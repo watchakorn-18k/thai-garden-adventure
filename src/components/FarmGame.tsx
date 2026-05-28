@@ -72,11 +72,46 @@ export default function FarmGame() {
     setTimeout(() => setPopups((p) => p.filter((q) => q.id !== id)), 900);
   };
 
+  const burstParticles = (x: number, y: number, kind: "dirt" | "water" | "sparkle") => {
+    const palette =
+      kind === "dirt"
+        ? ["#6b3a1c", "#8b5a2b", "#3d2412"]
+        : kind === "water"
+          ? ["#4cc2ee", "#7fd8ff", "#2a8ec0"]
+          : ["#ffe07a", "#fff5b8", "#e8a23a"];
+    const count = kind === "sparkle" ? 8 : 7;
+    const fresh = Array.from({ length: count }).map((_, i) => {
+      const angle = (Math.PI * (i + 1)) / (count + 1) + Math.PI; // upward arc
+      const speed = 18 + Math.random() * 18;
+      return {
+        id: popupId.current + i + 1,
+        x,
+        y,
+        kind,
+        dx: Math.cos(angle) * speed,
+        dy: Math.sin(angle) * speed - 6,
+        color: palette[i % palette.length],
+      };
+    });
+    popupId.current += count;
+    setParticles((p) => [...p, ...fresh]);
+    setTimeout(
+      () => setParticles((p) => p.filter((q) => !fresh.find((f) => f.id === q.id))),
+      600,
+    );
+  };
+
+  const shake = (x: number, y: number) => {
+    const id = ++popupId.current;
+    setShakeTile({ x, y, id });
+    setTimeout(() => setShakeTile((s) => (s?.id === id ? null : s)), 260);
+  };
+
   const doAction = useCallback(() => {
     const t = facingTile();
     if (!t) return;
     setActing(true);
-    setTimeout(() => setActing(false), 250);
+    setTimeout(() => setActing(false), 320);
 
     setTiles((grid) => {
       const next: Tile[][] = grid.map((r) => r.map((c) => ({ ...c, crop: c.crop ? { ...c.crop } : undefined })));
@@ -86,6 +121,7 @@ export default function FarmGame() {
         const crop = CROPS[tile.crop.id];
         setCoins((c) => c + crop.sellPrice);
         addPopup(t.x, t.y, `+${crop.sellPrice} ฿`);
+        burstParticles(t.x, t.y, "sparkle");
         next[t.y][t.x] = { type: "grass" };
         return next;
       }
@@ -94,11 +130,14 @@ export default function FarmGame() {
         if (tile.type === "grass") {
           next[t.y][t.x] = { type: "tilled" };
           addPopup(t.x, t.y, "ขุด!");
+          burstParticles(t.x, t.y, "dirt");
+          shake(t.x, t.y);
         }
       } else if (tool === "watering_can") {
         if (tile.type === "tilled" || (tile.crop && tile.type !== "watered")) {
           next[t.y][t.x] = { ...tile, type: "watered" };
           addPopup(t.x, t.y, "💧");
+          burstParticles(t.x, t.y, "water");
         }
       } else if (tool === "seed") {
         if ((tile.type === "tilled" || tile.type === "watered") && !tile.crop) {
@@ -115,6 +154,7 @@ export default function FarmGame() {
       return next;
     });
   }, [facingTile, tool, seedChoice, coins]);
+
 
   // crop growth tick
   useEffect(() => {
