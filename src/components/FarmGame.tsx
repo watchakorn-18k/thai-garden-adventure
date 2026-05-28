@@ -213,6 +213,8 @@ export default function FarmGame() {
       }
       setDir(nd);
       setWalking(true);
+      setWalkFrame((f) => f + 1);
+
       setPos((p) => {
         let { x, y } = p;
         if (nd === "up") y = Math.max(0, y - 1);
