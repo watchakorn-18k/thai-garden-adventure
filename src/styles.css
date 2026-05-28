@@ -924,6 +924,60 @@
 .speech-dot {
   animation: speech-dot 1s ease-in-out infinite;
 }
+@keyframes match-sparkle-pulse {
+  0%, 100% { opacity: 0.1; transform: scale(0.6); }
+  50% { opacity: 1; transform: scale(1.4); }
+}
+@keyframes match-leaf-drift {
+  0% { transform: translate3d(-80px, -20px, 0) rotate(0deg); opacity: 0; }
+  10% { opacity: 0.9; }
+  100% { transform: translate3d(760px, 90px, 0) rotate(360deg); opacity: 0; }
+}
+@keyframes match-chicken-side {
+  0%, 100% { transform: translate3d(0, 0, 0) scaleX(1); }
+  40% { transform: translate3d(22px, -8px, 0) scaleX(1); }
+  70% { transform: translate3d(8px, 10px, 0) scaleX(-1); }
+}
+@keyframes match-dog-side {
+  0%, 100% { transform: translate3d(0, 0, 0) scaleX(-1); }
+  35% { transform: translate3d(-28px, 14px, 0) scaleX(-1); }
+  65% { transform: translate3d(-8px, 28px, 0) scaleX(1); }
+}
+@keyframes crowd-card-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+.match-sparkle {
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  background: #ffd24a;
+  box-shadow: 0 0 8px 2px rgba(255,210,74,0.7);
+  animation: match-sparkle-pulse 2.4s ease-in-out infinite;
+}
+.match-leaf {
+  position: absolute;
+  width: 8px;
+  height: 5px;
+  box-shadow: inset -2px -1px 0 rgba(0,0,0,0.25);
+  animation: match-leaf-drift 9s linear infinite;
+}
+.match-chicken-side { animation: match-chicken-side 5s steps(6) infinite; }
+.match-dog-side { animation: match-dog-side 7s steps(8) infinite; }
+.match-crowd-card {
+  padding: 6px 8px;
+  background: #f4e4c1;
+  color: #1a0f1f;
+  font-family: var(--font-pixel);
+  font-size: 9px;
+  box-shadow: 0 0 0 2px #1a0f1f, 0 0 0 4px var(--gold), 0 0 18px rgba(255,210,74,0.35);
+  animation: crowd-card-bob 1.6s ease-in-out infinite;
+}
+.match-crowd-card-pink {
+  background: #ff8fb1;
+  color: #1a0f1f;
+  box-shadow: 0 0 0 2px #1a0f1f, 0 0 0 4px #d94e6a, 0 0 18px rgba(255,143,177,0.35);
+}
 
 /* === Sky decoration ======================================== */
 .sky-stars {

@@ -564,6 +564,8 @@ function SelfField({
         </div>
       </div>
 
+      <MatchArenaAmbience />
+
       {events.map(({ id, ev }) => {
         if (ev.kind === "insufficient_funds") return null;
         const text =
@@ -597,6 +599,81 @@ function SelfField({
         );
       })}
     </div>
+  );
+}
+
+function MatchArenaAmbience() {
+  return (
+    <>
+      <div className="absolute inset-0 pointer-events-none z-20">
+        {Array.from({ length: 10 }).map((_, i) => (
+          <div
+            key={`sp-${i}`}
+            className="match-sparkle"
+            style={{
+              left: `${6 + ((i * 19) % 88)}%`,
+              top: `${8 + ((i * 31) % 78)}%`,
+              animationDelay: `${i * 0.45}s`,
+            }}
+          />
+        ))}
+        {Array.from({ length: 7 }).map((_, i) => (
+          <div
+            key={`leaf-${i}`}
+            className="match-leaf"
+            style={{
+              left: `${-10 + i * 18}%`,
+              top: `${10 + ((i * 29) % 70)}%`,
+              animationDelay: `${i * 1.2}s`,
+              background: i % 2 ? "#8bc967" : "#ffd24a",
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="absolute -left-13.5 bottom-9.5 pointer-events-none z-20 match-chicken-side">
+        <MiniChicken />
+      </div>
+      <div className="absolute -right-15.5 top-22 pointer-events-none z-20 match-dog-side">
+        <MiniDog />
+      </div>
+
+      <div className="absolute -left-13 top-10.5 pointer-events-none z-20 match-crowd-card">
+        <span className="speech-dot">.</span><span className="speech-dot" style={{ animationDelay: "0.2s" }}>.</span><span className="speech-dot" style={{ animationDelay: "0.4s" }}>.</span>
+      </div>
+      <div className="absolute -right-18 bottom-23 pointer-events-none z-20 match-crowd-card match-crowd-card-pink">
+        GO!
+      </div>
+    </>
+  );
+}
+
+function MiniChicken() {
+  return (
+    <svg viewBox="0 0 16 16" width="34" height="34" shapeRendering="crispEdges" style={{ imageRendering: "pixelated" }}>
+      <rect x="5" y="5" width="7" height="6" fill="#f4e4c1" />
+      <rect x="4" y="6" width="1" height="4" fill="#f4e4c1" />
+      <rect x="12" y="7" width="2" height="2" fill="#f4e4c1" />
+      <rect x="8" y="3" width="2" height="2" fill="#d94e6a" />
+      <rect x="12" y="6" width="1" height="1" fill="#1a0f1f" />
+      <rect x="14" y="8" width="2" height="1" fill="#e8a23a" />
+      <rect x="6" y="11" width="1" height="2" fill="#e8a23a" />
+      <rect x="10" y="11" width="1" height="2" fill="#e8a23a" />
+    </svg>
+  );
+}
+
+function MiniDog() {
+  return (
+    <svg viewBox="0 0 18 14" width="44" height="34" shapeRendering="crispEdges" style={{ imageRendering: "pixelated" }}>
+      <rect x="4" y="5" width="9" height="5" fill="#8b5a2b" />
+      <rect x="12" y="4" width="4" height="4" fill="#a36d36" />
+      <rect x="13" y="3" width="2" height="2" fill="#6b3a1c" />
+      <rect x="15" y="5" width="2" height="1" fill="#1a0f1f" />
+      <rect x="2" y="4" width="2" height="1" fill="#8b5a2b" />
+      <rect x="5" y="10" width="2" height="3" fill="#5a2f17" />
+      <rect x="10" y="10" width="2" height="3" fill="#5a2f17" />
+    </svg>
   );
 }
 
