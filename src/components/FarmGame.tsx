@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import PixelFarmer from "./PixelFarmer";
+
 
 type Direction = "up" | "down" | "left" | "right";
 type TileType = "grass" | "tilled" | "watered";
@@ -45,8 +47,14 @@ export default function FarmGame() {
   const [day, setDay] = useState(1);
   const [popups, setPopups] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
   const [acting, setActing] = useState(false);
+  const [walkFrame, setWalkFrame] = useState(0);
+  const [particles, setParticles] = useState<
+    { id: number; x: number; y: number; kind: "dirt" | "water" | "sparkle"; dx: number; dy: number; color: string }[]
+  >([]);
+  const [shakeTile, setShakeTile] = useState<{ x: number; y: number; id: number } | null>(null);
   const keys = useRef<Set<string>>(new Set());
   const popupId = useRef(0);
+
 
   const facingTile = useCallback(() => {
     let { x, y } = pos;
@@ -64,11 +72,46 @@ export default function FarmGame() {
     setTimeout(() => setPopups((p) => p.filter((q) => q.id !== id)), 900);
   };
 
+  const burstParticles = (x: number, y: number, kind: "dirt" | "water" | "sparkle") => {
+    const palette =
+      kind === "dirt"
+        ? ["#6b3a1c", "#8b5a2b", "#3d2412"]
+        : kind === "water"
+          ? ["#4cc2ee", "#7fd8ff", "#2a8ec0"]
+          : ["#ffe07a", "#fff5b8", "#e8a23a"];
+    const count = kind === "sparkle" ? 8 : 7;
+    const fresh = Array.from({ length: count }).map((_, i) => {
+      const angle = (Math.PI * (i + 1)) / (count + 1) + Math.PI; // upward arc
+      const speed = 18 + Math.random() * 18;
+      return {
+        id: popupId.current + i + 1,
+        x,
+        y,
+        kind,
+        dx: Math.cos(angle) * speed,
+        dy: Math.sin(angle) * speed - 6,
+        color: palette[i % palette.length],
+      };
+    });
+    popupId.current += count;
+    setParticles((p) => [...p, ...fresh]);
+    setTimeout(
+      () => setParticles((p) => p.filter((q) => !fresh.find((f) => f.id === q.id))),
+      600,
+    );
+  };
+
+  const shake = (x: number, y: number) => {
+    const id = ++popupId.current;
+    setShakeTile({ x, y, id });
+    setTimeout(() => setShakeTile((s) => (s?.id === id ? null : s)), 260);
+  };
+
   const doAction = useCallback(() => {
     const t = facingTile();
     if (!t) return;
     setActing(true);
-    setTimeout(() => setActing(false), 250);
+    setTimeout(() => setActing(false), 320);
 
     setTiles((grid) => {
       const next: Tile[][] = grid.map((r) => r.map((c) => ({ ...c, crop: c.crop ? { ...c.crop } : undefined })));
@@ -78,6 +121,7 @@ export default function FarmGame() {
         const crop = CROPS[tile.crop.id];
         setCoins((c) => c + crop.sellPrice);
         addPopup(t.x, t.y, `+${crop.sellPrice} ฿`);
+        burstParticles(t.x, t.y, "sparkle");
         next[t.y][t.x] = { type: "grass" };
         return next;
       }
@@ -86,11 +130,14 @@ export default function FarmGame() {
         if (tile.type === "grass") {
           next[t.y][t.x] = { type: "tilled" };
           addPopup(t.x, t.y, "ขุด!");
+          burstParticles(t.x, t.y, "dirt");
+          shake(t.x, t.y);
         }
       } else if (tool === "watering_can") {
         if (tile.type === "tilled" || (tile.crop && tile.type !== "watered")) {
           next[t.y][t.x] = { ...tile, type: "watered" };
           addPopup(t.x, t.y, "💧");
+          burstParticles(t.x, t.y, "water");
         }
       } else if (tool === "seed") {
         if ((tile.type === "tilled" || tile.type === "watered") && !tile.crop) {
@@ -107,6 +154,7 @@ export default function FarmGame() {
       return next;
     });
   }, [facingTile, tool, seedChoice, coins]);
+
 
   // crop growth tick
   useEffect(() => {
@@ -165,6 +213,8 @@ export default function FarmGame() {
       }
       setDir(nd);
       setWalking(true);
+      setWalkFrame((f) => f + 1);
+
       setPos((p) => {
         let { x, y } = p;
         if (nd === "up") y = Math.max(0, y - 1);
@@ -220,16 +270,23 @@ export default function FarmGame() {
         {tiles.map((row, y) =>
           row.map((c, x) => {
             const isFacing = facing && facing.x === x && facing.y === y;
+            const isShaking = shakeTile && shakeTile.x === x && shakeTile.y === y;
             const cls =
               c.type === "grass" ? "tile-grass" : c.type === "watered" ? "tile-watered" : "tile-tilled";
             return (
               <div
                 key={`${x}-${y}`}
-                className={`absolute ${cls} border border-black/10`}
+                className={`absolute ${cls} border border-black/10 ${isShaking ? "tile-shake" : ""}`}
                 style={{ left: x * TILE, top: y * TILE, width: TILE, height: TILE }}
               >
                 {isFacing && (
                   <div className="absolute inset-1 rounded-md border-2 border-gold animate-pulse pointer-events-none" />
+                )}
+                {c.type === "watered" && (
+                  <div
+                    className="absolute rounded-full border-2 border-sky-300/70 pointer-events-none ripple"
+                    style={{ left: "30%", top: "35%", width: "40%", height: "30%" }}
+                  />
                 )}
                 {c.crop && (
                   <div
@@ -248,7 +305,7 @@ export default function FarmGame() {
         {popups.map((p) => (
           <div
             key={p.id}
-            className="absolute pointer-events-none text-sm font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]"
+            className="absolute pointer-events-none text-sm font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] z-20"
             style={{
               left: p.x * TILE + TILE / 2 - 20,
               top: p.y * TILE,
@@ -259,35 +316,45 @@ export default function FarmGame() {
           </div>
         ))}
 
-        {/* character */}
+        {/* particles */}
+        {particles.map((p) => (
+          <div
+            key={p.id}
+            className="absolute pointer-events-none dirt-particle z-20"
+            style={{
+              left: p.x * TILE + TILE / 2 - 3,
+              top: p.y * TILE + TILE / 2 - 3,
+              width: p.kind === "sparkle" ? 5 : 6,
+              height: p.kind === "sparkle" ? 5 : 6,
+              background: p.color,
+              borderRadius: p.kind === "water" ? "50%" : p.kind === "sparkle" ? "50%" : "1px",
+              boxShadow: p.kind === "sparkle" ? `0 0 6px ${p.color}` : "0 1px 0 rgba(0,0,0,0.3)",
+              ["--dx" as string]: `${p.dx}px`,
+              ["--dy" as string]: `${p.dy}px`,
+            }}
+          />
+        ))}
+
+        {/* character (pixel) */}
         <div
-          className="absolute flex items-center justify-center text-4xl transition-all duration-150 z-10"
+          className="absolute z-10 transition-[left,top] duration-150 ease-linear"
           style={{
             left: pos.x * TILE,
-            top: pos.y * TILE - 8,
+            top: pos.y * TILE - 10,
             width: TILE,
             height: TILE,
-            animation: walking ? "bob 0.3s infinite" : "none",
-            transform: dir === "left" ? "scaleX(-1)" : "scaleX(1)",
-            filter: "drop-shadow(0 4px 4px rgba(0,0,0,0.4))",
           }}
         >
-          {charEmoji}
-          {acting && (
-            <span
-              className="absolute text-2xl"
-              style={{
-                top: -4,
-                right: dir === "left" ? "auto" : -4,
-                left: dir === "left" ? -4 : "auto",
-                animation: "dig-pop 0.3s ease-out",
-              }}
-            >
-              {toolEmoji}
-            </span>
-          )}
+          <PixelFarmer
+            direction={dir}
+            walking={walking}
+            walkFrame={walkFrame}
+            acting={acting}
+            tool={tool}
+          />
         </div>
       </div>
+
 
       {/* Toolbar */}
       <div className="w-full max-w-5xl flex flex-wrap items-center justify-center gap-2 p-3 rounded-2xl bg-card border-2 border-primary/40 shadow-lg">

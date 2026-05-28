@@ -73,6 +73,10 @@
   0%, 100% { transform: translateY(0); }
   50% { transform: translateY(-2px); }
 }
+@keyframes pixel-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-1.5px); }
+}
 @keyframes dig-pop {
   0% { transform: scale(0.6) rotate(-20deg); opacity: 0; }
   60% { transform: scale(1.2) rotate(10deg); opacity: 1; }
@@ -86,6 +90,56 @@
   0% { transform: translateY(0); opacity: 1; }
   100% { transform: translateY(-30px); opacity: 0; }
 }
+@keyframes tool-swing-side {
+  0%   { transform: rotate(-70deg); }
+  40%  { transform: rotate(20deg); }
+  70%  { transform: rotate(35deg); }
+  100% { transform: rotate(10deg); }
+}
+@keyframes tool-vertical-swing {
+  0%   { transform: translateY(-4px) scale(0.9); }
+  50%  { transform: translateY(2px) scale(1.1); }
+  100% { transform: translateY(0) scale(1); }
+}
+@keyframes tool-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(-25deg); }
+}
+@keyframes drop-fall {
+  0%   { transform: translateY(-3px); opacity: 0; }
+  30%  { opacity: 1; }
+  100% { transform: translateY(4px); opacity: 0; }
+}
+@keyframes seed-toss {
+  0%   { transform: translate(-2px, 2px); opacity: 0; }
+  40%  { opacity: 1; }
+  100% { transform: translate(4px, -2px); opacity: 0; }
+}
+@keyframes dirt-burst {
+  0%   { transform: translate(0,0) scale(1); opacity: 1; }
+  100% { transform: translate(var(--dx), var(--dy)) scale(0.4); opacity: 0; }
+}
+@keyframes tile-shake {
+  0%, 100% { transform: translate(0,0); }
+  25% { transform: translate(-1px, 1px); }
+  50% { transform: translate(1px, -1px); }
+  75% { transform: translate(-1px, 0); }
+}
+@keyframes ripple {
+  0% { transform: scale(0.3); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.tool-swing-side { animation: tool-swing-side 0.28s ease-out forwards; }
+.tool-vertical   { animation: tool-vertical-swing 0.28s ease-out forwards; }
+.tool-tilt       { animation: tool-tilt 0.5s ease-in-out; }
+.drop-a          { animation: drop-fall 0.5s ease-in 0.05s infinite; }
+.drop-b          { animation: drop-fall 0.5s ease-in 0.2s infinite; }
+.seed-toss       { animation: seed-toss 0.5s ease-out forwards; }
+.tile-shake      { animation: tile-shake 0.25s ease-out; }
+.dirt-particle   { animation: dirt-burst 0.55s ease-out forwards; }
+.ripple          { animation: ripple 0.6s ease-out forwards; }
+
 
 .tile-grass {
   background:
