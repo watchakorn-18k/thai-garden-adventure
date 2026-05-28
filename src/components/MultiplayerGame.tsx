@@ -22,7 +22,6 @@ import {
 } from "@/lib/match-protocol";
 
 const TILE_SELF = 56;
-const TILE_OPP = 28;
 const MOVE_REPEAT_MS = 70;
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
@@ -69,6 +68,7 @@ export default function MultiplayerGame({ code }: Props) {
     pos: { x: number; y: number };
     dir: Direction;
   } | null>(null);
+  const [actionFlash, setActionFlash] = useState(0);
 
   const self = state?.players.find((p) => p.id === selfId);
   const opp = state?.players.find((p) => p.id !== selfId);
@@ -97,6 +97,12 @@ export default function MultiplayerGame({ code }: Props) {
     [send],
   );
 
+  const sendAction = useCallback(() => {
+    if (statusRef.current !== "playing") return;
+    setActionFlash((n) => n + 1);
+    send({ t: "action" });
+  }, [send]);
+
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
@@ -107,7 +113,7 @@ export default function MultiplayerGame({ code }: Props) {
         lastSentDir.current = { dir, at: Date.now() };
         sendMove(dir);
       }
-      if (k === " " || k === "enter") send({ t: "action" });
+      if (k === " " || k === "enter") sendAction();
       if (k === "1") send({ t: "tool", tool: "hoe" });
       if (k === "2") send({ t: "tool", tool: "watering_can" });
       if (k === "3") send({ t: "tool", tool: "seed" });
@@ -119,7 +125,7 @@ export default function MultiplayerGame({ code }: Props) {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [send, sendMove]);
+  }, [send, sendAction, sendMove]);
 
   useEffect(() => {
     if (state?.status !== "playing") return;
@@ -171,10 +177,16 @@ export default function MultiplayerGame({ code }: Props) {
 
       {(state.status === "playing" || state.status === "ended") && self && (
         <div className="relative z-10 flex flex-col items-center gap-3">
-          {opp && <OpponentField player={opp} />}
+          {opp &&
+            (state.status === "playing" ? (
+              <OpponentStatusCard player={opp} />
+            ) : (
+              <OpponentField player={opp} />
+            ))}
           <SelfField
             player={renderSelf ?? self}
             events={events.filter((e) => e.ev.playerId === self.id)}
+            actionFlash={actionFlash}
           />
         </div>
       )}
@@ -191,16 +203,70 @@ export default function MultiplayerGame({ code }: Props) {
       )}
 
       {state.status === "playing" && self && <Toolbar self={self} send={send} />}
-      {state.status === "playing" && self && <MobileControls send={send} sendMove={sendMove} />}
+      {state.status === "playing" && self && (
+        <MobileControls sendMove={sendMove} sendAction={sendAction} />
+      )}
       {status !== "open" && (
         <ConnectionBanner text={lastError?.message ?? "กำลังเชื่อมต่อใหม่..."} />
       )}
       {lastError && status === "open" && <ConnectionBanner text={lastError.message} />}
 
-      <div className="relative z-10 font-pixel text-[9px] text-[var(--muted-foreground)] text-center hidden sm:block">
-        <span className="pixel-chip mr-2">WASD / ↑↓←→</span>MOVE
-        <span className="pixel-chip mx-2">SPACE</span>USE
-        <span className="pixel-chip mx-2">1·2·3</span>TOOL
+      <MultiplayerControlsGuide />
+    </div>
+  );
+}
+
+function MultiplayerControlsGuide() {
+  return (
+    <div className="relative z-10 hidden w-full max-w-5xl sm:block">
+      <div className="multi-guide pixel-panel px-5 py-4">
+        <div className="multi-guide-head">
+          <span className="font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">
+            DUEL GUIDE
+          </span>
+          <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+            แข่งทำคะแนน · เก็บเกี่ยวให้ไวกว่าอีกฝั่ง
+          </span>
+        </div>
+
+        <div className="multi-guide-grid">
+          <div className="multi-guide-move">
+            <div className="grid grid-cols-3 grid-rows-2 gap-1">
+              <span />
+              <kbd className="pixel-key pixel-key-sm">W</kbd>
+              <span />
+              <kbd className="pixel-key pixel-key-sm">A</kbd>
+              <kbd className="pixel-key pixel-key-sm">S</kbd>
+              <kbd className="pixel-key pixel-key-sm">D</kbd>
+            </div>
+            <div>
+              <div className="font-pixel text-[9px] tracking-wider">MOVE</div>
+              <div className="font-pixel text-[7px] text-[var(--muted-foreground)]">
+                ลูกศรก็ใช้ได้
+              </div>
+            </div>
+          </div>
+
+          <span className="multi-guide-rule" />
+
+          <div className="multi-guide-actions">
+            <GuideAction keys="SPACE" label="USE" sub="ลงมือกับช่องตรงหน้า" />
+            <GuideAction keys="1 / 2 / 3" label="TOOL" sub="จอบ · น้ำ · เมล็ด" />
+            <GuideAction keys="R" label="READY" sub="เริ่มรอบใหม่ใน lobby" />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function GuideAction({ keys, label, sub }: { keys: string; label: string; sub: string }) {
+  return (
+    <div className="multi-guide-action">
+      <kbd className="pixel-key pixel-key-guide">{keys}</kbd>
+      <div className="min-w-0">
+        <div className="font-pixel text-[9px] tracking-wider">{label}</div>
+        <div className="font-pixel text-[7px] text-[var(--muted-foreground)] truncate">{sub}</div>
       </div>
     </div>
   );
@@ -419,9 +485,11 @@ function CountdownView({ endsAt }: { endsAt: number }) {
 function SelfField({
   player,
   events,
+  actionFlash,
 }: {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
+  actionFlash: number;
 }) {
   return (
     <div
@@ -482,13 +550,18 @@ function SelfField({
           transition: "transform 35ms linear",
         }}
       >
-        <PixelFarmer
-          direction={player.dir}
-          walking={false}
-          walkFrame={0}
-          acting={false}
-          tool={player.tool}
-        />
+        <div
+          key={actionFlash}
+          style={{ animation: actionFlash ? "grow 120ms ease-out" : undefined }}
+        >
+          <PixelFarmer
+            direction={player.dir}
+            walking={false}
+            walkFrame={0}
+            acting={actionFlash > 0}
+            tool={player.tool}
+          />
+        </div>
       </div>
 
       {events.map(({ id, ev }) => {
@@ -527,64 +600,41 @@ function SelfField({
   );
 }
 
-function OpponentField({ player }: { player: PublicPlayer }) {
+function OpponentStatusCard({ player }: { player: PublicPlayer }) {
   return (
-    <div className="flex flex-col items-center gap-1 opacity-80">
-      <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-        {player.name}'s FIELD
+    <div className="pixel-panel flex items-center gap-4 px-4 py-3 opacity-90">
+      <div style={{ width: 34, height: 34, overflow: "hidden" }}>
+        <div style={{ transform: "scale(0.55)", transformOrigin: "0 0" }}>
+          <PixelFarmer
+            direction={player.dir}
+            walking={false}
+            walkFrame={0}
+            acting={false}
+            tool={player.tool}
+          />
+        </div>
+      </div>
+      <div className="flex flex-col gap-1">
+        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">OPPONENT</div>
+        <div className="font-pixel text-[12px]">{player.name}</div>
+      </div>
+      <div className="mx-1 h-8 w-1" style={{ background: "#1a0f1f" }} />
+      <div className="flex flex-col gap-1">
+        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">COINS</div>
+        <div className="font-pixel text-[12px] text-[var(--gold)]">{player.coins}</div>
       </div>
       <div
-        className="relative field-frame"
-        style={{ width: COLS * TILE_OPP, height: ROWS * TILE_OPP }}
+        className="font-pixel text-[8px]"
+        style={{ color: player.connected ? "#86efac" : "#f87171" }}
       >
-        {player.tiles.map((row, y) =>
-          row.map((c, x) => {
-            const cls =
-              c.type === "grass"
-                ? "tile-grass"
-                : c.type === "watered"
-                  ? "tile-watered"
-                  : "tile-tilled";
-            return (
-              <div
-                key={`${x}-${y}`}
-                className={`absolute tile-edge ${cls}`}
-                style={{ left: x * TILE_OPP, top: y * TILE_OPP, width: TILE_OPP, height: TILE_OPP }}
-              >
-                {c.crop && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    <div style={{ transform: `scale(0.5)` }}>
-                      <PixelCrop id={c.crop.id} stage={c.crop.stage} />
-                    </div>
-                  </div>
-                )}
-              </div>
-            );
-          }),
-        )}
-        <div
-          className="absolute"
-          style={{
-            left: player.pos.x * TILE_OPP,
-            top: player.pos.y * TILE_OPP - 4,
-            width: TILE_OPP,
-            height: TILE_OPP,
-            transition: "left 80ms linear, top 80ms linear",
-          }}
-        >
-          <div style={{ transform: "scale(0.5)", transformOrigin: "0 0" }}>
-            <PixelFarmer
-              direction={player.dir}
-              walking={false}
-              walkFrame={0}
-              acting={false}
-              tool={player.tool}
-            />
-          </div>
-        </div>
+        {player.connected ? "ONLINE" : "OFFLINE"}
       </div>
     </div>
   );
+}
+
+function OpponentField({ player }: { player: PublicPlayer }) {
+  return <OpponentStatusCard player={player} />;
 }
 
 function Toolbar({
@@ -649,11 +699,11 @@ function Toolbar({
 }
 
 function MobileControls({
-  send,
   sendMove,
+  sendAction,
 }: {
-  send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
   sendMove: (dir: Direction) => void;
+  sendAction: () => void;
 }) {
   const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stop = () => {
@@ -680,7 +730,7 @@ function MobileControls({
       <button
         className="pixel-btn pointer-events-auto h-20 w-20 rounded-full"
         data-accent="true"
-        onPointerDown={() => send({ t: "action" })}
+        onPointerDown={sendAction}
       >
         <span className="font-pixel text-[10px]">USE</span>
       </button>

@@ -286,6 +286,57 @@
     flex-shrink: 0;
   }
 
+  .multi-guide {
+    display: grid;
+    gap: 14px;
+  }
+  .multi-guide-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .multi-guide-head::after {
+    content: "";
+    height: 3px;
+    flex: 1;
+    background: #1a0f1f;
+  }
+  .multi-guide-grid {
+    display: grid;
+    grid-template-columns: auto 3px 1fr;
+    gap: 18px;
+    align-items: stretch;
+  }
+  .multi-guide-move,
+  .multi-guide-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .multi-guide-rule {
+    width: 3px;
+    background: #1a0f1f;
+  }
+  .multi-guide-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .multi-guide-action {
+    min-width: 0;
+    padding: 8px 10px;
+    background: #1a0f1f;
+    box-shadow:
+      inset 0 2px 0 0 rgba(255, 255, 255, 0.04),
+      inset 0 -2px 0 0 rgba(0, 0, 0, 0.35);
+  }
+  .pixel-key-guide {
+    min-width: 74px;
+    height: 26px;
+    font-size: 8px;
+    letter-spacing: 1px;
+  }
+
   .pixel-chip[data-gold="true"] {
     background: var(--gold);
     color: #1a0f1f;
@@ -717,6 +768,60 @@
       0 0 24px 6px rgba(255, 210, 74, 0.7);
   }
 }
+@keyframes action-ping {
+  0%,
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  78% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  90% {
+    opacity: 0;
+    transform: scale(1.8);
+  }
+}
+@keyframes chicken-wander {
+  0%,
+  100% {
+    transform: translate3d(70px, 60px, 0) scaleX(1);
+  }
+  25% {
+    transform: translate3d(120px, 80px, 0) scaleX(1);
+  }
+  50% {
+    transform: translate3d(95px, 125px, 0) scaleX(-1);
+  }
+  75% {
+    transform: translate3d(55px, 92px, 0) scaleX(-1);
+  }
+}
+@keyframes dog-wander {
+  0%,
+  100% {
+    transform: translate3d(570px, 70px, 0) scaleX(-1);
+  }
+  35% {
+    transform: translate3d(500px, 128px, 0) scaleX(-1);
+  }
+  65% {
+    transform: translate3d(620px, 190px, 0) scaleX(1);
+  }
+}
+@keyframes speech-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
 
 .tool-swing-side {
   animation: tool-swing-side 0.28s ease-out forwards;
@@ -799,6 +904,25 @@
 .combo-bar-fill {
   animation: combo-bar-fill linear forwards;
   transform-origin: left center;
+}
+.activity-ping {
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  border: 3px solid #ffd24a;
+  border-radius: 50%;
+  box-shadow: 0 0 18px rgba(255, 210, 74, 0.8);
+  animation: action-ping 4.4s ease-out infinite;
+  pointer-events: none;
+}
+.chicken {
+  animation: chicken-wander 11s steps(8) infinite;
+}
+.dog {
+  animation: dog-wander 14s steps(10) infinite;
+}
+.speech-dot {
+  animation: speech-dot 1s ease-in-out infinite;
 }
 
 /* === Sky decoration ======================================== */

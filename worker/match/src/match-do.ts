@@ -194,11 +194,18 @@ export class MatchRoom implements DurableObject {
     const p = this.players.get(pid);
     if (p) p.connected = false;
     this.wsToPlayer.delete(ws);
-    this.persist();
-    this.broadcastSnapshot();
     if (this.status === "playing" && [...this.players.values()].every((q) => !q.connected)) {
       this.endMatch(undefined, "forfeit");
+      return;
     }
+    if (this.status === "countdown") {
+      this.status = "lobby";
+      this.countdownEndsAt = undefined;
+      for (const player of this.players.values()) player.ready = false;
+    }
+    this.dropDisconnectedWaitingPlayers();
+    this.persist();
+    this.broadcastSnapshot();
   }
 
   async webSocketError(ws: WebSocket): Promise<void> {
@@ -285,8 +292,16 @@ export class MatchRoom implements DurableObject {
     if (time) this.ctx.waitUntil(this.ctx.storage.setAlarm(time));
   }
 
+  private dropDisconnectedWaitingPlayers(): void {
+    if (this.status === "playing") return;
+    for (const [id, player] of this.players) {
+      if (!player.connected) this.players.delete(id);
+    }
+  }
+
   private handleJoin(ws: WebSocket, code: string, name: string, sessionId?: string): void {
     this.code = code;
+    this.dropDisconnectedWaitingPlayers();
 
     let playerId: string | undefined;
     const att = ws.deserializeAttachment() as { playerId?: string; sessionId?: string } | null;

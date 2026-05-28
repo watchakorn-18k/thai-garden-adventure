@@ -410,6 +410,16 @@ export default function FarmGame() {
     [],
   );
 
+  const activityPings = useMemo(
+    () => [
+      { x: 2, y: 2, delay: 0.4 },
+      { x: 8, y: 1, delay: 1.8 },
+      { x: 10, y: 6, delay: 3.2 },
+      { x: 4, y: 6, delay: 4.6 },
+    ],
+    [],
+  );
+
   return (
     <div className="relative min-h-screen w-full flex flex-col items-center justify-center p-6 gap-6 overflow-hidden">
       {/* Sky decoration */}
@@ -635,6 +645,26 @@ export default function FarmGame() {
             </div>
           </div>
         ))}
+
+        {/* multiplayer-style ambient activity */}
+        {activityPings.map((p, i) => (
+          <div
+            key={`ap-${i}`}
+            className="activity-ping"
+            style={{
+              left: p.x * TILE + TILE / 2 - 14,
+              top: p.y * TILE + TILE / 2 - 14,
+              animationDelay: `${p.delay}s`,
+            }}
+          />
+        ))}
+
+        <div className="absolute pointer-events-none chicken z-20">
+          <ChickenSprite />
+        </div>
+        <div className="absolute pointer-events-none dog z-20">
+          <DogSprite />
+        </div>
 
         {/* popups */}
         {popups.map((p) => {
@@ -953,6 +983,54 @@ function FlowArrow() {
       <rect x="11" y="4" width="2" height="6" fill="currentColor" />
       <rect x="13" y="5" width="2" height="4" fill="currentColor" />
       <rect x="15" y="6" width="2" height="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function ChickenSprite() {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="32"
+      height="32"
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated", filter: "drop-shadow(0 2px 0 rgba(0,0,0,0.35))" }}
+    >
+      <rect x="5" y="5" width="7" height="6" fill="#f4e4c1" />
+      <rect x="4" y="6" width="1" height="4" fill="#f4e4c1" />
+      <rect x="12" y="7" width="2" height="2" fill="#f4e4c1" />
+      <rect x="8" y="3" width="2" height="2" fill="#d94e6a" />
+      <rect x="10" y="4" width="1" height="1" fill="#d94e6a" />
+      <rect x="12" y="6" width="1" height="1" fill="#1a0f1f" />
+      <rect x="14" y="8" width="2" height="1" fill="#e8a23a" />
+      <rect x="6" y="11" width="1" height="2" fill="#e8a23a" />
+      <rect x="10" y="11" width="1" height="2" fill="#e8a23a" />
+      <rect x="5" y="13" width="2" height="1" fill="#8b6420" />
+      <rect x="9" y="13" width="2" height="1" fill="#8b6420" />
+    </svg>
+  );
+}
+
+function DogSprite() {
+  return (
+    <svg
+      viewBox="0 0 18 14"
+      width="42"
+      height="32"
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated", filter: "drop-shadow(0 2px 0 rgba(0,0,0,0.35))" }}
+    >
+      <rect x="4" y="5" width="9" height="5" fill="#8b5a2b" />
+      <rect x="12" y="4" width="4" height="4" fill="#a36d36" />
+      <rect x="13" y="3" width="2" height="2" fill="#6b3a1c" />
+      <rect x="15" y="5" width="2" height="1" fill="#1a0f1f" />
+      <rect x="16" y="6" width="1" height="1" fill="#1a0f1f" />
+      <rect x="2" y="4" width="2" height="1" fill="#8b5a2b" />
+      <rect x="1" y="3" width="1" height="1" fill="#8b5a2b" />
+      <rect x="5" y="10" width="2" height="3" fill="#5a2f17" />
+      <rect x="10" y="10" width="2" height="3" fill="#5a2f17" />
+      <rect x="4" y="13" width="3" height="1" fill="#1a0f1f" />
+      <rect x="9" y="13" width="3" height="1" fill="#1a0f1f" />
     </svg>
   );
 }
