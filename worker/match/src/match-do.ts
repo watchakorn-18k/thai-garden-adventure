@@ -22,6 +22,7 @@ import {
 
 interface PlayerState {
   id: string;
+  sessionId: string;
   name: string;
   coins: number;
   pos: { x: number; y: number };
@@ -33,6 +34,17 @@ interface PlayerState {
   connected: boolean;
   lastMoveAt: number;
   lastActionAt: number;
+}
+
+interface StoredRoomState {
+  code: string;
+  status: PublicMatchState["status"];
+  countdownEndsAt?: number;
+  startedAt?: number;
+  endsAt?: number;
+  winnerId?: string;
+  endedReason?: "race" | "timeout" | "forfeit";
+  players: Omit<PlayerState, "connected" | "lastMoveAt" | "lastActionAt">[];
 }
 
 const MOVE_COOLDOWN_MS = 100;
@@ -47,7 +59,9 @@ export class MatchRoom implements DurableObject {
   private startedAt?: number;
   private endsAt?: number;
   private winnerId?: string;
+  private endedReason?: "race" | "timeout" | "forfeit";
   private players = new Map<string, PlayerState>();
+  private initialized?: Promise<void>;
   private wsToPlayer = new WeakMap<WebSocket, string>();
   private pendingEvents: ServerEvent[] = [];
   private snapshotTimer?: ReturnType<typeof setInterval>;
@@ -58,12 +72,13 @@ export class MatchRoom implements DurableObject {
     _env: unknown,
   ) {
     for (const ws of this.ctx.getWebSockets()) {
-      const att = ws.deserializeAttachment() as { playerId?: string } | null;
+      const att = ws.deserializeAttachment() as { playerId?: string; sessionId?: string } | null;
       if (att?.playerId) this.wsToPlayer.set(ws, att.playerId);
     }
   }
 
   async fetch(request: Request): Promise<Response> {
+    await this.ensureInitialized();
     const url = new URL(request.url);
     if (url.pathname === "/ws") {
       if (request.headers.get("Upgrade") !== "websocket") {
@@ -80,6 +95,7 @@ export class MatchRoom implements DurableObject {
   }
 
   async webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer): Promise<void> {
+    await this.ensureInitialized();
     if (typeof raw !== "string") return;
     let parsed;
     try {
@@ -91,7 +107,7 @@ export class MatchRoom implements DurableObject {
     const msg = parsed.data;
 
     if (msg.t === "join") {
-      this.handleJoin(ws, msg.code, msg.name);
+      this.handleJoin(ws, msg.code, msg.name, msg.sessionId);
       return;
     }
 
@@ -106,6 +122,7 @@ export class MatchRoom implements DurableObject {
       if (this.status !== "lobby") return;
       player.ready = true;
       this.maybeStartCountdown();
+      this.persist();
       this.broadcastSnapshot();
       return;
     }
@@ -115,6 +132,7 @@ export class MatchRoom implements DurableObject {
       player.ready = true;
       const allReady = [...this.players.values()].every((p) => p.ready);
       if (this.players.size === 2 && allReady) this.resetForRematch();
+      this.persist();
       this.broadcastSnapshot();
       return;
     }
@@ -135,6 +153,7 @@ export class MatchRoom implements DurableObject {
       player.lastMoveAt = now;
       player.dir = msg.dir;
       player.pos = movePos(player.pos, msg.dir);
+      this.persist();
       return;
     }
     if (msg.t === "action") {
@@ -155,16 +174,19 @@ export class MatchRoom implements DurableObject {
         this.pendingEvents.push({ ...ev, playerId });
       }
       if (player.coins >= TARGET_COINS) this.endMatch(playerId, "race");
+      else this.persist();
       return;
     }
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
+    await this.ensureInitialized();
     const pid = this.wsToPlayer.get(ws);
     if (!pid) return;
     const p = this.players.get(pid);
     if (p) p.connected = false;
     this.wsToPlayer.delete(ws);
+    this.persist();
     this.broadcastSnapshot();
     if (this.status === "playing" && [...this.players.values()].every((q) => !q.connected)) {
       this.endMatch(undefined, "forfeit");
@@ -175,21 +197,111 @@ export class MatchRoom implements DurableObject {
     return this.webSocketClose(ws);
   }
 
-  private handleJoin(ws: WebSocket, code: string, name: string): void {
+  async alarm(): Promise<void> {
+    await this.ensureInitialized();
+    const now = Date.now();
+    if (this.status === "countdown" && this.countdownEndsAt && now >= this.countdownEndsAt) {
+      this.startPlaying();
+      return;
+    }
+    if (this.status === "playing" && this.endsAt && now >= this.endsAt) {
+      this.endByTimeout();
+      return;
+    }
+    this.scheduleAlarm();
+  }
+
+  private async ensureInitialized(): Promise<void> {
+    this.initialized ??= this.loadStoredState();
+    await this.initialized;
+  }
+
+  private async loadStoredState(): Promise<void> {
+    const stored = await this.ctx.storage.get<StoredRoomState>("room");
+    if (!stored) return;
+    this.code = stored.code;
+    this.status = stored.status;
+    this.countdownEndsAt = stored.countdownEndsAt;
+    this.startedAt = stored.startedAt;
+    this.endsAt = stored.endsAt;
+    this.winnerId = stored.winnerId;
+    this.endedReason = stored.endedReason;
+    this.players = new Map(
+      stored.players.map((p) => [
+        p.id,
+        {
+          ...p,
+          connected: false,
+          lastMoveAt: 0,
+          lastActionAt: 0,
+        },
+      ]),
+    );
+    for (const ws of this.ctx.getWebSockets()) {
+      const att = ws.deserializeAttachment() as { playerId?: string; sessionId?: string } | null;
+      if (att?.playerId) {
+        this.wsToPlayer.set(ws, att.playerId);
+        const player = this.players.get(att.playerId);
+        if (player) player.connected = true;
+      }
+    }
+    if (this.status === "playing") this.startTimers();
+    this.scheduleAlarm();
+  }
+
+  private persist(): void {
+    const players = [...this.players.values()].map(
+      ({ connected: _connected, lastMoveAt: _lastMoveAt, lastActionAt: _lastActionAt, ...p }) => p,
+    );
+    this.ctx.waitUntil(
+      this.ctx.storage.put("room", {
+        code: this.code,
+        status: this.status,
+        countdownEndsAt: this.countdownEndsAt,
+        startedAt: this.startedAt,
+        endsAt: this.endsAt,
+        winnerId: this.winnerId,
+        endedReason: this.endedReason,
+        players,
+      } satisfies StoredRoomState),
+    );
+  }
+
+  private scheduleAlarm(): void {
+    const time =
+      this.status === "countdown"
+        ? this.countdownEndsAt
+        : this.status === "playing"
+          ? this.endsAt
+          : undefined;
+    if (time) this.ctx.waitUntil(this.ctx.storage.setAlarm(time));
+  }
+
+  private handleJoin(ws: WebSocket, code: string, name: string, sessionId?: string): void {
     this.code = code;
 
     let playerId: string | undefined;
-    const att = ws.deserializeAttachment() as { playerId?: string } | null;
+    const att = ws.deserializeAttachment() as { playerId?: string; sessionId?: string } | null;
     if (att?.playerId && this.players.has(att.playerId)) {
       playerId = att.playerId;
+    } else if (sessionId) {
+      playerId = [...this.players.values()].find((p) => p.sessionId === sessionId)?.id;
+    }
+
+    if (playerId) {
       const existing = this.players.get(playerId)!;
       existing.connected = true;
       existing.name = name;
+      existing.lastMoveAt = 0;
+      existing.lastActionAt = 0;
+      sessionId = existing.sessionId;
     } else if (this.players.size < 2) {
       playerId = crypto.randomUUID();
+      sessionId = crypto.randomUUID();
       const startX = this.players.size === 0 ? 3 : 8;
       this.players.set(playerId, {
         id: playerId,
+        sessionId,
         name,
         coins: 50,
         pos: { x: startX, y: 4 },
@@ -212,9 +324,10 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
-    ws.serializeAttachment({ playerId });
+    ws.serializeAttachment({ playerId, sessionId });
     this.wsToPlayer.set(ws, playerId);
-    this.sendTo(ws, { t: "welcome", playerId, state: this.publicState() });
+    this.sendTo(ws, { t: "welcome", playerId, sessionId, state: this.publicState() });
+    this.persist();
     this.broadcastSnapshot();
   }
 
@@ -224,6 +337,7 @@ export class MatchRoom implements DurableObject {
     if (![...this.players.values()].every((p) => p.ready)) return;
     this.status = "countdown";
     this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
+    this.scheduleAlarm();
     setTimeout(() => this.startPlaying(), COUNTDOWN_MS);
   }
 
@@ -244,19 +358,21 @@ export class MatchRoom implements DurableObject {
       p.lastMoveAt = 0;
       p.lastActionAt = 0;
     }
-    this.snapshotTimer = setInterval(() => this.tickSnapshot(), SNAPSHOT_INTERVAL_MS);
-    this.growthTimer = setInterval(() => this.tickGrowthAll(), GROWTH_INTERVAL_MS);
+    this.startTimers();
+    this.scheduleAlarm();
+    this.persist();
     this.broadcastSnapshot();
+  }
+
+  private startTimers(): void {
+    this.snapshotTimer ??= setInterval(() => this.tickSnapshot(), SNAPSHOT_INTERVAL_MS);
+    this.growthTimer ??= setInterval(() => this.tickGrowthAll(), GROWTH_INTERVAL_MS);
   }
 
   private tickSnapshot(): void {
     if (this.status !== "playing") return;
     if (this.endsAt && Date.now() >= this.endsAt) {
-      let best: PlayerState | undefined;
-      for (const p of this.players.values()) {
-        if (!best || p.coins > best.coins) best = p;
-      }
-      this.endMatch(best?.id, "timeout");
+      this.endByTimeout();
       return;
     }
     this.broadcastSnapshot();
@@ -273,12 +389,21 @@ export class MatchRoom implements DurableObject {
       const res = tickGrowth(p.tiles, now);
       if (res.changed) p.tiles = res.tiles;
     }
+    this.persist();
+  }
+
+  private endByTimeout(): void {
+    const players = [...this.players.values()];
+    const bestCoins = Math.max(...players.map((p) => p.coins));
+    const winners = players.filter((p) => p.coins === bestCoins);
+    this.endMatch(winners.length === 1 ? winners[0].id : undefined, "timeout");
   }
 
   private endMatch(winnerId: string | undefined, reason: "race" | "timeout" | "forfeit"): void {
     if (this.status === "ended") return;
     this.status = "ended";
     this.winnerId = winnerId;
+    this.endedReason = reason;
     if (this.snapshotTimer) {
       clearInterval(this.snapshotTimer);
       this.snapshotTimer = undefined;
@@ -288,6 +413,7 @@ export class MatchRoom implements DurableObject {
       this.growthTimer = undefined;
     }
     for (const p of this.players.values()) p.ready = false;
+    this.persist();
     this.broadcast({ t: "end", winnerId, reason });
     this.broadcastSnapshot();
   }
@@ -295,6 +421,7 @@ export class MatchRoom implements DurableObject {
   private resetForRematch(): void {
     this.status = "lobby";
     this.winnerId = undefined;
+    this.endedReason = undefined;
     this.startedAt = undefined;
     this.endsAt = undefined;
     for (const p of this.players.values()) {
@@ -302,6 +429,7 @@ export class MatchRoom implements DurableObject {
       p.coins = 50;
       p.tiles = makeEmptyField();
     }
+    this.persist();
     this.maybeStartCountdown();
   }
 
@@ -325,6 +453,7 @@ export class MatchRoom implements DurableObject {
       startedAt: this.startedAt,
       endsAt: this.endsAt,
       winnerId: this.winnerId,
+      endedReason: this.endedReason,
       players,
     };
   }

@@ -43,7 +43,7 @@ export default function MultiplayerGame({ code }: Props) {
 
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
   const evIdRef = useRef(0);
-  const { state, selfId, status, send } = useMatch({
+  const { state, selfId, status, lastError, send } = useMatch({
     code,
     name,
     onEvents: (batch) => {
@@ -106,18 +106,20 @@ export default function MultiplayerGame({ code }: Props) {
   const self = state?.players.find((p) => p.id === selfId);
   const opp = state?.players.find((p) => p.id !== selfId);
 
-  if (status === "connecting" || !state) {
-    return <CenterMsg main="กำลังเชื่อมต่อ..." sub={`ROOM ${code}`} />;
-  }
-  if (status === "closed") {
-    return <CenterMsg main="หลุดการเชื่อมต่อ" sub="กำลังลองใหม่..." />;
+  if (!state) {
+    return (
+      <CenterMsg
+        main={lastError?.message ?? "กำลังเชื่อมต่อ..."}
+        sub={lastError ? `ROOM ${code}` : `ROOM ${code}`}
+      />
+    );
   }
 
   return (
     <div className="relative min-h-screen w-full flex flex-col items-center justify-start p-6 gap-4 overflow-hidden">
       <div className="sky-stars" />
 
-      <MatchHUD code={code} self={self} opp={opp} state={state} />
+      <MatchHUD code={code} self={self} opp={opp} state={state} status={status} />
 
       {state.status === "lobby" && (
         <LobbyView self={self} opp={opp} onReady={() => send({ t: "ready" })} />
@@ -137,6 +139,7 @@ export default function MultiplayerGame({ code }: Props) {
       {state.status === "ended" && (
         <EndOverlay
           winnerId={state.winnerId}
+          reason={state.endedReason}
           selfId={selfId}
           players={state.players}
           onRematch={() => send({ t: "rematch" })}
@@ -145,8 +148,13 @@ export default function MultiplayerGame({ code }: Props) {
       )}
 
       {state.status === "playing" && self && <Toolbar self={self} send={send} />}
+      {state.status === "playing" && self && <MobileControls send={send} />}
+      {status !== "open" && (
+        <ConnectionBanner text={lastError?.message ?? "กำลังเชื่อมต่อใหม่..."} />
+      )}
+      {lastError && status === "open" && <ConnectionBanner text={lastError.message} />}
 
-      <div className="relative z-10 font-pixel text-[9px] text-[var(--muted-foreground)] text-center">
+      <div className="relative z-10 font-pixel text-[9px] text-[var(--muted-foreground)] text-center hidden sm:block">
         <span className="pixel-chip mr-2">WASD / ↑↓←→</span>MOVE
         <span className="pixel-chip mx-2">SPACE</span>USE
         <span className="pixel-chip mx-2">1·2·3</span>TOOL
@@ -165,23 +173,44 @@ function CenterMsg({ main, sub }: { main: string; sub?: string }) {
   );
 }
 
+function ConnectionBanner({ text }: { text: string }) {
+  return (
+    <div className="fixed top-4 left-1/2 z-40 -translate-x-1/2 pixel-chip font-pixel text-[9px] text-[var(--gold)]">
+      {text}
+    </div>
+  );
+}
+
 function MatchHUD({
   code,
   self,
   opp,
   state,
+  status,
 }: {
   code: string;
   self?: PublicPlayer;
   opp?: PublicPlayer;
   state: { status: string; endsAt?: number };
+  status: string;
 }) {
   const [now, setNow] = useState(() => Date.now());
+  const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
   useEffect(() => {
     if (state.status !== "playing") return;
     const i = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(i);
   }, [state.status]);
+  const copyRoom = async () => {
+    try {
+      const text = typeof window !== "undefined" ? window.location.href : code;
+      await navigator.clipboard.writeText(text);
+      setCopied("ok");
+    } catch {
+      setCopied("fail");
+    }
+    setTimeout(() => setCopied("idle"), 1200);
+  };
   const remaining = state.endsAt ? Math.max(0, state.endsAt - now) : MATCH_DURATION_MS;
   const mm = Math.floor(remaining / 60000)
     .toString()
@@ -192,10 +221,17 @@ function MatchHUD({
 
   return (
     <header className="relative z-10 w-full max-w-5xl flex items-center justify-between gap-4 px-6 py-3 pixel-panel">
-      <div className="flex items-center gap-3">
+      <button
+        onClick={copyRoom}
+        className="flex items-center gap-3 text-left"
+        title="Copy room link"
+      >
         <span className="font-pixel text-[10px] text-[var(--muted-foreground)]">ROOM</span>
         <span className="font-pixel text-[18px] text-[var(--gold)] tracking-[4px]">{code}</span>
-      </div>
+        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+          {copied === "ok" ? "COPIED" : copied === "fail" ? "COPY FAIL" : "COPY"}
+        </span>
+      </button>
 
       <div className="flex items-center gap-4 flex-1 px-6">
         <PlayerBar player={self} side="left" />
@@ -203,8 +239,13 @@ function MatchHUD({
         <PlayerBar player={opp} side="right" />
       </div>
 
-      <div className="font-pixel text-[16px] text-[var(--gold)]">
-        {mm}:{ss}
+      <div className="flex flex-col items-end gap-1">
+        <div className="font-pixel text-[16px] text-[var(--gold)]">
+          {mm}:{ss}
+        </div>
+        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+          {status !== "open" ? "RECONNECTING" : state.status.toUpperCase()}
+        </div>
       </div>
     </header>
   );
@@ -224,7 +265,7 @@ function PlayerBar({ player, side }: { player?: PublicPlayer; side: "left" | "ri
         )}
         {player && !player.connected && (
           <span className="font-pixel text-[8px]" style={{ color: "#ff6b6b" }}>
-            DC
+            RECONNECTING
           </span>
         )}
       </div>
@@ -542,14 +583,76 @@ function Toolbar({
   );
 }
 
+function MobileControls({
+  send,
+}: {
+  send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
+}) {
+  const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stop = () => {
+    if (repeatRef.current) clearInterval(repeatRef.current);
+    repeatRef.current = null;
+  };
+  const startMove = (dir: Direction) => {
+    stop();
+    send({ t: "move", dir });
+    repeatRef.current = setInterval(() => send({ t: "move", dir }), MOVE_REPEAT_MS);
+  };
+  useEffect(() => stop, []);
+
+  return (
+    <div className="fixed bottom-4 left-0 right-0 z-20 flex items-end justify-between px-4 sm:hidden pointer-events-none">
+      <div className="grid grid-cols-3 gap-2 pointer-events-auto">
+        <div />
+        <MoveButton label="↑" onPointerDown={() => startMove("up")} onPointerUp={stop} />
+        <div />
+        <MoveButton label="←" onPointerDown={() => startMove("left")} onPointerUp={stop} />
+        <MoveButton label="↓" onPointerDown={() => startMove("down")} onPointerUp={stop} />
+        <MoveButton label="→" onPointerDown={() => startMove("right")} onPointerUp={stop} />
+      </div>
+      <button
+        className="pixel-btn pointer-events-auto h-20 w-20 rounded-full"
+        data-accent="true"
+        onPointerDown={() => send({ t: "action" })}
+      >
+        <span className="font-pixel text-[10px]">USE</span>
+      </button>
+    </div>
+  );
+}
+
+function MoveButton({
+  label,
+  onPointerDown,
+  onPointerUp,
+}: {
+  label: string;
+  onPointerDown: () => void;
+  onPointerUp: () => void;
+}) {
+  return (
+    <button
+      className="pixel-btn h-14 w-14"
+      onPointerDown={onPointerDown}
+      onPointerUp={onPointerUp}
+      onPointerCancel={onPointerUp}
+      onPointerLeave={onPointerUp}
+    >
+      <span className="font-pixel text-[16px]">{label}</span>
+    </button>
+  );
+}
+
 function EndOverlay({
   winnerId,
+  reason,
   selfId,
   players,
   onRematch,
   self,
 }: {
   winnerId?: string;
+  reason?: "race" | "timeout" | "forfeit";
   selfId: string | null;
   players: PublicPlayer[];
   onRematch: () => void;
@@ -557,6 +660,9 @@ function EndOverlay({
 }) {
   const won = winnerId && winnerId === selfId;
   const tied = !winnerId;
+  const reasonText =
+    reason === "race" ? "FIRST TO 500" : reason === "timeout" ? "TIME UP" : "DISCONNECTED";
+  const sortedPlayers = [...players].sort((a, b) => b.coins - a.coins);
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center"
@@ -572,8 +678,9 @@ function EndOverlay({
         >
           {tied ? "DRAW" : won ? "YOU WIN!" : "YOU LOSE"}
         </div>
+        <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">{reasonText}</div>
         <div className="flex flex-col gap-2 w-full">
-          {players.map((p) => (
+          {sortedPlayers.map((p) => (
             <div
               key={p.id}
               className="flex items-center justify-between gap-3 font-pixel text-[10px]"
@@ -595,7 +702,9 @@ function EndOverlay({
           data-accent={!self?.ready ? "true" : undefined}
           disabled={self?.ready}
         >
-          <span className="font-pixel text-[12px]">{self?.ready ? "รอคู่แข่ง..." : "REMATCH"}</span>
+          <span className="font-pixel text-[12px]">
+            {self?.ready ? "READY — WAITING" : "REMATCH"}
+          </span>
         </button>
         <a
           href="/lobby"

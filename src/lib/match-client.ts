@@ -32,12 +32,12 @@ function sessionKey(code: string): string {
 
 function readSessionId(code: string): string | undefined {
   if (typeof window === "undefined") return undefined;
-  return localStorage.getItem(sessionKey(code)) ?? undefined;
+  return sessionStorage.getItem(sessionKey(code)) ?? undefined;
 }
 
 function writeSessionId(code: string, sessionId: string): void {
   if (typeof window === "undefined") return;
-  localStorage.setItem(sessionKey(code), sessionId);
+  sessionStorage.setItem(sessionKey(code), sessionId);
 }
 
 export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMatchOpts) {
@@ -73,7 +73,7 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
         if (cancelled) return;
         attemptRef.current = 0;
         setStatus("open");
-        const msg: ClientMsg = { t: "join", code, name };
+        const msg: ClientMsg = { t: "join", code, name, sessionId: readSessionId(code) };
         ws.send(JSON.stringify(msg));
         sentJoinRef.current = true;
       });
@@ -87,6 +87,8 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
           return;
         }
         if (parsed.t === "welcome") {
+          writeSessionId(code, parsed.sessionId);
+          setLastError(null);
           setSelfId(parsed.playerId);
           setState(parsed.state);
         } else if (parsed.t === "snapshot") {
@@ -95,6 +97,8 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
           onEventsRef.current?.(parsed.events);
         } else if (parsed.t === "end") {
           onEndRef.current?.(parsed.winnerId, parsed.reason);
+        } else if (parsed.t === "error") {
+          setLastError({ code: parsed.code, message: parsed.message });
         }
       });
 
@@ -116,9 +120,10 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
       });
     };
 
-    connect();
+    const connectTimer = setTimeout(connect, 0);
     return () => {
       cancelled = true;
+      clearTimeout(connectTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       const ws = wsRef.current;
       wsRef.current = null;
@@ -141,5 +146,5 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
     }
   };
 
-  return { state, selfId, status, send };
+  return { state, selfId, status, lastError, send };
 }
