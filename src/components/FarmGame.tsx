@@ -355,7 +355,6 @@ export default function FarmGame() {
         </div>
       </div>
 
-      </div>
 
       {/* Toolbar */}
       <div className="w-full max-w-5xl flex flex-wrap items-center justify-center gap-2 p-3 rounded-2xl bg-card border-2 border-primary/40 shadow-lg">
