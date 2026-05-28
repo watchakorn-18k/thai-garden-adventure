@@ -47,8 +47,14 @@ export default function FarmGame() {
   const [day, setDay] = useState(1);
   const [popups, setPopups] = useState<{ id: number; x: number; y: number; text: string }[]>([]);
   const [acting, setActing] = useState(false);
+  const [walkFrame, setWalkFrame] = useState(0);
+  const [particles, setParticles] = useState<
+    { id: number; x: number; y: number; kind: "dirt" | "water" | "sparkle"; dx: number; dy: number; color: string }[]
+  >([]);
+  const [shakeTile, setShakeTile] = useState<{ x: number; y: number; id: number } | null>(null);
   const keys = useRef<Set<string>>(new Set());
   const popupId = useRef(0);
+
 
   const facingTile = useCallback(() => {
     let { x, y } = pos;
