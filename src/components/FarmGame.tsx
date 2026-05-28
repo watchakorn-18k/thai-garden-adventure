@@ -74,7 +74,7 @@ export default function FarmGame() {
       const next = grid.map((r) => r.map((c) => ({ ...c, crop: c.crop ? { ...c.crop } : undefined })));
       const tile = next[t.y][t.x];
 
-      if (tile.crop && tile.crop.stage >= 2) {
+      const next: Tile[][] = grid.map((r) => r.map((c) => ({ ...c, crop: c.crop ? { ...c.crop } : undefined })));
         const crop = CROPS[tile.crop.id];
         setCoins((c) => c + crop.sellPrice);
         addPopup(t.x, t.y, `+${crop.sellPrice} ฿`);
