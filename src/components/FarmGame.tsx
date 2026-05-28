@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
+import CosmeticPicker from "./CosmeticPicker";
 import {
   HoeIcon,
   WaterCanIcon,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/game-types";
 import { applyAction, tickGrowth } from "@/lib/game-logic";
 import { SFX, setMuted, isMuted } from "@/lib/sfx";
+import { readCosmetics, writeCosmetics } from "@/lib/player-cosmetics";
 
 const TILE = 56;
 const COMBO_WINDOW = 2200; // ms to keep combo alive
@@ -47,6 +49,7 @@ export default function FarmGame() {
   const [tool, setTool] = useState<Tool>("hoe");
   const [seedChoice, setSeedChoice] = useState<CropId>("chili");
   const [coins, setCoins] = useState(50);
+  const [cosmetics, setCosmetics] = useState(() => readCosmetics());
   const [popups, setPopups] = useState<
     { id: number; x: number; y: number; text: string; tone: "good" | "bad" | "info" }[]
   >([]);
@@ -542,6 +545,18 @@ export default function FarmGame() {
         </div>
       </header>
 
+      <div className="relative z-10 w-full max-w-5xl">
+        <CosmeticPicker
+          value={cosmetics}
+          onChange={(next) => {
+            setCosmetics(next);
+            writeCosmetics(next);
+            SFX.click();
+          }}
+          compact
+        />
+      </div>
+
       {/* Field */}
       <div
         ref={fieldRef}
@@ -795,6 +810,7 @@ export default function FarmGame() {
             walkFrame={walkFrame}
             acting={acting}
             tool={tool}
+            cosmetics={cosmetics}
           />
         </div>
       </div>

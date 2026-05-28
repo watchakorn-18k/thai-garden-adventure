@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
+import CosmeticPicker from "./CosmeticPicker";
 import {
   ChiliIcon,
   CoinIcon,
@@ -13,11 +14,15 @@ import {
 } from "./PixelIcons";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { movePos } from "@/lib/game-logic";
+import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
 import {
-  MATCH_DURATION_MS,
-  TARGET_COINS,
+  DEFAULT_ROOM_SETTINGS,
+  type MatchRole,
+  type PublicMatchState,
   type PublicPlayer,
+  type RoomSettings,
+  type RoomStage,
   type ServerEvent,
 } from "@/lib/match-protocol";
 
@@ -31,21 +36,41 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   eggplant: EggplantIcon,
 };
 
+const STAGE_COPY: Record<RoomStage, { label: string; desc: string }> = {
+  classic: { label: "CLASSIC FIELD", desc: "สวนมาตรฐาน แข่งทำเหรียญไว" },
+  water: { label: "CANAL FIELD", desc: "คลองชลประทานล้อมสวน" },
+  festival: { label: "FESTIVAL NIGHT", desc: "บรรยากาศงานวัด โทนทอง" },
+};
+
 interface Props {
   code: string;
+  role?: MatchRole;
 }
 
-export default function MultiplayerGame({ code }: Props) {
+export default function MultiplayerGame({ code, role = "player" }: Props) {
   const name = useMemo(() => {
     if (typeof window === "undefined") return "Player";
     return localStorage.getItem("tg.name")?.trim() || "Player";
   }, []);
 
+  const [cosmetics, setCosmetics] = useState(() => readCosmetics());
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [outfitOpen, setOutfitOpen] = useState(false);
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
   const evIdRef = useRef(0);
-  const { state, selfId, status, lastError, send } = useMatch({
+  const {
+    state,
+    selfId,
+    isHost,
+    role: matchRole,
+    status,
+    lastError,
+    send,
+  } = useMatch({
     code,
     name,
+    role,
+    cosmetics,
     onEvents: (batch) => {
       setEvents((prev) => {
         const next = [...prev];
@@ -70,7 +95,9 @@ export default function MultiplayerGame({ code }: Props) {
   } | null>(null);
   const [actionFlash, setActionFlash] = useState(0);
 
-  const self = state?.players.find((p) => p.id === selfId);
+  const isSpectator = matchRole === "spectator";
+  const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
+  const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
   const opp = state?.players.find((p) => p.id !== selfId);
   const renderSelf = self
     ? predictedMove?.playerId === self.id
@@ -85,6 +112,7 @@ export default function MultiplayerGame({ code }: Props) {
 
   const sendMove = useCallback(
     (dir: Direction) => {
+      if (isSpectator) return;
       const currentSelf = selfRef.current;
       if (!currentSelf || statusRef.current !== "playing") return;
       setPredictedMove((current) => ({
@@ -94,16 +122,18 @@ export default function MultiplayerGame({ code }: Props) {
       }));
       send({ t: "move", dir });
     },
-    [send],
+    [isSpectator, send],
   );
 
   const sendAction = useCallback(() => {
+    if (isSpectator) return;
     if (statusRef.current !== "playing") return;
     setActionFlash((n) => n + 1);
     send({ t: "action" });
-  }, [send]);
+  }, [isSpectator, send]);
 
   useEffect(() => {
+    if (isSpectator) return;
     const onDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       keys.current.add(k);
@@ -114,6 +144,7 @@ export default function MultiplayerGame({ code }: Props) {
         sendMove(dir);
       }
       if (k === " " || k === "enter") sendAction();
+      if (k === "r" && statusRef.current === "lobby") send({ t: "ready" });
       if (k === "1") send({ t: "tool", tool: "hoe" });
       if (k === "2") send({ t: "tool", tool: "watering_can" });
       if (k === "3") send({ t: "tool", tool: "seed" });
@@ -125,9 +156,10 @@ export default function MultiplayerGame({ code }: Props) {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [send, sendAction, sendMove]);
+  }, [isSpectator, send, sendAction, sendMove]);
 
   useEffect(() => {
+    if (isSpectator) return;
     if (state?.status !== "playing") return;
     const i = setInterval(() => {
       const k = keys.current;
@@ -143,7 +175,7 @@ export default function MultiplayerGame({ code }: Props) {
       sendMove(dir);
     }, 60);
     return () => clearInterval(i);
-  }, [state?.status, sendMove]);
+  }, [isSpectator, state?.status, sendMove]);
 
   useEffect(() => {
     if (!self || !predictedMove || predictedMove.playerId !== self.id) return;
@@ -165,31 +197,77 @@ export default function MultiplayerGame({ code }: Props) {
     <div className="relative min-h-screen w-full flex flex-col items-center justify-start p-6 gap-4 overflow-hidden">
       <div className="sky-stars" />
 
-      <MatchHUD code={code} self={self} opp={opp} state={state} status={status} />
+      <MatchHUD
+        code={code}
+        self={self ?? state.players[0]}
+        opp={isSpectator ? state.players[1] : opp}
+        state={state}
+        settings={state.settings}
+        status={status}
+        role={matchRole}
+        outfit={
+          !isSpectator && state.status !== "playing"
+            ? {
+                open: outfitOpen,
+                cosmetics,
+                onToggle: () => setOutfitOpen((current) => !current),
+                onClose: () => setOutfitOpen(false),
+                onChange: (next: PlayerCosmetics) => {
+                  setCosmetics(next);
+                  writeCosmetics(next);
+                  send({ t: "cosmetics", cosmetics: next });
+                },
+              }
+            : undefined
+        }
+      />
 
-      {state.status === "lobby" && (
-        <LobbyView self={self} opp={opp} onReady={() => send({ t: "ready" })} />
-      )}
+      {state.status === "lobby" &&
+        (isSpectator ? (
+          <SpectatorLobbyView
+            players={state.players}
+            state={state}
+            isHost={hasHostControls}
+            onClaimSlot={() => send({ t: "claim_slot" })}
+            onOpenSettings={() => setSettingsOpen(true)}
+          />
+        ) : (
+          <LobbyView
+            self={self}
+            opp={opp}
+            state={state}
+            isHost={hasHostControls}
+            onReady={() => send({ t: "ready" })}
+            onLeaveSlot={() => send({ t: "leave_slot" })}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onKick={(playerId) => send({ t: "kick", playerId })}
+          />
+        ))}
 
       {state.status === "countdown" && state.countdownEndsAt && (
         <CountdownView endsAt={state.countdownEndsAt} />
       )}
 
-      {(state.status === "playing" || state.status === "ended") && self && (
-        <div className="relative z-10 flex flex-col items-center gap-3">
-          {opp &&
-            (state.status === "playing" ? (
-              <OpponentStatusCard player={opp} />
-            ) : (
-              <OpponentField player={opp} />
-            ))}
-          <SelfField
-            player={renderSelf ?? self}
-            events={events.filter((e) => e.ev.playerId === self.id)}
-            actionFlash={actionFlash}
-          />
-        </div>
-      )}
+      {(state.status === "playing" || state.status === "ended") &&
+        (isSpectator ? (
+          <SpectatorMatchView players={state.players} events={events} />
+        ) : (
+          self && (
+            <div className="relative z-10 flex flex-col items-center gap-3">
+              {opp &&
+                (state.status === "playing" ? (
+                  <OpponentStatusCard player={opp} />
+                ) : (
+                  <OpponentField player={opp} />
+                ))}
+              <SelfField
+                player={renderSelf ?? self}
+                events={events.filter((e) => e.ev.playerId === self.id)}
+                actionFlash={actionFlash}
+              />
+            </div>
+          )
+        ))}
 
       {state.status === "ended" && (
         <EndOverlay
@@ -199,11 +277,23 @@ export default function MultiplayerGame({ code }: Props) {
           players={state.players}
           onRematch={() => send({ t: "rematch" })}
           self={self}
+          spectator={isSpectator}
         />
       )}
 
-      {state.status === "playing" && self && <Toolbar self={self} send={send} />}
-      {state.status === "playing" && self && (
+      {settingsOpen && state && (
+        <SettingsModal
+          settings={state.settings}
+          onClose={() => setSettingsOpen(false)}
+          onSave={(settings) => {
+            send({ t: "settings", settings });
+            setSettingsOpen(false);
+          }}
+        />
+      )}
+
+      {state.status === "playing" && self && !isSpectator && <Toolbar self={self} send={send} />}
+      {state.status === "playing" && self && !isSpectator && (
         <MobileControls sendMove={sendMove} sendAction={sendAction} />
       )}
       {status !== "open" && (
@@ -211,7 +301,16 @@ export default function MultiplayerGame({ code }: Props) {
       )}
       {lastError && status === "open" && <ConnectionBanner text={lastError.message} />}
 
-      <MultiplayerControlsGuide />
+      {!isSpectator && <MultiplayerControlsGuide />}
+      {isSpectator && <SpectatorGuide />}
+    </div>
+  );
+}
+
+function SpectatorGuide() {
+  return (
+    <div className="relative z-10 font-pixel text-[9px] text-[var(--muted-foreground)] text-center hidden sm:block">
+      <span className="pixel-chip mr-2">REFEREE VIEW</span>ดูคะแนน เวลา สถานะผู้เล่น สำหรับ live สด
     </div>
   );
 }
@@ -317,16 +416,29 @@ function MatchHUD({
   self,
   opp,
   state,
+  settings,
   status,
+  role,
+  outfit,
 }: {
   code: string;
   self?: PublicPlayer;
   opp?: PublicPlayer;
   state: { status: string; endsAt?: number };
+  settings: RoomSettings;
   status: string;
+  role: MatchRole;
+  outfit?: {
+    open: boolean;
+    cosmetics: PlayerCosmetics;
+    onToggle: () => void;
+    onClose: () => void;
+    onChange: (next: PlayerCosmetics) => void;
+  };
 }) {
   const [now, setNow] = useState(() => Date.now());
   const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
+  const [copyToast, setCopyToast] = useState<"ok" | "fail" | null>(null);
   useEffect(() => {
     if (state.status !== "playing") return;
     const i = setInterval(() => setNow(Date.now()), 250);
@@ -334,15 +446,17 @@ function MatchHUD({
   }, [state.status]);
   const copyRoom = async () => {
     try {
-      const text = typeof window !== "undefined" ? window.location.href : code;
-      await navigator.clipboard.writeText(text);
+      await navigator.clipboard.writeText(code);
       setCopied("ok");
+      setCopyToast("ok");
     } catch {
       setCopied("fail");
+      setCopyToast("fail");
     }
     setTimeout(() => setCopied("idle"), 1200);
+    setTimeout(() => setCopyToast(null), 1800);
   };
-  const remaining = state.endsAt ? Math.max(0, state.endsAt - now) : MATCH_DURATION_MS;
+  const remaining = state.endsAt ? Math.max(0, state.endsAt - now) : settings.durationMs;
   const mm = Math.floor(remaining / 60000)
     .toString()
     .padStart(2, "0");
@@ -351,23 +465,29 @@ function MatchHUD({
     .padStart(2, "0");
 
   return (
-    <header className="relative z-10 w-full max-w-5xl flex items-center justify-between gap-4 px-6 py-3 pixel-panel">
+    <>
+      {copyToast && (
+        <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 pixel-chip font-pixel text-[9px] text-gold" style={{ animation: "float-up 1.8s ease-out forwards" }}>
+          {copyToast === "ok" ? `คัดลอกรหัส ${code} แล้ว` : "คัดลอกรหัสไม่สำเร็จ"}
+        </div>
+      )}
+      <header className="relative z-10 w-full max-w-5xl flex items-center justify-between gap-4 px-6 py-3 pixel-panel">
       <button
         onClick={copyRoom}
         className="flex items-center gap-3 text-left"
-        title="Copy room link"
+        title="Copy room code"
       >
         <span className="font-pixel text-[10px] text-[var(--muted-foreground)]">ROOM</span>
         <span className="font-pixel text-[18px] text-[var(--gold)] tracking-[4px]">{code}</span>
         <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          {copied === "ok" ? "COPIED" : copied === "fail" ? "COPY FAIL" : "COPY"}
+          {copied === "ok" ? "COPIED" : copied === "fail" ? "COPY FAIL" : "COPY CODE"}
         </span>
       </button>
 
       <div className="flex items-center gap-4 flex-1 px-6">
-        <PlayerBar player={self} side="left" />
+        <PlayerBar player={self} side="left" targetCoins={settings.targetCoins} />
         <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
-        <PlayerBar player={opp} side="right" />
+        <PlayerBar player={opp} side="right" targetCoins={settings.targetCoins} />
       </div>
 
       <div className="flex flex-col items-end gap-1">
@@ -375,15 +495,28 @@ function MatchHUD({
           {mm}:{ss}
         </div>
         <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          {status !== "open" ? "RECONNECTING" : state.status.toUpperCase()}
+          {status !== "open"
+            ? "RECONNECTING"
+            : role === "spectator"
+              ? `REFEREE · ${state.status.toUpperCase()}`
+              : state.status.toUpperCase()}
         </div>
       </div>
-    </header>
+      </header>
+    </>
   );
 }
 
-function PlayerBar({ player, side }: { player?: PublicPlayer; side: "left" | "right" }) {
-  const pct = player ? Math.min(100, (player.coins / TARGET_COINS) * 100) : 0;
+function PlayerBar({
+  player,
+  side,
+  targetCoins,
+}: {
+  player?: PublicPlayer;
+  side: "left" | "right";
+  targetCoins: number;
+}) {
+  const pct = player ? Math.min(100, (player.coins / targetCoins) * 100) : 0;
   return (
     <div className={`flex-1 flex flex-col gap-1 ${side === "right" ? "items-end" : "items-start"}`}>
       <div className="flex items-center gap-2">
@@ -391,7 +524,7 @@ function PlayerBar({ player, side }: { player?: PublicPlayer; side: "left" | "ri
         {player && (
           <span className="font-pixel text-[10px] text-[var(--gold)] flex items-center gap-1">
             <CoinIcon size={12} />
-            {player.coins}/{TARGET_COINS}
+            {player.coins}/{targetCoins}
           </span>
         )}
         {player && !player.connected && (
@@ -417,46 +550,396 @@ function PlayerBar({ player, side }: { player?: PublicPlayer; side: "left" | "ri
 function LobbyView({
   self,
   opp,
+  state,
+  isHost,
   onReady,
+  onLeaveSlot,
+  onOpenSettings,
+  onKick,
 }: {
   self?: PublicPlayer;
   opp?: PublicPlayer;
+  state: PublicMatchState;
+  isHost: boolean;
   onReady: () => void;
+  onLeaveSlot: () => void;
+  onOpenSettings: () => void;
+  onKick: (playerId: string) => void;
+}) {
+  const waitingForOpponent = !opp;
+  const readyCount = [self, opp].filter((p) => p?.ready).length;
+  const settings = state.settings ?? DEFAULT_ROOM_SETTINGS;
+  return (
+    <section className="lobby-stage relative z-10 w-full max-w-5xl">
+      <div className="lobby-orbit" />
+      <div className="lobby-spark-field">
+        {Array.from({ length: 18 }).map((_, i) => (
+          <span
+            key={i}
+            className="lobby-star"
+            style={{
+              left: `${5 + ((i * 23) % 90)}%`,
+              top: `${8 + ((i * 31) % 82)}%`,
+              animationDelay: `${i * 0.22}s`,
+            }}
+          />
+        ))}
+      </div>
+
+      <div className="lobby-title-card pixel-panel">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
+            MATCH LOBBY
+          </span>
+          {isHost && (
+            <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
+              HOST
+            </span>
+          )}
+        </div>
+        <h2 className="font-pixel lobby-title">THAI GARDEN DUEL</h2>
+        <p className="lobby-subtitle">
+          {waitingForOpponent
+            ? "ส่งลิงก์ให้เพื่อน แล้วตั้งกติกาห้องก่อนเริ่ม"
+            : self?.ready && opp?.ready
+              ? "ทั้งสองฝั่งพร้อมแล้ว · กำลังนับถอยหลัง"
+              : `พร้อมแล้ว ${readyCount}/${settings.maxPlayers} · กด READY เพื่อเข้ารอบ`}
+        </p>
+      </div>
+
+      <RoomSettingsSummary settings={settings} isHost={isHost} onOpenSettings={onOpenSettings} />
+
+      <div className="lobby-versus-grid">
+        <PlayerCard player={self} label="YOU" side="left" hostId={state.hostId} />
+        <div className="lobby-vs-core" aria-hidden>
+          <span>VS</span>
+        </div>
+        <PlayerCard
+          player={opp}
+          label="RIVAL"
+          side="right"
+          hostId={state.hostId}
+          canKick={isHost && Boolean(opp)}
+          onKick={onKick}
+        />
+      </div>
+
+      <div className="lobby-ready-row">
+        <div className="lobby-ruleline" />
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={onReady}
+            className="pixel-btn lobby-ready-btn"
+            data-accent={self?.ready ? undefined : "true"}
+            disabled={self?.ready}
+          >
+            <span className="font-pixel text-[12px]">
+              {self?.ready ? "READY · WAITING" : "READY UP"}
+            </span>
+            <span className="font-pixel text-[8px] opacity-70">R</span>
+          </button>
+          <button onClick={onLeaveSlot} className="pixel-btn">
+            <span className="font-pixel text-[10px]">LEAVE SLOT</span>
+          </button>
+        </div>
+        <div className="lobby-ruleline" />
+      </div>
+    </section>
+  );
+}
+
+function RoomSettingsSummary({
+  settings,
+  isHost,
+  onOpenSettings,
+}: {
+  settings: RoomSettings;
+  isHost: boolean;
+  onOpenSettings: () => void;
 }) {
   return (
-    <div className="relative z-10 flex flex-col items-center gap-6 mt-12">
-      <div className="font-pixel text-[14px] text-[var(--muted-foreground)]">
-        {opp ? "ผู้เล่นพร้อม ?" : "รอผู้เล่นอีกคน..."}
-      </div>
-      <div className="flex items-center gap-8">
-        <PlayerCard player={self} label="YOU" />
-        <span className="font-pixel text-[20px] text-[var(--gold)]">VS</span>
-        <PlayerCard player={opp} label="OPPONENT" />
-      </div>
-      <button
-        onClick={onReady}
-        className="pixel-btn"
-        data-accent={self?.ready ? undefined : "true"}
-        disabled={self?.ready}
-      >
-        <span className="font-pixel text-[12px]">{self?.ready ? "พร้อมแล้ว ✓" : "READY"}</span>
-      </button>
+    <div className="pixel-panel relative z-10 my-4 flex flex-wrap items-center justify-center gap-3 px-4 py-3">
+      <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
+        {STAGE_COPY[settings.stage].label}
+      </span>
+      <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+        TARGET {settings.targetCoins}
+      </span>
+      <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+        TIME {Math.round(settings.durationMs / 60000)} MIN
+      </span>
+      <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+        SLOTS {settings.maxPlayers}
+      </span>
+      {isHost ? (
+        <button onClick={onOpenSettings} className="pixel-btn px-3 py-2">
+          <span className="font-pixel text-[8px]">SETTINGS</span>
+        </button>
+      ) : (
+        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">HOST SETTINGS</span>
+      )}
     </div>
   );
 }
 
-function PlayerCard({ player, label }: { player?: PublicPlayer; label: string }) {
+function PlayerCard({
+  player,
+  label,
+  side = "left",
+  hostId,
+  canKick = false,
+  onKick,
+}: {
+  player?: PublicPlayer;
+  label: string;
+  side?: "left" | "right";
+  hostId?: string;
+  canKick?: boolean;
+  onKick?: (playerId: string) => void;
+}) {
+  const ready = Boolean(player?.ready);
   return (
-    <div className="pixel-panel p-4 flex flex-col items-center gap-2 min-w-[160px]">
-      <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</span>
-      <span className="font-pixel text-[14px]">{player?.name ?? "..."}</span>
-      <span
-        className="font-pixel text-[9px]"
-        style={{ color: player?.ready ? "#ffd24a" : "#7d6a5a" }}
+    <article
+      className="lobby-player-card pixel-panel"
+      data-ready={ready ? "true" : undefined}
+      data-side={side}
+    >
+      <div className="lobby-player-sheen" />
+      <div className="lobby-player-topline">
+        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</span>
+        <div className="flex items-center gap-2">
+          {player?.id === hostId && (
+            <span className="font-pixel text-[7px] text-[var(--gold)]">HOST</span>
+          )}
+          <span className="lobby-status-dot" data-ready={ready ? "true" : undefined} />
+        </div>
+      </div>
+      <div className="lobby-avatar-wrap">
+        <div className="lobby-avatar-ground" />
+        {player ? (
+          <div className="lobby-avatar-sprite">
+            <PixelFarmer
+              direction={side === "left" ? "right" : "left"}
+              walking={false}
+              walkFrame={0}
+              acting={ready}
+              tool={player.tool}
+              cosmetics={player.cosmetics}
+            />
+          </div>
+        ) : (
+          <div className="lobby-empty-slot">
+            <span className="font-pixel">?</span>
+          </div>
+        )}
+      </div>
+      <div className="lobby-player-name font-pixel">{player?.name ?? "OPEN SLOT"}</div>
+      <div className="lobby-player-meta font-pixel" data-ready={ready ? "true" : undefined}>
+        {player ? (ready ? "LOCKED IN" : "WAITING") : "INVITE FRIEND"}
+      </div>
+      {canKick && player && (
+        <button
+          onClick={() => onKick?.(player.id)}
+          className="pixel-btn mt-3 px-3 py-2"
+          data-accent="true"
+        >
+          <span className="font-pixel text-[8px]">KICK</span>
+        </button>
+      )}
+    </article>
+  );
+}
+
+function SettingsModal({
+  settings,
+  onClose,
+  onSave,
+}: {
+  settings: RoomSettings;
+  onClose: () => void;
+  onSave: (settings: RoomSettings) => void;
+}) {
+  const [draft, setDraft] = useState<RoomSettings>(settings);
+  const setNumber = (key: "targetCoins" | "durationMs", value: number) => {
+    setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-30 flex items-center justify-center p-4"
+      style={{ background: "rgba(10,5,15,0.82)" }}
+    >
+      <div
+        className="pixel-panel w-full max-w-2xl p-6 flex flex-col gap-5"
+        style={{ background: "#3a2148" }}
       >
-        {player?.ready ? "READY" : "WAITING"}
-      </span>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <div className="font-pixel text-[10px] tracking-[3px] text-[#d9c6ef]">
+              HOST SETTINGS
+            </div>
+            <h3 className="font-pixel text-[34px] text-[var(--gold)] mt-2 leading-relaxed">
+              ตั้งค่าห้อง
+            </h3>
+          </div>
+          <button onClick={onClose} className="pixel-btn px-4 py-3">
+            <span className="font-pixel text-[10px]">CLOSE</span>
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          {(Object.keys(STAGE_COPY) as RoomStage[]).map((stage) => (
+            <button
+              key={stage}
+              onClick={() => setDraft((current) => ({ ...current, stage }))}
+              className="pixel-panel p-4 text-left transition-transform active:translate-y-[1px]"
+              data-ready={draft.stage === stage ? "true" : undefined}
+              style={{ background: draft.stage === stage ? "#4a2b58" : "#2b1836" }}
+            >
+              <div className="font-pixel text-[12px] text-[var(--gold)] leading-relaxed">
+                {STAGE_COPY[stage].label}
+              </div>
+              <div className="font-pixel text-[13px] text-[#fff1d6] mt-3 leading-[1.8]">
+                {STAGE_COPY[stage].desc}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <SettingField label="TARGET" helper="เหรียญที่ต้องทำให้ถึงก่อน" value={draft.targetCoins}>
+            <input
+              className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3"
+              type="number"
+              min={200}
+              max={1500}
+              step={50}
+              value={draft.targetCoins}
+              onChange={(e) => setNumber("targetCoins", Number(e.target.value))}
+            />
+          </SettingField>
+          <SettingField
+            label="TIME"
+            helper="นาทีต่อรอบ"
+            value={Math.round(draft.durationMs / 60000)}
+          >
+            <input
+              className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3"
+              type="number"
+              min={2}
+              max={10}
+              step={1}
+              value={Math.round(draft.durationMs / 60000)}
+              onChange={(e) => setNumber("durationMs", Number(e.target.value) * 60000)}
+            />
+          </SettingField>
+          <SettingField label="SLOTS" helper="ตอนนี้ล็อก 2 คน" value={draft.maxPlayers}>
+            <input
+              className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3 opacity-80"
+              type="number"
+              min={2}
+              max={2}
+              value={draft.maxPlayers}
+              readOnly
+            />
+          </SettingField>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          <button onClick={onClose} className="pixel-btn px-5 py-4">
+            <span className="font-pixel text-[11px]">CANCEL</span>
+          </button>
+          <button onClick={() => onSave(draft)} className="pixel-btn px-5 py-4" data-accent="true">
+            <span className="font-pixel text-[11px]">SAVE SETTINGS</span>
+          </button>
+        </div>
+      </div>
     </div>
+  );
+}
+
+function SettingField({
+  label,
+  helper,
+  value,
+  children,
+}: {
+  label: string;
+  helper: string;
+  value: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex flex-col gap-2">
+      <span className="font-pixel text-[11px] text-[var(--gold)]">{label}</span>
+      {children}
+      <span className="font-pixel text-[12px] text-[#fff1d6] leading-[1.8]">
+        {helper} · {value}
+      </span>
+    </label>
+  );
+}
+
+function SpectatorLobbyView({
+  players,
+  state,
+  isHost,
+  onClaimSlot,
+  onOpenSettings,
+}: {
+  players: PublicPlayer[];
+  state: PublicMatchState;
+  isHost: boolean;
+  onClaimSlot: () => void;
+  onOpenSettings: () => void;
+}) {
+  const slotsFull = players.length >= state.settings.maxPlayers;
+  return (
+    <section className="lobby-stage relative z-10 w-full max-w-5xl">
+      <div className="lobby-title-card pixel-panel">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
+            REFEREE VIEW
+          </span>
+          {isHost && (
+            <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
+              HOST
+            </span>
+          )}
+        </div>
+        <h2 className="font-pixel lobby-title">WATCH MODE</h2>
+        <p className="lobby-subtitle">เริ่มเป็นผู้ชมก่อน · กดเข้า slot เมื่อต้องการลงแข่ง</p>
+      </div>
+
+      <RoomSettingsSummary
+        settings={state.settings}
+        isHost={isHost}
+        onOpenSettings={onOpenSettings}
+      />
+
+      <div className="lobby-versus-grid">
+        <PlayerCard player={players[0]} label="PLAYER 1" side="left" hostId={state.hostId} />
+        <div className="lobby-vs-core" aria-hidden>
+          <span>VS</span>
+        </div>
+        <PlayerCard player={players[1]} label="PLAYER 2" side="right" hostId={state.hostId} />
+      </div>
+
+      <div className="lobby-ready-row">
+        <div className="lobby-ruleline" />
+        <button
+          onClick={onClaimSlot}
+          className="pixel-btn lobby-ready-btn"
+          data-accent={!slotsFull ? "true" : undefined}
+          disabled={slotsFull}
+        >
+          <span className="font-pixel text-[12px]">
+            {slotsFull ? "PLAYER SLOTS FULL" : "ENTER PLAYER SLOT"}
+          </span>
+        </button>
+        <div className="lobby-ruleline" />
+      </div>
+    </section>
   );
 }
 
@@ -630,54 +1113,48 @@ function MatchArenaAmbience() {
           />
         ))}
       </div>
-
-      <div className="absolute -left-13.5 bottom-9.5 pointer-events-none z-20 match-chicken-side">
-        <MiniChicken />
-      </div>
-      <div className="absolute -right-15.5 top-22 pointer-events-none z-20 match-dog-side">
-        <MiniDog />
-      </div>
-
-      <div className="absolute -left-13 top-10.5 pointer-events-none z-20 match-crowd-card">
-        <span className="speech-dot">.</span><span className="speech-dot" style={{ animationDelay: "0.2s" }}>.</span><span className="speech-dot" style={{ animationDelay: "0.4s" }}>.</span>
-      </div>
-      <div className="absolute -right-18 bottom-23 pointer-events-none z-20 match-crowd-card match-crowd-card-pink">
-        GO!
-      </div>
     </>
   );
 }
 
-function MiniChicken() {
+function SpectatorMatchView({
+  players,
+  events,
+}: {
+  players: PublicPlayer[];
+  events: { id: number; ev: ServerEvent }[];
+}) {
   return (
-    <svg viewBox="0 0 16 16" width="34" height="34" shapeRendering="crispEdges" style={{ imageRendering: "pixelated" }}>
-      <rect x="5" y="5" width="7" height="6" fill="#f4e4c1" />
-      <rect x="4" y="6" width="1" height="4" fill="#f4e4c1" />
-      <rect x="12" y="7" width="2" height="2" fill="#f4e4c1" />
-      <rect x="8" y="3" width="2" height="2" fill="#d94e6a" />
-      <rect x="12" y="6" width="1" height="1" fill="#1a0f1f" />
-      <rect x="14" y="8" width="2" height="1" fill="#e8a23a" />
-      <rect x="6" y="11" width="1" height="2" fill="#e8a23a" />
-      <rect x="10" y="11" width="1" height="2" fill="#e8a23a" />
-    </svg>
+    <div className="relative z-10 flex flex-col items-center gap-3">
+      <div className="pixel-panel flex items-center gap-4 px-4 py-3">
+        <span className="font-pixel text-[10px] text-[var(--gold)]">REFEREE VIEW</span>
+        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+          {players.length}/2 PLAYERS
+        </span>
+      </div>
+      <div className="flex flex-col xl:flex-row items-center gap-4">
+        {players.map((player, i) => (
+          <div key={player.id} className="flex flex-col items-center gap-2">
+            <OpponentStatusCard player={player} label={`PLAYER ${i + 1}`} />
+            <SelfField
+              player={player}
+              events={events.filter((e) => e.ev.playerId === player.id)}
+              actionFlash={0}
+            />
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
-function MiniDog() {
-  return (
-    <svg viewBox="0 0 18 14" width="44" height="34" shapeRendering="crispEdges" style={{ imageRendering: "pixelated" }}>
-      <rect x="4" y="5" width="9" height="5" fill="#8b5a2b" />
-      <rect x="12" y="4" width="4" height="4" fill="#a36d36" />
-      <rect x="13" y="3" width="2" height="2" fill="#6b3a1c" />
-      <rect x="15" y="5" width="2" height="1" fill="#1a0f1f" />
-      <rect x="2" y="4" width="2" height="1" fill="#8b5a2b" />
-      <rect x="5" y="10" width="2" height="3" fill="#5a2f17" />
-      <rect x="10" y="10" width="2" height="3" fill="#5a2f17" />
-    </svg>
-  );
-}
-
-function OpponentStatusCard({ player }: { player: PublicPlayer }) {
+function OpponentStatusCard({
+  player,
+  label = "OPPONENT",
+}: {
+  player: PublicPlayer;
+  label?: string;
+}) {
   return (
     <div className="pixel-panel flex items-center gap-4 px-4 py-3 opacity-90">
       <div style={{ width: 34, height: 34, overflow: "hidden" }}>
@@ -692,7 +1169,7 @@ function OpponentStatusCard({ player }: { player: PublicPlayer }) {
         </div>
       </div>
       <div className="flex flex-col gap-1">
-        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">OPPONENT</div>
+        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</div>
         <div className="font-pixel text-[12px]">{player.name}</div>
       </div>
       <div className="mx-1 h-8 w-1" style={{ background: "#1a0f1f" }} />
@@ -844,18 +1321,26 @@ function EndOverlay({
   players,
   onRematch,
   self,
+  spectator = false,
 }: {
   winnerId?: string;
-  reason?: "race" | "timeout" | "forfeit";
+  reason?: "race" | "timeout" | "forfeit" | "kick";
   selfId: string | null;
   players: PublicPlayer[];
   onRematch: () => void;
   self?: PublicPlayer;
+  spectator?: boolean;
 }) {
   const won = winnerId && winnerId === selfId;
   const tied = !winnerId;
   const reasonText =
-    reason === "race" ? "FIRST TO 500" : reason === "timeout" ? "TIME UP" : "DISCONNECTED";
+    reason === "race"
+      ? "FIRST TO 500"
+      : reason === "timeout"
+        ? "TIME UP"
+        : reason === "kick"
+          ? "KICKED"
+          : "DISCONNECTED";
   const sortedPlayers = [...players].sort((a, b) => b.coins - a.coins);
   return (
     <div
@@ -870,7 +1355,15 @@ function EndOverlay({
             textShadow: "3px 3px 0 #1a0f1f",
           }}
         >
-          {tied ? "DRAW" : won ? "YOU WIN!" : "YOU LOSE"}
+          {spectator
+            ? tied
+              ? "DRAW"
+              : "MATCH END"
+            : tied
+              ? "DRAW"
+              : won
+                ? "YOU WIN!"
+                : "YOU LOSE"}
         </div>
         <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">{reasonText}</div>
         <div className="flex flex-col gap-2 w-full">
@@ -890,16 +1383,18 @@ function EndOverlay({
             </div>
           ))}
         </div>
-        <button
-          onClick={onRematch}
-          className="pixel-btn"
-          data-accent={!self?.ready ? "true" : undefined}
-          disabled={self?.ready}
-        >
-          <span className="font-pixel text-[12px]">
-            {self?.ready ? "READY — WAITING" : "REMATCH"}
-          </span>
-        </button>
+        {!spectator && (
+          <button
+            onClick={onRematch}
+            className="pixel-btn"
+            data-accent={!self?.ready ? "true" : undefined}
+            disabled={self?.ready}
+          >
+            <span className="font-pixel text-[12px]">
+              {self?.ready ? "READY — WAITING" : "REMATCH"}
+            </span>
+          </button>
+        )}
         <a
           href="/lobby"
           className="font-pixel text-[9px] text-[var(--muted-foreground)] opacity-70 hover:opacity-100"

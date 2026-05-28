@@ -12,18 +12,23 @@ import {
 import {
   clientMsg,
   COUNTDOWN_MS,
-  MATCH_DURATION_MS,
-  TARGET_COINS,
+  DEFAULT_ROOM_SETTINGS,
+  roomSettingsSchema,
+  cosmeticsSchema,
   type PublicMatchState,
+  type MatchRole,
   type PublicPlayer,
+  type RoomSettings,
   type ServerEvent,
   type ServerMsg,
 } from "../../../src/lib/match-protocol";
+import { DEFAULT_COSMETICS, type PlayerCosmetics } from "../../../src/lib/player-cosmetics";
 
 interface PlayerState {
   id: string;
   sessionId: string;
   name: string;
+  cosmetics: PlayerCosmetics;
   coins: number;
   pos: { x: number; y: number };
   dir: Direction;
@@ -43,7 +48,10 @@ interface StoredRoomState {
   startedAt?: number;
   endsAt?: number;
   winnerId?: string;
-  endedReason?: "race" | "timeout" | "forfeit";
+  endedReason?: "race" | "timeout" | "forfeit" | "kick";
+  hostId?: string;
+  hostSessionId?: string;
+  settings?: RoomSettings;
   players: Omit<PlayerState, "connected" | "lastMoveAt" | "lastActionAt">[];
 }
 
@@ -51,6 +59,15 @@ const MOVE_COOLDOWN_MS = 60;
 const ACTION_COOLDOWN_MS = 80;
 const SNAPSHOT_INTERVAL_MS = 100;
 const GROWTH_INTERVAL_MS = 500;
+const MAX_SPECTATORS = 5;
+
+interface SocketAttachment {
+  playerId?: string;
+  sessionId?: string;
+  role?: MatchRole;
+  name?: string;
+  cosmetics?: PlayerCosmetics;
+}
 
 export class MatchRoom implements DurableObject {
   private code = "";
@@ -59,10 +76,14 @@ export class MatchRoom implements DurableObject {
   private startedAt?: number;
   private endsAt?: number;
   private winnerId?: string;
-  private endedReason?: "race" | "timeout" | "forfeit";
+  private endedReason?: "race" | "timeout" | "forfeit" | "kick";
+  private hostId?: string;
+  private hostSessionId?: string;
+  private settings: RoomSettings = DEFAULT_ROOM_SETTINGS;
   private players = new Map<string, PlayerState>();
   private initialized?: Promise<void>;
   private wsToPlayer = new WeakMap<WebSocket, string>();
+  private wsToRole = new WeakMap<WebSocket, MatchRole>();
   private pendingEvents: ServerEvent[] = [];
   private snapshotTimer?: ReturnType<typeof setInterval>;
   private growthTimer?: ReturnType<typeof setInterval>;
@@ -72,8 +93,9 @@ export class MatchRoom implements DurableObject {
     _env: unknown,
   ) {
     for (const ws of this.ctx.getWebSockets()) {
-      const att = ws.deserializeAttachment() as { playerId?: string; sessionId?: string } | null;
+      const att = ws.deserializeAttachment() as SocketAttachment | null;
       if (att?.playerId) this.wsToPlayer.set(ws, att.playerId);
+      this.wsToRole.set(ws, att?.role ?? "player");
     }
   }
 
@@ -107,16 +129,52 @@ export class MatchRoom implements DurableObject {
     const msg = parsed.data;
 
     if (msg.t === "join") {
-      this.handleJoin(ws, msg.code, msg.name, msg.sessionId);
+      this.handleJoin(ws, msg.code, msg.name, msg.sessionId, msg.role ?? "player", msg.cosmetics);
       return;
     }
 
+    if (msg.t === "claim_slot") {
+      this.claimPlayerSlot(ws);
+      return;
+    }
+
+    if (msg.t === "leave_slot") {
+      this.leavePlayerSlot(ws);
+      return;
+    }
+
+    if (msg.t === "settings") {
+      this.updateSettings(ws, msg.settings);
+      return;
+    }
+
+    if (this.wsToRole.get(ws) !== "player") return;
     const playerId = this.wsToPlayer.get(ws);
     if (!playerId) return;
     const player = this.players.get(playerId);
     if (!player) return;
 
     const now = Date.now();
+
+    if (msg.t === "cosmetics") {
+      player.cosmetics = cosmeticsSchema.parse(msg.cosmetics);
+      this.persist();
+      this.broadcastSnapshot();
+      return;
+    }
+
+    if (msg.t === "kick") {
+      if (!this.canEditRoom(ws)) {
+        this.sendTo(ws, {
+          t: "error",
+          code: "host_only",
+          message: "HOST เท่านั้นที่เตะผู้เล่นได้",
+        });
+        return;
+      }
+      this.kickPlayer(ws, playerId, msg.playerId);
+      return;
+    }
 
     if (msg.t === "ready") {
       if (this.status !== "lobby") return;
@@ -131,7 +189,7 @@ export class MatchRoom implements DurableObject {
       if (this.status !== "ended") return;
       player.ready = true;
       const allReady = [...this.players.values()].every((p) => p.ready);
-      if (this.players.size === 2 && allReady) this.resetForRematch();
+      if (this.players.size === this.settings.maxPlayers && allReady) this.resetForRematch();
       this.persist();
       this.broadcastSnapshot();
       return;
@@ -174,7 +232,7 @@ export class MatchRoom implements DurableObject {
       for (const ev of result.events) {
         this.pendingEvents.push({ ...ev, playerId });
       }
-      if (player.coins >= TARGET_COINS) this.endMatch(playerId, "race");
+      if (player.coins >= this.settings.targetCoins) this.endMatch(playerId, "race");
       else {
         this.persist();
         this.broadcastSnapshot();
@@ -189,11 +247,17 @@ export class MatchRoom implements DurableObject {
 
   async webSocketClose(ws: WebSocket): Promise<void> {
     await this.ensureInitialized();
+    if (this.wsToRole.get(ws) === "spectator") {
+      this.wsToRole.delete(ws);
+      this.wsToPlayer.delete(ws);
+      return;
+    }
     const pid = this.wsToPlayer.get(ws);
     if (!pid) return;
     const p = this.players.get(pid);
     if (p) p.connected = false;
     this.wsToPlayer.delete(ws);
+    this.wsToRole.delete(ws);
     if (this.status === "playing" && [...this.players.values()].every((q) => !q.connected)) {
       this.endMatch(undefined, "forfeit");
       return;
@@ -241,6 +305,9 @@ export class MatchRoom implements DurableObject {
     this.endsAt = stored.endsAt;
     this.winnerId = stored.winnerId;
     this.endedReason = stored.endedReason;
+    this.hostId = stored.hostId;
+    this.hostSessionId = stored.hostSessionId;
+    this.settings = roomSettingsSchema.catch(DEFAULT_ROOM_SETTINGS).parse(stored.settings);
     this.players = new Map(
       stored.players.map((p) => [
         p.id,
@@ -253,8 +320,9 @@ export class MatchRoom implements DurableObject {
       ]),
     );
     for (const ws of this.ctx.getWebSockets()) {
-      const att = ws.deserializeAttachment() as { playerId?: string; sessionId?: string } | null;
-      if (att?.playerId) {
+      const att = ws.deserializeAttachment() as SocketAttachment | null;
+      this.wsToRole.set(ws, att?.role ?? "player");
+      if (att?.playerId && (att.role ?? "player") === "player") {
         this.wsToPlayer.set(ws, att.playerId);
         const player = this.players.get(att.playerId);
         if (player) player.connected = true;
@@ -277,6 +345,9 @@ export class MatchRoom implements DurableObject {
         endsAt: this.endsAt,
         winnerId: this.winnerId,
         endedReason: this.endedReason,
+        hostId: this.hostId,
+        hostSessionId: this.hostSessionId,
+        settings: this.settings,
         players,
       } satisfies StoredRoomState),
     );
@@ -297,14 +368,235 @@ export class MatchRoom implements DurableObject {
     for (const [id, player] of this.players) {
       if (!player.connected) this.players.delete(id);
     }
+    this.ensureHost();
   }
 
-  private handleJoin(ws: WebSocket, code: string, name: string, sessionId?: string): void {
+  private ensureHost(): void {
+    if (this.hostId && this.players.has(this.hostId)) return;
+    const hostPlayer = [...this.players.values()].find((p) => p.sessionId === this.hostSessionId);
+    this.hostId = hostPlayer?.id;
+  }
+
+  private canEditRoom(ws: WebSocket): boolean {
+    const att = ws.deserializeAttachment() as SocketAttachment | null;
+    return (
+      Boolean(this.hostSessionId && att?.sessionId === this.hostSessionId) &&
+      (this.status === "lobby" || this.status === "ended")
+    );
+  }
+
+  private kickPlayer(ws: WebSocket, hostId: string, targetId: string): void {
+    if (targetId === hostId) {
+      this.sendTo(ws, { t: "error", code: "invalid_kick", message: "เตะตัวเองไม่ได้" });
+      return;
+    }
+    const target = this.players.get(targetId);
+    if (!target) {
+      this.sendTo(ws, { t: "error", code: "missing_player", message: "ไม่พบผู้เล่นนี้" });
+      return;
+    }
+    this.players.delete(targetId);
+    for (const socket of this.ctx.getWebSockets()) {
+      if (this.wsToPlayer.get(socket) !== targetId) continue;
+      this.sendTo(socket, { t: "error", code: "kicked", message: "คุณถูกเตะออกจากห้อง" });
+      this.wsToPlayer.delete(socket);
+      this.wsToRole.delete(socket);
+      try {
+        socket.close(1000, "kicked");
+      } catch {
+        /* noop */
+      }
+    }
+    this.ensureHost();
+    for (const player of this.players.values()) player.ready = false;
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private spectatorCount(): number {
+    return this.ctx.getWebSockets().filter((socket) => this.wsToRole.get(socket) === "spectator")
+      .length;
+  }
+
+  private updateSettings(ws: WebSocket, rawSettings: RoomSettings): void {
+    if (!this.canEditRoom(ws)) {
+      this.sendTo(ws, {
+        t: "error",
+        code: "host_only",
+        message: "HOST เท่านั้นที่ตั้งค่าห้องได้",
+      });
+      return;
+    }
+    const settings = roomSettingsSchema.safeParse(rawSettings);
+    if (!settings.success) {
+      this.sendTo(ws, { t: "error", code: "invalid_settings", message: "ตั้งค่าห้องไม่ถูกต้อง" });
+      return;
+    }
+    this.settings = settings.data;
+    for (const p of this.players.values()) p.ready = false;
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private claimPlayerSlot(ws: WebSocket): void {
+    if (this.wsToRole.get(ws) === "player") {
+      this.sendTo(ws, { t: "error", code: "already_player", message: "คุณอยู่ในช่องผู้เล่นแล้ว" });
+      return;
+    }
+    if (this.status === "countdown" || this.status === "playing") {
+      this.sendTo(ws, {
+        t: "error",
+        code: "match_active",
+        message: "การแข่งขันเริ่มแล้ว รอรอบถัดไป",
+      });
+      return;
+    }
+    if (this.players.size >= this.settings.maxPlayers) {
+      this.sendTo(ws, { t: "error", code: "room_full", message: "ช่องผู้เล่นเต็มแล้ว" });
+      return;
+    }
+
+    const att = ws.deserializeAttachment() as SocketAttachment | null;
+    const playerId = crypto.randomUUID();
+    const sessionId = att?.sessionId ?? crypto.randomUUID();
+    const startX = this.players.size === 0 ? 3 : 8;
+    const cosmetics = cosmeticsSchema.parse(att?.cosmetics ?? DEFAULT_COSMETICS);
+    if (!this.hostSessionId) this.hostSessionId = sessionId;
+    if (this.hostSessionId === sessionId) this.hostId = playerId;
+    this.players.set(playerId, {
+      id: playerId,
+      sessionId,
+      name: att?.name ?? "Player",
+      cosmetics,
+      coins: 50,
+      pos: { x: startX, y: 4 },
+      dir: "down",
+      tool: "hoe",
+      seedChoice: "chili",
+      tiles: makeEmptyField(),
+      ready: false,
+      connected: true,
+      lastMoveAt: 0,
+      lastActionAt: 0,
+    });
+    ws.serializeAttachment({
+      playerId,
+      sessionId,
+      role: "player",
+      name: att?.name,
+      cosmetics,
+    } satisfies SocketAttachment);
+    this.wsToPlayer.set(ws, playerId);
+    this.wsToRole.set(ws, "player");
+    this.sendTo(ws, {
+      t: "welcome",
+      playerId,
+      sessionId,
+      role: "player",
+      host: this.hostSessionId === sessionId,
+      state: this.publicState(),
+    });
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private leavePlayerSlot(ws: WebSocket): void {
+    if (this.status === "countdown" || this.status === "playing") {
+      this.sendTo(ws, {
+        t: "error",
+        code: "match_active",
+        message: "การแข่งขันเริ่มแล้ว ออกจาก slot ไม่ได้",
+      });
+      return;
+    }
+    if (this.wsToRole.get(ws) !== "player") return;
+    const playerId = this.wsToPlayer.get(ws);
+    if (!playerId) return;
+    const player = this.players.get(playerId);
+    const spectatorId = crypto.randomUUID();
+    const spectatorSessionId = player?.sessionId ?? crypto.randomUUID();
+    const name = player?.name ?? "Player";
+    const cosmetics = cosmeticsSchema.parse(player?.cosmetics ?? DEFAULT_COSMETICS);
+    this.players.delete(playerId);
+    this.wsToPlayer.set(ws, spectatorId);
+    this.wsToRole.set(ws, "spectator");
+    ws.serializeAttachment({
+      playerId: spectatorId,
+      sessionId: spectatorSessionId,
+      role: "spectator",
+      name,
+      cosmetics,
+    } satisfies SocketAttachment);
+    this.ensureHost();
+    for (const p of this.players.values()) p.ready = false;
+    this.sendTo(ws, {
+      t: "welcome",
+      playerId: spectatorId,
+      sessionId: spectatorSessionId,
+      role: "spectator",
+      host: this.hostSessionId === spectatorSessionId,
+      state: this.publicState(),
+    });
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private handleJoin(
+    ws: WebSocket,
+    code: string,
+    name: string,
+    sessionId?: string,
+    role: MatchRole = "player",
+    cosmetics: PlayerCosmetics = DEFAULT_COSMETICS,
+  ): void {
     this.code = code;
     this.dropDisconnectedWaitingPlayers();
 
+    if (role === "spectator") {
+      if (this.spectatorCount() >= MAX_SPECTATORS) {
+        this.sendTo(ws, {
+          t: "error",
+          code: "spectator_full",
+          message: "Spectator slots are full",
+        });
+        try {
+          ws.close(1000, "spectator_full");
+        } catch {
+          /* noop */
+        }
+        return;
+      }
+      const spectatorId = crypto.randomUUID();
+      const spectatorSessionId = sessionId ?? crypto.randomUUID();
+      if (!this.hostSessionId) this.hostSessionId = spectatorSessionId;
+      const spectatorCosmetics = cosmeticsSchema.parse(cosmetics);
+      ws.serializeAttachment({
+        playerId: spectatorId,
+        sessionId: spectatorSessionId,
+        role,
+        name,
+        cosmetics: spectatorCosmetics,
+      } satisfies SocketAttachment);
+      this.wsToPlayer.set(ws, spectatorId);
+      this.wsToRole.set(ws, role);
+      this.sendTo(ws, {
+        t: "welcome",
+        playerId: spectatorId,
+        sessionId: spectatorSessionId,
+        role,
+        host: this.hostSessionId === spectatorSessionId,
+        state: this.publicState(),
+      });
+      this.broadcastSnapshot();
+      return;
+    }
+
     let playerId: string | undefined;
-    const att = ws.deserializeAttachment() as { playerId?: string; sessionId?: string } | null;
+    const att = ws.deserializeAttachment() as {
+      playerId?: string;
+      sessionId?: string;
+      role?: MatchRole;
+    } | null;
     if (att?.playerId && this.players.has(att.playerId)) {
       playerId = att.playerId;
     } else if (sessionId) {
@@ -315,17 +607,21 @@ export class MatchRoom implements DurableObject {
       const existing = this.players.get(playerId)!;
       existing.connected = true;
       existing.name = name;
+      existing.cosmetics = cosmeticsSchema.parse(cosmetics);
       existing.lastMoveAt = 0;
       existing.lastActionAt = 0;
       sessionId = existing.sessionId;
-    } else if (this.players.size < 2) {
+    } else if (this.players.size < this.settings.maxPlayers) {
       playerId = crypto.randomUUID();
       sessionId = crypto.randomUUID();
       const startX = this.players.size === 0 ? 3 : 8;
+      if (!this.hostSessionId) this.hostSessionId = sessionId;
+      if (this.hostSessionId === sessionId) this.hostId = playerId;
       this.players.set(playerId, {
         id: playerId,
         sessionId,
         name,
+        cosmetics: cosmeticsSchema.parse(cosmetics),
         coins: 50,
         pos: { x: startX, y: 4 },
         dir: "down",
@@ -347,16 +643,24 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
-    ws.serializeAttachment({ playerId, sessionId });
+    ws.serializeAttachment({ playerId, sessionId, role });
     this.wsToPlayer.set(ws, playerId);
-    this.sendTo(ws, { t: "welcome", playerId, sessionId, state: this.publicState() });
+    this.wsToRole.set(ws, role);
+    this.sendTo(ws, {
+      t: "welcome",
+      playerId,
+      sessionId,
+      role,
+      host: this.hostSessionId === sessionId,
+      state: this.publicState(),
+    });
     this.persist();
     this.broadcastSnapshot();
   }
 
   private maybeStartCountdown(): void {
     if (this.status !== "lobby") return;
-    if (this.players.size !== 2) return;
+    if (this.players.size !== this.settings.maxPlayers) return;
     if (![...this.players.values()].every((p) => p.ready)) return;
     this.status = "countdown";
     this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
@@ -369,7 +673,7 @@ export class MatchRoom implements DurableObject {
     const now = Date.now();
     this.status = "playing";
     this.startedAt = now;
-    this.endsAt = now + MATCH_DURATION_MS;
+    this.endsAt = now + this.settings.durationMs;
     this.countdownEndsAt = undefined;
     for (const p of this.players.values()) {
       p.coins = 50;
@@ -422,7 +726,10 @@ export class MatchRoom implements DurableObject {
     this.endMatch(winners.length === 1 ? winners[0].id : undefined, "timeout");
   }
 
-  private endMatch(winnerId: string | undefined, reason: "race" | "timeout" | "forfeit"): void {
+  private endMatch(
+    winnerId: string | undefined,
+    reason: "race" | "timeout" | "forfeit" | "kick",
+  ): void {
     if (this.status === "ended") return;
     this.status = "ended";
     this.winnerId = winnerId;
@@ -468,10 +775,13 @@ export class MatchRoom implements DurableObject {
       tiles: p.tiles,
       ready: p.ready,
       connected: p.connected,
+      cosmetics: cosmeticsSchema.parse(p.cosmetics ?? DEFAULT_COSMETICS),
     }));
     return {
       code: this.code,
       status: this.status,
+      hostId: this.hostId,
+      settings: this.settings,
       countdownEndsAt: this.countdownEndsAt,
       startedAt: this.startedAt,
       endsAt: this.endsAt,

@@ -1,3 +1,5 @@
+import { DEFAULT_COSMETICS, type PlayerCosmetics } from "@/lib/player-cosmetics";
+
 type Direction = "up" | "down" | "left" | "right";
 
 interface Props {
@@ -6,6 +8,16 @@ interface Props {
   walkFrame: number;
   acting: boolean;
   tool: "hoe" | "watering_can" | "seed";
+  cosmetics?: PlayerCosmetics;
+}
+
+function shade(hex: string, amount: number) {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const clamp = (v: number) => Math.max(0, Math.min(255, v));
+  const r = clamp(((n >> 16) & 255) + amount);
+  const g = clamp(((n >> 8) & 255) + amount);
+  const b = clamp((n & 255) + amount);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
 }
 
 // Pixel palette
@@ -29,92 +41,108 @@ const C = {
 };
 
 /** Each cell is a single pixel; the SVG is rendered at TILE size with crisp-edges. */
-function FrontSprite({ swing }: { swing: number }) {
+function FrontSprite({ swing, palette }: { swing: number; palette: typeof C }) {
   // 16x16 grid expressed as JSX rects
   // We'll draw a small farmer with the hat (ngob)
   return (
     <>
       {/* Hat brim wide */}
-      <rect x="2" y="3" width="12" height="1" fill={C.hat} />
-      <rect x="3" y="2" width="10" height="1" fill={C.hat} />
-      <rect x="2" y="4" width="12" height="1" fill={C.hatDark} />
+      <rect x="2" y="3" width="12" height="1" fill={palette.hat} />
+      <rect x="3" y="2" width="10" height="1" fill={palette.hat} />
+      <rect x="2" y="4" width="12" height="1" fill={palette.hatDark} />
       {/* Hat cone */}
-      <rect x="5" y="1" width="6" height="1" fill={C.hat} />
-      <rect x="6" y="0" width="4" height="1" fill={C.hatDark} />
+      <rect x="5" y="1" width="6" height="1" fill={palette.hat} />
+      <rect x="6" y="0" width="4" height="1" fill={palette.hatDark} />
       {/* Face */}
-      <rect x="5" y="5" width="6" height="3" fill={C.skin} />
-      <rect x="5" y="8" width="6" height="1" fill={C.skinDark} />
+      <rect x="5" y="5" width="6" height="3" fill={palette.skin} />
+      <rect x="5" y="8" width="6" height="1" fill={palette.skinDark} />
       {/* Eyes */}
-      <rect x="6" y="6" width="1" height="1" fill={C.outline} />
-      <rect x="9" y="6" width="1" height="1" fill={C.outline} />
+      <rect x="6" y="6" width="1" height="1" fill={palette.outline} />
+      <rect x="9" y="6" width="1" height="1" fill={palette.outline} />
       {/* Shirt */}
-      <rect x="4" y="9" width="8" height="3" fill={C.shirt} />
-      <rect x="4" y="11" width="8" height="1" fill={C.shirtDark} />
+      <rect x="4" y="9" width="8" height="3" fill={palette.shirt} />
+      <rect x="4" y="11" width="8" height="1" fill={palette.shirtDark} />
       {/* Arms */}
-      <rect x="3" y="9" width="1" height="3" fill={C.skin} />
-      <rect x="12" y="9" width="1" height="3" fill={C.skin} />
+      <rect x="3" y="9" width="1" height="3" fill={palette.skin} />
+      <rect x="12" y="9" width="1" height="3" fill={palette.skin} />
       {/* Pants */}
-      <rect x="5" y="12" width="6" height="2" fill={C.pants} />
-      <rect x="5" y="13" width="6" height="1" fill={C.pantsDark} />
+      <rect x="5" y="12" width="6" height="2" fill={palette.pants} />
+      <rect x="5" y="13" width="6" height="1" fill={palette.pantsDark} />
       {/* Legs animation */}
-      <rect x={swing === 0 ? 5 : 4} y="14" width="2" height="2" fill={C.shoe} />
-      <rect x={swing === 0 ? 9 : 10} y="14" width="2" height="2" fill={C.shoe} />
+      <rect x={swing === 0 ? 5 : 4} y="14" width="2" height="2" fill={palette.shoe} />
+      <rect x={swing === 0 ? 9 : 10} y="14" width="2" height="2" fill={palette.shoe} />
     </>
   );
 }
 
-function BackSprite({ swing }: { swing: number }) {
+function BackSprite({ swing, palette }: { swing: number; palette: typeof C }) {
   return (
     <>
-      <rect x="2" y="3" width="12" height="1" fill={C.hat} />
-      <rect x="3" y="2" width="10" height="1" fill={C.hat} />
-      <rect x="2" y="4" width="12" height="1" fill={C.hatDark} />
-      <rect x="5" y="1" width="6" height="1" fill={C.hat} />
-      <rect x="6" y="0" width="4" height="1" fill={C.hatDark} />
+      <rect x="2" y="3" width="12" height="1" fill={palette.hat} />
+      <rect x="3" y="2" width="10" height="1" fill={palette.hat} />
+      <rect x="2" y="4" width="12" height="1" fill={palette.hatDark} />
+      <rect x="5" y="1" width="6" height="1" fill={palette.hat} />
+      <rect x="6" y="0" width="4" height="1" fill={palette.hatDark} />
       {/* Back of head */}
-      <rect x="5" y="5" width="6" height="3" fill={C.hair} />
-      <rect x="5" y="8" width="6" height="1" fill={C.skinDark} />
+      <rect x="5" y="5" width="6" height="3" fill={palette.hair} />
+      <rect x="5" y="8" width="6" height="1" fill={palette.skinDark} />
       {/* Shirt back */}
-      <rect x="4" y="9" width="8" height="3" fill={C.shirtDark} />
-      <rect x="3" y="9" width="1" height="3" fill={C.skin} />
-      <rect x="12" y="9" width="1" height="3" fill={C.skin} />
-      <rect x="5" y="12" width="6" height="2" fill={C.pantsDark} />
-      <rect x={swing === 0 ? 5 : 4} y="14" width="2" height="2" fill={C.shoe} />
-      <rect x={swing === 0 ? 9 : 10} y="14" width="2" height="2" fill={C.shoe} />
+      <rect x="4" y="9" width="8" height="3" fill={palette.shirtDark} />
+      <rect x="3" y="9" width="1" height="3" fill={palette.skin} />
+      <rect x="12" y="9" width="1" height="3" fill={palette.skin} />
+      <rect x="5" y="12" width="6" height="2" fill={palette.pantsDark} />
+      <rect x={swing === 0 ? 5 : 4} y="14" width="2" height="2" fill={palette.shoe} />
+      <rect x={swing === 0 ? 9 : 10} y="14" width="2" height="2" fill={palette.shoe} />
     </>
   );
 }
 
-function SideSprite({ swing }: { swing: number }) {
+function SideSprite({ swing, palette }: { swing: number; palette: typeof C }) {
   return (
     <>
-      <rect x="2" y="3" width="12" height="1" fill={C.hat} />
-      <rect x="3" y="2" width="10" height="1" fill={C.hat} />
-      <rect x="2" y="4" width="12" height="1" fill={C.hatDark} />
-      <rect x="5" y="1" width="6" height="1" fill={C.hat} />
-      <rect x="6" y="0" width="4" height="1" fill={C.hatDark} />
+      <rect x="2" y="3" width="12" height="1" fill={palette.hat} />
+      <rect x="3" y="2" width="10" height="1" fill={palette.hat} />
+      <rect x="2" y="4" width="12" height="1" fill={palette.hatDark} />
+      <rect x="5" y="1" width="6" height="1" fill={palette.hat} />
+      <rect x="6" y="0" width="4" height="1" fill={palette.hatDark} />
       {/* Profile face */}
-      <rect x="5" y="5" width="6" height="3" fill={C.skin} />
-      <rect x="10" y="6" width="1" height="1" fill={C.outline} />
-      <rect x="5" y="8" width="6" height="1" fill={C.skinDark} />
+      <rect x="5" y="5" width="6" height="3" fill={palette.skin} />
+      <rect x="10" y="6" width="1" height="1" fill={palette.outline} />
+      <rect x="5" y="8" width="6" height="1" fill={palette.skinDark} />
       {/* Shirt */}
-      <rect x="5" y="9" width="6" height="3" fill={C.shirt} />
-      <rect x="5" y="11" width="6" height="1" fill={C.shirtDark} />
+      <rect x="5" y="9" width="6" height="3" fill={palette.shirt} />
+      <rect x="5" y="11" width="6" height="1" fill={palette.shirtDark} />
       {/* Arm in front */}
-      <rect x="10" y="9" width="2" height="3" fill={C.shirt} />
+      <rect x="10" y="9" width="2" height="3" fill={palette.shirt} />
       {/* Pants */}
-      <rect x="6" y="12" width="4" height="2" fill={C.pants} />
+      <rect x="6" y="12" width="4" height="2" fill={palette.pants} />
       {/* Legs walking */}
-      <rect x={swing === 0 ? 6 : 5} y="14" width="2" height="2" fill={C.shoe} />
-      <rect x={swing === 0 ? 8 : 9} y="14" width="2" height="2" fill={C.shoe} />
+      <rect x={swing === 0 ? 6 : 5} y="14" width="2" height="2" fill={palette.shoe} />
+      <rect x={swing === 0 ? 8 : 9} y="14" width="2" height="2" fill={palette.shoe} />
     </>
   );
 }
 
-export default function PixelFarmer({ direction, walking, walkFrame, acting, tool }: Props) {
+export default function PixelFarmer({
+  direction,
+  walking,
+  walkFrame,
+  acting,
+  tool,
+  cosmetics = DEFAULT_COSMETICS,
+}: Props) {
   const swing = walking ? walkFrame % 2 : 0;
   const flip = direction === "left";
   const isVertical = direction === "up" || direction === "down";
+  const palette = {
+    ...C,
+    hat: cosmetics.hat,
+    hatDark: shade(cosmetics.hat, -70),
+    shirt: cosmetics.shirt,
+    shirtDark: shade(cosmetics.shirt, -70),
+    pants: cosmetics.pants,
+    pantsDark: shade(cosmetics.pants, -70),
+  };
 
   // Tool overlay placement & rotation based on direction + acting state
   const toolOverlay = () => {
@@ -123,39 +151,39 @@ export default function PixelFarmer({ direction, walking, walkFrame, acting, too
       // Pixel hoe: handle (brown) + head (metal)
       return (
         <g className="tool-swing-side" style={{ transformOrigin: "11px 9px" }}>
-          <rect x="11" y="3" width="1" height="7" fill={C.tool} />
-          <rect x="12" y="2" width="1" height="6" fill={C.tool} />
-          <rect x="10" y="9" width="3" height="2" fill={C.toolMetal} />
-          <rect x="10" y="11" width="3" height="1" fill={C.toolMetalDark} />
+          <rect x="11" y="3" width="1" height="7" fill={palette.tool} />
+          <rect x="12" y="2" width="1" height="6" fill={palette.tool} />
+          <rect x="10" y="9" width="3" height="2" fill={palette.toolMetal} />
+          <rect x="10" y="11" width="3" height="1" fill={palette.toolMetalDark} />
         </g>
       );
     }
     if (tool === "watering_can") {
       return (
         <g style={{ transformOrigin: "12px 10px" }} className="tool-tilt">
-          <rect x="11" y="8" width="3" height="3" fill={C.toolMetal} />
-          <rect x="11" y="10" width="3" height="1" fill={C.toolMetalDark} />
-          <rect x="14" y="9" width="1" height="1" fill={C.toolMetal} />
+          <rect x="11" y="8" width="3" height="3" fill={palette.toolMetal} />
+          <rect x="11" y="10" width="3" height="1" fill={palette.toolMetalDark} />
+          <rect x="14" y="9" width="1" height="1" fill={palette.toolMetal} />
           {/* water drops */}
-          <rect x="15" y="11" width="1" height="1" fill={C.water} className="drop-a" />
-          <rect x="14" y="13" width="1" height="1" fill={C.water} className="drop-b" />
+          <rect x="15" y="11" width="1" height="1" fill={palette.water} className="drop-a" />
+          <rect x="14" y="13" width="1" height="1" fill={palette.water} className="drop-b" />
         </g>
       );
     }
     // seed
     return (
       <g className="seed-toss">
-        <rect x="13" y="6" width="1" height="1" fill={C.seed} />
-        <rect x="14" y="8" width="1" height="1" fill={C.seed} />
-        <rect x="13" y="10" width="1" height="1" fill={C.seed} />
+        <rect x="13" y="6" width="1" height="1" fill={palette.seed} />
+        <rect x="14" y="8" width="1" height="1" fill={palette.seed} />
+        <rect x="13" y="10" width="1" height="1" fill={palette.seed} />
       </g>
     );
   };
 
   let body;
-  if (direction === "down") body = <FrontSprite swing={swing} />;
-  else if (direction === "up") body = <BackSprite swing={swing} />;
-  else body = <SideSprite swing={swing} />;
+  if (direction === "down") body = <FrontSprite swing={swing} palette={palette} />;
+  else if (direction === "up") body = <BackSprite swing={swing} palette={palette} />;
+  else body = <SideSprite swing={swing} palette={palette} />;
 
   return (
     <svg
@@ -177,21 +205,21 @@ export default function PixelFarmer({ direction, walking, walkFrame, acting, too
         <g style={{ transformOrigin: "8px 9px" }} className="tool-vertical">
           {tool === "hoe" && (
             <>
-              <rect x="7" y="2" width="2" height="7" fill={C.tool} />
-              <rect x="6" y="9" width="4" height="2" fill={C.toolMetal} />
+              <rect x="7" y="2" width="2" height="7" fill={palette.tool} />
+              <rect x="6" y="9" width="4" height="2" fill={palette.toolMetal} />
             </>
           )}
           {tool === "watering_can" && (
             <>
-              <rect x="6" y="7" width="4" height="3" fill={C.toolMetal} />
-              <rect x="7" y="11" width="1" height="1" fill={C.water} className="drop-a" />
-              <rect x="9" y="12" width="1" height="1" fill={C.water} className="drop-b" />
+              <rect x="6" y="7" width="4" height="3" fill={palette.toolMetal} />
+              <rect x="7" y="11" width="1" height="1" fill={palette.water} className="drop-a" />
+              <rect x="9" y="12" width="1" height="1" fill={palette.water} className="drop-b" />
             </>
           )}
           {tool === "seed" && (
             <>
-              <rect x="7" y="10" width="1" height="1" fill={C.seed} />
-              <rect x="9" y="11" width="1" height="1" fill={C.seed} />
+              <rect x="7" y="10" width="1" height="1" fill={palette.seed} />
+              <rect x="9" y="11" width="1" height="1" fill={palette.seed} />
             </>
           )}
         </g>

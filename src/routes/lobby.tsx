@@ -22,19 +22,15 @@ function LobbyPage() {
     if (typeof window !== "undefined") localStorage.setItem("tg.name", n);
   };
 
-  const create = () => {
-    const trimmed = name.trim();
-    if (!trimmed) return setError("ใส่ชื่อก่อน");
-    const code = makeRoomCode();
-    navigate({ to: "/match/$code", params: { code } });
-  };
-
   const join = () => {
     const trimmed = name.trim();
     if (!trimmed) return setError("ใส่ชื่อก่อน");
-    const code = joinCode.trim().toUpperCase();
+    const code = joinCode.trim().toUpperCase() || makeRoomCode();
     if (!ROOM_CODE_RE.test(code)) return setError("รหัสห้องไม่ถูกต้อง (6 ตัว A-Z 2-9)");
-    navigate({ to: "/match/$code", params: { code } });
+    navigate({
+      to: "/match/$code",
+      params: { code },
+    });
   };
 
   return (
@@ -49,7 +45,7 @@ function LobbyPage() {
           1v1 ESPORT MODE
         </h1>
         <p className="font-pixel text-[9px] text-[var(--muted-foreground)]">
-          แข่งแรกถึง 500 เหรียญ ชนะ — เวลาจำกัด 5 นาที
+          คนสร้างห้องตั้งค่าด่าน เป้าหมาย เวลา และเตะผู้เล่นได้ก่อนเริ่ม
         </p>
       </header>
 
@@ -65,34 +61,21 @@ function LobbyPage() {
           />
         </label>
 
-        <button
-          onClick={create}
-          className="pixel-btn flex items-center justify-center gap-2"
-          data-accent="true"
-        >
-          <span className="font-pixel text-[12px]">CREATE ROOM</span>
-        </button>
-
-        <div className="flex items-center gap-2 my-1">
-          <div className="flex-1 h-[2px] bg-[#1a0f1f]" />
-          <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">OR</span>
-          <div className="flex-1 h-[2px] bg-[#1a0f1f]" />
-        </div>
-
         <div className="flex flex-col gap-2">
           <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">ROOM CODE</span>
-          <div className="flex gap-2">
-            <input
-              value={joinCode}
-              onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 6))}
-              onKeyDown={(e) => e.key === "Enter" && join()}
-              placeholder="ABCD23"
-              className="pixel-chip font-pixel text-[14px] tracking-[4px] px-3 py-2 outline-none flex-1 text-center"
-            />
-            <button onClick={join} className="pixel-btn">
-              <span className="font-pixel text-[12px]">JOIN</span>
-            </button>
-          </div>
+          <input
+            value={joinCode}
+            onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 6))}
+            onKeyDown={(e) => e.key === "Enter" && join()}
+            placeholder="ว่างไว้เพื่อสร้างห้องใหม่"
+            className="pixel-chip font-pixel text-[14px] tracking-[4px] px-3 py-2 outline-none flex-1 text-center"
+          />
+          <button onClick={join} className="pixel-btn" data-accent="true">
+            <span className="font-pixel text-[12px]">JOIN / CREATE ROOM</span>
+          </button>
+          <span className="font-pixel text-[8px] text-[var(--muted-foreground)] text-center">
+            ทุกคนเริ่มเป็นผู้ชมก่อน แล้วค่อยกดลงแข่งในห้อง
+          </span>
         </div>
 
         {error && (

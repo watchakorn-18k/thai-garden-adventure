@@ -1,5 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import type { ClientMsg, PublicMatchState, ServerEvent, ServerMsg } from "./match-protocol";
+import type {
+  ClientMsg,
+  MatchRole,
+  PublicMatchState,
+  ServerEvent,
+  ServerMsg,
+} from "./match-protocol";
+import type { PlayerCosmetics } from "./player-cosmetics";
 
 export type ConnStatus = "connecting" | "open" | "closed";
 
@@ -12,6 +19,8 @@ interface UseMatchOpts {
   code: string;
   name: string;
   enabled?: boolean;
+  role?: MatchRole;
+  cosmetics?: PlayerCosmetics;
   onEvents?: (events: ServerEvent[]) => void;
   onEnd?: (winnerId: string | undefined, reason: string) => void;
 }
@@ -40,9 +49,25 @@ function writeSessionId(code: string, sessionId: string): void {
   sessionStorage.setItem(sessionKey(code), sessionId);
 }
 
-export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMatchOpts) {
+function clearSessionId(code: string): void {
+  if (typeof window === "undefined") return;
+  sessionStorage.removeItem(sessionKey(code));
+}
+
+export function useMatch({
+  code,
+  name,
+  enabled = true,
+  role = "player",
+  cosmetics,
+  onEvents,
+  onEnd,
+}: UseMatchOpts) {
   const [state, setState] = useState<PublicMatchState | null>(null);
   const [selfId, setSelfId] = useState<string | null>(null);
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [isHost, setIsHost] = useState(false);
+  const [matchRole, setMatchRole] = useState<MatchRole>(role);
   const [status, setStatus] = useState<ConnStatus>("closed");
   const [lastError, setLastError] = useState<MatchError | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -50,15 +75,18 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
   const sentJoinRef = useRef(false);
   const onEventsRef = useRef(onEvents);
   const onEndRef = useRef(onEnd);
+  const cosmeticsRef = useRef(cosmetics);
 
   useEffect(() => {
     onEventsRef.current = onEvents;
     onEndRef.current = onEnd;
-  }, [onEvents, onEnd]);
+    cosmeticsRef.current = cosmetics;
+  }, [onEvents, onEnd, cosmetics]);
 
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
+    let blockedReconnect = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
 
     const connect = () => {
@@ -73,7 +101,14 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
         if (cancelled) return;
         attemptRef.current = 0;
         setStatus("open");
-        const msg: ClientMsg = { t: "join", code, name, sessionId: readSessionId(code) };
+        const msg: ClientMsg = {
+          t: "join",
+          code,
+          name,
+          role,
+          cosmetics: cosmeticsRef.current,
+          sessionId: readSessionId(code),
+        };
         ws.send(JSON.stringify(msg));
         sentJoinRef.current = true;
       });
@@ -90,6 +125,9 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
           writeSessionId(code, parsed.sessionId);
           setLastError(null);
           setSelfId(parsed.playerId);
+          setSessionId(parsed.sessionId);
+          setIsHost(parsed.host);
+          setMatchRole(parsed.role);
           setState(parsed.state);
         } else if (parsed.t === "snapshot") {
           setState(parsed.state);
@@ -99,6 +137,15 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
           onEndRef.current?.(parsed.winnerId, parsed.reason);
         } else if (parsed.t === "error") {
           setLastError({ code: parsed.code, message: parsed.message });
+          if (parsed.code === "kicked") {
+            blockedReconnect = true;
+            clearSessionId(code);
+            try {
+              ws.close(1000, "kicked");
+            } catch {
+              /* noop */
+            }
+          }
         }
       });
 
@@ -106,6 +153,7 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
         if (cancelled) return;
         setStatus("closed");
         wsRef.current = null;
+        if (blockedReconnect) return;
         const delay = RECONNECT_DELAYS[Math.min(attemptRef.current, RECONNECT_DELAYS.length - 1)];
         attemptRef.current += 1;
         reconnectTimer = setTimeout(connect, delay);
@@ -134,7 +182,7 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
           /* noop */
         }
     };
-  }, [code, name, enabled]);
+  }, [code, name, enabled, role]);
 
   const send = (msg: ClientMsg) => {
     const ws = wsRef.current;
@@ -146,5 +194,5 @@ export function useMatch({ code, name, enabled = true, onEvents, onEnd }: UseMat
     }
   };
 
-  return { state, selfId, status, lastError, send };
+  return { state, selfId, sessionId, isHost, role: matchRole, status, lastError, send };
 }

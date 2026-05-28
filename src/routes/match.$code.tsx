@@ -10,5 +10,5 @@ export const Route = createFileRoute("/match/$code")({
 
 function MatchPage() {
   const { code } = Route.useParams();
-  return <MultiplayerGame code={code} />;
+  return <MultiplayerGame code={code} role="spectator" />;
 }
