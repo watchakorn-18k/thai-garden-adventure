@@ -270,16 +270,23 @@ export default function FarmGame() {
         {tiles.map((row, y) =>
           row.map((c, x) => {
             const isFacing = facing && facing.x === x && facing.y === y;
+            const isShaking = shakeTile && shakeTile.x === x && shakeTile.y === y;
             const cls =
               c.type === "grass" ? "tile-grass" : c.type === "watered" ? "tile-watered" : "tile-tilled";
             return (
               <div
                 key={`${x}-${y}`}
-                className={`absolute ${cls} border border-black/10`}
+                className={`absolute ${cls} border border-black/10 ${isShaking ? "tile-shake" : ""}`}
                 style={{ left: x * TILE, top: y * TILE, width: TILE, height: TILE }}
               >
                 {isFacing && (
                   <div className="absolute inset-1 rounded-md border-2 border-gold animate-pulse pointer-events-none" />
+                )}
+                {c.type === "watered" && (
+                  <div
+                    className="absolute rounded-full border-2 border-sky-300/70 pointer-events-none ripple"
+                    style={{ left: "30%", top: "35%", width: "40%", height: "30%" }}
+                  />
                 )}
                 {c.crop && (
                   <div
@@ -298,7 +305,7 @@ export default function FarmGame() {
         {popups.map((p) => (
           <div
             key={p.id}
-            className="absolute pointer-events-none text-sm font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)]"
+            className="absolute pointer-events-none text-sm font-bold text-white drop-shadow-[0_2px_2px_rgba(0,0,0,0.8)] z-20"
             style={{
               left: p.x * TILE + TILE / 2 - 20,
               top: p.y * TILE,
@@ -309,34 +316,45 @@ export default function FarmGame() {
           </div>
         ))}
 
-        {/* character */}
+        {/* particles */}
+        {particles.map((p) => (
+          <div
+            key={p.id}
+            className="absolute pointer-events-none dirt-particle z-20"
+            style={{
+              left: p.x * TILE + TILE / 2 - 3,
+              top: p.y * TILE + TILE / 2 - 3,
+              width: p.kind === "sparkle" ? 5 : 6,
+              height: p.kind === "sparkle" ? 5 : 6,
+              background: p.color,
+              borderRadius: p.kind === "water" ? "50%" : p.kind === "sparkle" ? "50%" : "1px",
+              boxShadow: p.kind === "sparkle" ? `0 0 6px ${p.color}` : "0 1px 0 rgba(0,0,0,0.3)",
+              ["--dx" as string]: `${p.dx}px`,
+              ["--dy" as string]: `${p.dy}px`,
+            }}
+          />
+        ))}
+
+        {/* character (pixel) */}
         <div
-          className="absolute flex items-center justify-center text-4xl transition-all duration-150 z-10"
+          className="absolute z-10 transition-[left,top] duration-150 ease-linear"
           style={{
             left: pos.x * TILE,
-            top: pos.y * TILE - 8,
+            top: pos.y * TILE - 10,
             width: TILE,
             height: TILE,
-            animation: walking ? "bob 0.3s infinite" : "none",
-            transform: dir === "left" ? "scaleX(-1)" : "scaleX(1)",
-            filter: "drop-shadow(0 4px 4px rgba(0,0,0,0.4))",
           }}
         >
-          {charEmoji}
-          {acting && (
-            <span
-              className="absolute text-2xl"
-              style={{
-                top: -4,
-                right: dir === "left" ? "auto" : -4,
-                left: dir === "left" ? -4 : "auto",
-                animation: "dig-pop 0.3s ease-out",
-              }}
-            >
-              {toolEmoji}
-            </span>
-          )}
+          <PixelFarmer
+            direction={dir}
+            walking={walking}
+            walkFrame={walkFrame}
+            acting={acting}
+            tool={tool}
+          />
         </div>
+      </div>
+
       </div>
 
       {/* Toolbar */}
