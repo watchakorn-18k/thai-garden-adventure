@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import PixelFarmer from "./PixelFarmer";
+
 
 type Direction = "up" | "down" | "left" | "right";
 type TileType = "grass" | "tilled" | "watered";
