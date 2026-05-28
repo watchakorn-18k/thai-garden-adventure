@@ -9,38 +9,65 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as LobbyRouteImport } from './routes/lobby'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as MatchCodeRouteImport } from './routes/match.$code'
 
+const LobbyRoute = LobbyRouteImport.update({
+  id: '/lobby',
+  path: '/lobby',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MatchCodeRoute = MatchCodeRouteImport.update({
+  id: '/match/$code',
+  path: '/match/$code',
+  getParentRoute: () => rootRouteImport,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/lobby': typeof LobbyRoute
+  '/match/$code': typeof MatchCodeRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/lobby': typeof LobbyRoute
+  '/match/$code': typeof MatchCodeRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/lobby': typeof LobbyRoute
+  '/match/$code': typeof MatchCodeRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/lobby' | '/match/$code'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/lobby' | '/match/$code'
+  id: '__root__' | '/' | '/lobby' | '/match/$code'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  LobbyRoute: typeof LobbyRoute
+  MatchCodeRoute: typeof MatchCodeRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/lobby': {
+      id: '/lobby'
+      path: '/lobby'
+      fullPath: '/lobby'
+      preLoaderRoute: typeof LobbyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -48,12 +75,31 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/match/$code': {
+      id: '/match/$code'
+      path: '/match/$code'
+      fullPath: '/match/$code'
+      preLoaderRoute: typeof MatchCodeRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  LobbyRoute: LobbyRoute,
+  MatchCodeRoute: MatchCodeRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
+
+import type { getRouter } from './router.tsx'
+import type { startInstance } from './start.ts'
+declare module '@tanstack/react-start' {
+  interface Register {
+    ssr: true
+    router: Awaited<ReturnType<typeof getRouter>>
+    config: Awaited<ReturnType<typeof startInstance.getOptions>>
+  }
+}

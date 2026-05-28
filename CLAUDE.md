@@ -53,6 +53,7 @@ Server logic lives in `createServerFn` handlers (see `src/lib/api/example.functi
 ESLint blocks importing `server-only` (Next convention); use `.server.ts` suffix or `@tanstack/react-start/server-only` instead.
 
 Env-access patterns (documented in `src/lib/config.server.ts`):
+
 - On Cloudflare Workers, env binds at **request time** — reading `process.env.X` at module scope returns `undefined`. Always read inside a function/handler.
 - `.server.ts` module: server-only helpers, wrap reads in a function.
 - Inline `process.env` inside a `createServerFn` handler: one-off server reads.
@@ -61,3 +62,43 @@ Env-access patterns (documented in `src/lib/config.server.ts`):
 ### UI
 
 shadcn/ui in `src/components/ui/` (aliases in `components.json`: `@/components`, `@/components/ui`, `@/lib/utils`, `@/hooks`). Tailwind v4 with CSS variables, lucide-react icons. The current single feature is `src/components/FarmGame.tsx` — a self-contained Thai-themed Stardew-style farming game (mounted at `/` via `src/routes/index.tsx`) with pixel-art character (`PixelFarmer.tsx`). Tile/crop state is local React state; no persistence.
+
+## Skills Usage Policy
+
+Goal: save tokens by loading skills only when needed. Don't preload all skills — invoke via the Skill tool when a trigger matches.
+
+### Always load
+
+- **karpathy-guidelines** — load on EVERY user prompt before doing work. Reduces common LLM coding mistakes (overcomplication, hidden assumptions, vague success criteria). Invoke at start of each turn regardless of task.
+
+### Load on trigger (situational)
+
+| Skill                           | Trigger                                                                         |
+| ------------------------------- | ------------------------------------------------------------------------------- |
+| `stop-slop`                     | Writing/editing prose, README, PR descriptions, commit messages, marketing copy |
+| `full-output-enforcement`       | User asks for complete file, full code dump, no truncation, large generation    |
+| `design-taste-frontend-v1`      | UI redesign, visual polish, component styling beyond shadcn defaults            |
+| `industrial-brutalist-ui`       | User asks for brutalist/swiss/terminal aesthetic                                |
+| `minimalist-ui`                 | User asks for clean/editorial/minimal aesthetic                                 |
+| `high-end-visual-design`        | "Premium", "polished", "high-end" UI request                                    |
+| `redesign-existing-projects`    | Audit + upgrade existing UI to premium quality                                  |
+| `brandkit`                      | Creating brand assets, color/type system, logo guidance                         |
+| `verify`                        | User asks: verify PR, confirm fix works, validate change in real app            |
+| `run`                           | User asks: run/start app, take screenshot, see change live (FarmGame at `/`)    |
+| `code-review` / `review`        | Reviewing diff or PR for bugs                                                   |
+| `security-review`               | Security-focused review                                                         |
+| `init`                          | Initializing/rewriting `CLAUDE.md` for a new repo                               |
+| `update-config`                 | Permissions, hooks, env vars, `settings.json` changes                           |
+| `keybindings-help`              | Customizing Claude Code keybindings                                             |
+| `fewer-permission-prompts`      | User wants fewer permission prompts                                             |
+| `loop` / `ScheduleWakeup`       | Recurring tasks, polling, "/loop" requests                                      |
+| `claude-api`                    | Code imports `@anthropic-ai/sdk`, prompt caching, Claude model migrations       |
+| `skill-creator` / `find-skills` | Create/edit/find skills, run skill evals                                        |
+| `understand-anything:*`         | Deep architecture/domain analysis, knowledge graph, onboarding tour             |
+| `glm-plan-usage:*`              | Query GLM Coding Plan usage                                                     |
+
+### Don't load
+
+- Tailwind/shadcn/TanStack questions → use `context7` MCP instead (per MCP instructions)
+- Project structure / convention questions → already in this file
+- Trivial edits, typo fixes, single-file tweaks → skip skills, just do it

@@ -10,11 +10,11 @@ interface Props {
 
 // Pixel palette
 const C = {
-  hat: "#d9a441",      // straw hat
+  hat: "#d9a441", // straw hat
   hatDark: "#8b6420",
   skin: "#f0c090",
   skinDark: "#c08858",
-  shirt: "#c8412e",    // Thai red
+  shirt: "#c8412e", // Thai red
   shirtDark: "#7a2418",
   pants: "#3a5a8a",
   pantsDark: "#1f3560",

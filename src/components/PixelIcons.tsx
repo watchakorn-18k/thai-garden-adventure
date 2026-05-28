@@ -1,0 +1,197 @@
+interface IconProps {
+  size?: number;
+}
+
+const wrap = (size: number, body: React.ReactNode) => (
+  <svg
+    viewBox="0 0 16 16"
+    width={size}
+    height={size}
+    shapeRendering="crispEdges"
+    style={{ imageRendering: "pixelated" }}
+  >
+    {body}
+  </svg>
+);
+
+export function HoeIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="3" y="11" width="1" height="1" fill="#1a0f08" />
+      <rect x="4" y="10" width="1" height="1" fill="#1a0f08" />
+      <rect x="5" y="9" width="1" height="1" fill="#1a0f08" />
+      <rect x="6" y="8" width="1" height="1" fill="#1a0f08" />
+      <rect x="7" y="7" width="1" height="1" fill="#1a0f08" />
+      <rect x="8" y="6" width="1" height="1" fill="#1a0f08" />
+      <rect x="9" y="5" width="1" height="1" fill="#1a0f08" />
+      {/* handle */}
+      <rect x="4" y="12" width="1" height="1" fill="#8b5a2b" />
+      <rect x="5" y="10" width="1" height="2" fill="#8b5a2b" />
+      <rect x="6" y="9" width="1" height="2" fill="#8b5a2b" />
+      <rect x="7" y="8" width="1" height="2" fill="#a36d36" />
+      <rect x="8" y="7" width="1" height="2" fill="#8b5a2b" />
+      <rect x="9" y="6" width="1" height="2" fill="#8b5a2b" />
+      {/* head */}
+      <rect x="10" y="5" width="3" height="1" fill="#cdd2d8" />
+      <rect x="10" y="6" width="3" height="2" fill="#9aa0a8" />
+      <rect x="10" y="8" width="3" height="1" fill="#555a62" />
+    </>,
+  );
+}
+
+export function WaterCanIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* body */}
+      <rect x="4" y="6" width="6" height="6" fill="#9aa0a8" />
+      <rect x="4" y="6" width="6" height="1" fill="#cdd2d8" />
+      <rect x="4" y="11" width="6" height="1" fill="#555a62" />
+      <rect x="3" y="7" width="1" height="4" fill="#9aa0a8" />
+      <rect x="10" y="7" width="1" height="4" fill="#9aa0a8" />
+      {/* handle */}
+      <rect x="5" y="4" width="4" height="1" fill="#9aa0a8" />
+      <rect x="5" y="5" width="1" height="1" fill="#9aa0a8" />
+      <rect x="8" y="5" width="1" height="1" fill="#9aa0a8" />
+      {/* spout */}
+      <rect x="11" y="7" width="2" height="1" fill="#9aa0a8" />
+      <rect x="13" y="6" width="1" height="2" fill="#9aa0a8" />
+      {/* drops */}
+      <rect x="14" y="9" width="1" height="1" fill="#4cc2ee" />
+      <rect x="13" y="11" width="1" height="1" fill="#7fd8ff" />
+      <rect x="14" y="13" width="1" height="1" fill="#4cc2ee" />
+    </>,
+  );
+}
+
+export function SeedIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* bag */}
+      <rect x="4" y="5" width="8" height="9" fill="#8b6420" />
+      <rect x="4" y="5" width="8" height="1" fill="#a8803a" />
+      <rect x="4" y="13" width="8" height="1" fill="#5a3f12" />
+      <rect x="5" y="4" width="6" height="1" fill="#5a3f12" />
+      <rect x="6" y="3" width="4" height="1" fill="#5a3f12" />
+      {/* label */}
+      <rect x="6" y="8" width="4" height="3" fill="#f0d68a" />
+      <rect x="7" y="9" width="1" height="1" fill="#3a6b2a" />
+      <rect x="8" y="9" width="1" height="1" fill="#3a6b2a" />
+      <rect x="7" y="10" width="2" height="1" fill="#5fa148" />
+    </>,
+  );
+}
+
+export function CoinIcon({ size = 16 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="5" y="2" width="6" height="1" fill="#c89a30" />
+      <rect x="3" y="3" width="2" height="1" fill="#c89a30" />
+      <rect x="11" y="3" width="2" height="1" fill="#c89a30" />
+      <rect x="2" y="4" width="1" height="8" fill="#c89a30" />
+      <rect x="13" y="4" width="1" height="8" fill="#c89a30" />
+      <rect x="3" y="12" width="2" height="1" fill="#c89a30" />
+      <rect x="11" y="12" width="2" height="1" fill="#c89a30" />
+      <rect x="5" y="13" width="6" height="1" fill="#c89a30" />
+      <rect x="3" y="4" width="10" height="8" fill="#f4d864" />
+      <rect x="3" y="4" width="10" height="2" fill="#fbe89a" />
+      <rect x="3" y="10" width="10" height="2" fill="#c89a30" />
+      <rect x="6" y="6" width="4" height="1" fill="#a87a20" />
+      <rect x="7" y="7" width="2" height="3" fill="#a87a20" />
+      <rect x="6" y="9" width="4" height="1" fill="#a87a20" />
+    </>,
+  );
+}
+
+export function MoonIcon({ size = 16 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="6" y="2" width="5" height="1" fill="#fbd28a" />
+      <rect x="4" y="3" width="2" height="1" fill="#fbd28a" />
+      <rect x="11" y="3" width="2" height="1" fill="#fbd28a" />
+      <rect x="3" y="4" width="2" height="2" fill="#fbd28a" />
+      <rect x="3" y="6" width="2" height="4" fill="#fbd28a" />
+      <rect x="3" y="10" width="2" height="2" fill="#fbd28a" />
+      <rect x="4" y="12" width="2" height="1" fill="#fbd28a" />
+      <rect x="6" y="13" width="5" height="1" fill="#fbd28a" />
+      <rect x="11" y="12" width="2" height="1" fill="#fbd28a" />
+      <rect x="9" y="3" width="2" height="2" fill="#c8946a" />
+      <rect x="11" y="5" width="2" height="2" fill="#c8946a" />
+      <rect x="6" y="7" width="2" height="2" fill="#c8946a" />
+    </>,
+  );
+}
+
+// crop thumbnails (16x16)
+export function ChiliIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="7" y="3" width="3" height="1" fill="#3a6b2a" />
+      <rect x="6" y="4" width="2" height="1" fill="#5fa148" />
+      <rect x="8" y="4" width="1" height="2" fill="#3a6b2a" />
+      <rect x="6" y="5" width="3" height="2" fill="#e84444" />
+      <rect x="7" y="7" width="4" height="3" fill="#e84444" />
+      <rect x="8" y="10" width="4" height="3" fill="#e84444" />
+      <rect x="10" y="13" width="3" height="1" fill="#a01818" />
+      <rect x="6" y="5" width="1" height="3" fill="#f06868" />
+      <rect x="7" y="7" width="1" height="2" fill="#f06868" />
+    </>,
+  );
+}
+
+export function RiceIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="7" y="12" width="2" height="2" fill="#7a9a3a" />
+      <rect x="5" y="6" width="2" height="2" fill="#f4d864" />
+      <rect x="9" y="6" width="2" height="2" fill="#f4d864" />
+      <rect x="7" y="4" width="2" height="2" fill="#f4d864" />
+      <rect x="6" y="8" width="1" height="4" fill="#7a9a3a" />
+      <rect x="9" y="8" width="1" height="4" fill="#7a9a3a" />
+      <rect x="7" y="6" width="2" height="6" fill="#7a9a3a" />
+      <rect x="5" y="7" width="2" height="1" fill="#c89a30" />
+      <rect x="9" y="7" width="2" height="1" fill="#c89a30" />
+      <rect x="7" y="5" width="2" height="1" fill="#c89a30" />
+    </>,
+  );
+}
+
+export function MorningGloryIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="3" y="6" width="4" height="3" fill="#5fa148" />
+      <rect x="9" y="6" width="4" height="3" fill="#5fa148" />
+      <rect x="6" y="3" width="4" height="3" fill="#6ab04c" />
+      <rect x="3" y="6" width="2" height="1" fill="#8bc967" />
+      <rect x="9" y="6" width="2" height="1" fill="#8bc967" />
+      <rect x="6" y="3" width="2" height="1" fill="#8bc967" />
+      <rect x="7" y="9" width="2" height="4" fill="#3a6b2a" />
+      <rect x="10" y="2" width="2" height="2" fill="#9b59d4" />
+      <rect x="11" y="3" width="1" height="1" fill="#fff" />
+    </>,
+  );
+}
+
+export function EggplantIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="7" y="2" width="3" height="2" fill="#5fa148" />
+      <rect x="6" y="3" width="1" height="1" fill="#5fa148" />
+      <rect x="10" y="3" width="1" height="1" fill="#5fa148" />
+      <rect x="5" y="4" width="7" height="8" fill="#6b2e94" />
+      <rect x="5" y="4" width="7" height="1" fill="#8b4ec0" />
+      <rect x="5" y="12" width="7" height="1" fill="#4a1e6b" />
+      <rect x="5" y="13" width="2" height="1" fill="#4a1e6b" />
+      <rect x="10" y="13" width="2" height="1" fill="#4a1e6b" />
+      <rect x="6" y="6" width="1" height="2" fill="#8b4ec0" />
+    </>,
+  );
+}
