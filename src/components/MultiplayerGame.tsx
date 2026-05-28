@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
 import {
@@ -12,6 +12,7 @@ import {
   WaterCanIcon,
 } from "./PixelIcons";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
+import { movePos } from "@/lib/game-logic";
 import { useMatch } from "@/lib/match-client";
 import {
   MATCH_DURATION_MS,
@@ -22,7 +23,7 @@ import {
 
 const TILE_SELF = 56;
 const TILE_OPP = 28;
-const MOVE_REPEAT_MS = 130;
+const MOVE_REPEAT_MS = 70;
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
@@ -61,12 +62,51 @@ export default function MultiplayerGame({ code }: Props) {
 
   const keys = useRef<Set<string>>(new Set());
   const lastSentDir = useRef<{ dir: Direction; at: number } | null>(null);
+  const selfRef = useRef<PublicPlayer | undefined>(undefined);
+  const statusRef = useRef<string | undefined>(undefined);
+  const [predictedMove, setPredictedMove] = useState<{
+    playerId: string;
+    pos: { x: number; y: number };
+    dir: Direction;
+  } | null>(null);
+
+  const self = state?.players.find((p) => p.id === selfId);
+  const opp = state?.players.find((p) => p.id !== selfId);
+  const renderSelf = self
+    ? predictedMove?.playerId === self.id
+      ? { ...self, pos: predictedMove.pos, dir: predictedMove.dir }
+      : self
+    : undefined;
+
+  useEffect(() => {
+    selfRef.current = self;
+    statusRef.current = state?.status;
+  }, [self, state?.status]);
+
+  const sendMove = useCallback(
+    (dir: Direction) => {
+      const currentSelf = selfRef.current;
+      if (!currentSelf || statusRef.current !== "playing") return;
+      setPredictedMove((current) => ({
+        playerId: currentSelf.id,
+        pos: movePos(current?.playerId === currentSelf.id ? current.pos : currentSelf.pos, dir),
+        dir,
+      }));
+      send({ t: "move", dir });
+    },
+    [send],
+  );
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       keys.current.add(k);
       if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) e.preventDefault();
+      const dir = keyToDir(k);
+      if (dir && !e.repeat) {
+        lastSentDir.current = { dir, at: Date.now() };
+        sendMove(dir);
+      }
       if (k === " " || k === "enter") send({ t: "action" });
       if (k === "1") send({ t: "tool", tool: "hoe" });
       if (k === "2") send({ t: "tool", tool: "watering_can" });
@@ -79,17 +119,13 @@ export default function MultiplayerGame({ code }: Props) {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [send]);
+  }, [send, sendMove]);
 
   useEffect(() => {
     if (state?.status !== "playing") return;
     const i = setInterval(() => {
       const k = keys.current;
-      let dir: Direction | null = null;
-      if (k.has("w") || k.has("arrowup")) dir = "up";
-      else if (k.has("s") || k.has("arrowdown")) dir = "down";
-      else if (k.has("a") || k.has("arrowleft")) dir = "left";
-      else if (k.has("d") || k.has("arrowright")) dir = "right";
+      const dir = keysToDir(k);
       if (!dir) {
         lastSentDir.current = null;
         return;
@@ -98,13 +134,17 @@ export default function MultiplayerGame({ code }: Props) {
       const last = lastSentDir.current;
       if (last && last.dir === dir && now - last.at < MOVE_REPEAT_MS) return;
       lastSentDir.current = { dir, at: now };
-      send({ t: "move", dir });
+      sendMove(dir);
     }, 60);
     return () => clearInterval(i);
-  }, [state?.status, send]);
+  }, [state?.status, sendMove]);
 
-  const self = state?.players.find((p) => p.id === selfId);
-  const opp = state?.players.find((p) => p.id !== selfId);
+  useEffect(() => {
+    if (!self || !predictedMove || predictedMove.playerId !== self.id) return;
+    if (self.pos.x === predictedMove.pos.x && self.pos.y === predictedMove.pos.y) {
+      setPredictedMove(null);
+    }
+  }, [self, predictedMove]);
 
   if (!state) {
     return (
@@ -132,7 +172,10 @@ export default function MultiplayerGame({ code }: Props) {
       {(state.status === "playing" || state.status === "ended") && self && (
         <div className="relative z-10 flex flex-col items-center gap-3">
           {opp && <OpponentField player={opp} />}
-          <SelfField player={self} events={events.filter((e) => e.ev.playerId === self.id)} />
+          <SelfField
+            player={renderSelf ?? self}
+            events={events.filter((e) => e.ev.playerId === self.id)}
+          />
         </div>
       )}
 
@@ -148,7 +191,7 @@ export default function MultiplayerGame({ code }: Props) {
       )}
 
       {state.status === "playing" && self && <Toolbar self={self} send={send} />}
-      {state.status === "playing" && self && <MobileControls send={send} />}
+      {state.status === "playing" && self && <MobileControls send={send} sendMove={sendMove} />}
       {status !== "open" && (
         <ConnectionBanner text={lastError?.message ?? "กำลังเชื่อมต่อใหม่..."} />
       )}
@@ -160,6 +203,28 @@ export default function MultiplayerGame({ code }: Props) {
         <span className="pixel-chip mx-2">1·2·3</span>TOOL
       </div>
     </div>
+  );
+}
+
+function keyToDir(k: string): Direction | null {
+  if (k === "w" || k === "arrowup") return "up";
+  if (k === "s" || k === "arrowdown") return "down";
+  if (k === "a" || k === "arrowleft") return "left";
+  if (k === "d" || k === "arrowright") return "right";
+  return null;
+}
+
+function keysToDir(keys: Set<string>): Direction | null {
+  return keyToDir(
+    keys.has("w") || keys.has("arrowup")
+      ? "w"
+      : keys.has("s") || keys.has("arrowdown")
+        ? "s"
+        : keys.has("a") || keys.has("arrowleft")
+          ? "a"
+          : keys.has("d") || keys.has("arrowright")
+            ? "d"
+            : "",
   );
 }
 
@@ -414,7 +479,7 @@ function SelfField({
           transform: `translate3d(${player.pos.x * TILE_SELF}px, ${player.pos.y * TILE_SELF - 10}px, 0)`,
           width: TILE_SELF,
           height: TILE_SELF,
-          transition: "transform 80ms linear",
+          transition: "transform 35ms linear",
         }}
       >
         <PixelFarmer
@@ -585,8 +650,10 @@ function Toolbar({
 
 function MobileControls({
   send,
+  sendMove,
 }: {
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
+  sendMove: (dir: Direction) => void;
 }) {
   const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const stop = () => {
@@ -595,8 +662,8 @@ function MobileControls({
   };
   const startMove = (dir: Direction) => {
     stop();
-    send({ t: "move", dir });
-    repeatRef.current = setInterval(() => send({ t: "move", dir }), MOVE_REPEAT_MS);
+    sendMove(dir);
+    repeatRef.current = setInterval(() => sendMove(dir), MOVE_REPEAT_MS);
   };
   useEffect(() => stop, []);
 

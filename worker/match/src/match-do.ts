@@ -47,9 +47,9 @@ interface StoredRoomState {
   players: Omit<PlayerState, "connected" | "lastMoveAt" | "lastActionAt">[];
 }
 
-const MOVE_COOLDOWN_MS = 100;
-const ACTION_COOLDOWN_MS = 180;
-const SNAPSHOT_INTERVAL_MS = 200;
+const MOVE_COOLDOWN_MS = 60;
+const ACTION_COOLDOWN_MS = 80;
+const SNAPSHOT_INTERVAL_MS = 100;
 const GROWTH_INTERVAL_MS = 500;
 
 export class MatchRoom implements DurableObject {
@@ -154,6 +154,7 @@ export class MatchRoom implements DurableObject {
       player.dir = msg.dir;
       player.pos = movePos(player.pos, msg.dir);
       this.persist();
+      this.broadcastSnapshot();
       return;
     }
     if (msg.t === "action") {
@@ -174,7 +175,14 @@ export class MatchRoom implements DurableObject {
         this.pendingEvents.push({ ...ev, playerId });
       }
       if (player.coins >= TARGET_COINS) this.endMatch(playerId, "race");
-      else this.persist();
+      else {
+        this.persist();
+        this.broadcastSnapshot();
+      }
+      if (this.pendingEvents.length) {
+        this.broadcast({ t: "events", events: this.pendingEvents });
+        this.pendingEvents = [];
+      }
       return;
     }
   }
