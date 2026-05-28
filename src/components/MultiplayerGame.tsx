@@ -18,6 +18,7 @@ import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/playe
 import { useMatch } from "@/lib/match-client";
 import {
   DEFAULT_ROOM_SETTINGS,
+  type MatchRecap,
   type MatchRole,
   type PublicMatchState,
   type PublicPlayer,
@@ -28,6 +29,7 @@ import {
 
 const TILE_SELF = 56;
 const MOVE_REPEAT_MS = 70;
+const MOVE_TWEEN_MS = 85;
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
@@ -94,6 +96,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     dir: Direction;
   } | null>(null);
   const [actionFlash, setActionFlash] = useState(0);
+  const [acting, setActing] = useState(false);
+  const actionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSpectator = matchRole === "spectator";
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
@@ -129,6 +133,9 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     if (isSpectator) return;
     if (statusRef.current !== "playing") return;
     setActionFlash((n) => n + 1);
+    setActing(true);
+    if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+    actionTimerRef.current = setTimeout(() => setActing(false), 320);
     send({ t: "action" });
   }, [isSpectator, send]);
 
@@ -183,6 +190,12 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       setPredictedMove(null);
     }
   }, [self, predictedMove]);
+
+  useEffect(() => {
+    return () => {
+      if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+    };
+  }, []);
 
   if (!state) {
     return (
@@ -245,7 +258,11 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         ))}
 
       {state.status === "countdown" && state.countdownEndsAt && (
-        <CountdownView endsAt={state.countdownEndsAt} />
+        <CountdownView
+          endsAt={state.countdownEndsAt}
+          isHost={hasHostControls}
+          onCancel={() => send({ t: "cancel_countdown" })}
+        />
       )}
 
       {(state.status === "playing" || state.status === "ended") &&
@@ -264,6 +281,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
                 player={renderSelf ?? self}
                 events={events.filter((e) => e.ev.playerId === self.id)}
                 actionFlash={actionFlash}
+                acting={acting}
               />
             </div>
           )
@@ -275,6 +293,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           reason={state.endedReason}
           selfId={selfId}
           players={state.players}
+          recap={state.recap}
           onRematch={() => send({ t: "rematch" })}
           self={self}
           spectator={isSpectator}
@@ -467,43 +486,85 @@ function MatchHUD({
   return (
     <>
       {copyToast && (
-        <div className="fixed top-4 left-1/2 z-50 -translate-x-1/2 pixel-chip font-pixel text-[9px] text-gold" style={{ animation: "float-up 1.8s ease-out forwards" }}>
+        <div
+          className="fixed top-4 left-1/2 z-50 -translate-x-1/2 pixel-chip font-pixel text-[9px] text-gold"
+          style={{ animation: "float-up 1.8s ease-out forwards" }}
+        >
           {copyToast === "ok" ? `คัดลอกรหัส ${code} แล้ว` : "คัดลอกรหัสไม่สำเร็จ"}
         </div>
       )}
-      <header className="relative z-10 w-full max-w-5xl flex items-center justify-between gap-4 px-6 py-3 pixel-panel">
-      <button
-        onClick={copyRoom}
-        className="flex items-center gap-3 text-left"
-        title="Copy room code"
-      >
-        <span className="font-pixel text-[10px] text-[var(--muted-foreground)]">ROOM</span>
-        <span className="font-pixel text-[18px] text-[var(--gold)] tracking-[4px]">{code}</span>
-        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          {copied === "ok" ? "COPIED" : copied === "fail" ? "COPY FAIL" : "COPY CODE"}
-        </span>
-      </button>
+      <header className="relative z-20 w-full max-w-5xl pixel-panel px-6 py-3">
+        <div className="grid items-center gap-4 lg:grid-cols-[auto_minmax(260px,1fr)_auto]">
+          <button
+            onClick={copyRoom}
+            className="flex items-center gap-3 text-left transition-transform active:translate-y-[1px]"
+            title="Copy room code"
+          >
+            <span className="font-pixel text-[10px] text-[var(--muted-foreground)]">ROOM</span>
+            <span className="font-pixel text-[18px] text-[var(--gold)] tracking-[4px]">{code}</span>
+            <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+              {copied === "ok" ? "COPIED" : copied === "fail" ? "COPY FAIL" : "COPY CODE"}
+            </span>
+          </button>
 
-      <div className="flex items-center gap-4 flex-1 px-6">
-        <PlayerBar player={self} side="left" targetCoins={settings.targetCoins} />
-        <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
-        <PlayerBar player={opp} side="right" targetCoins={settings.targetCoins} />
-      </div>
+          <div className="flex min-w-0 items-center gap-4">
+            <PlayerBar player={self} side="left" targetCoins={settings.targetCoins} />
+            <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
+            <PlayerBar player={opp} side="right" targetCoins={settings.targetCoins} />
+          </div>
 
-      <div className="flex flex-col items-end gap-1">
-        <div className="font-pixel text-[16px] text-[var(--gold)]">
-          {mm}:{ss}
+          <div className="flex items-center justify-end gap-4">
+            <div className="flex flex-col items-end gap-1">
+              <div className="font-pixel text-[16px] text-[var(--gold)]">
+                {mm}:{ss}
+              </div>
+              <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+                {status !== "open"
+                  ? "RECONNECTING"
+                  : role === "spectator"
+                    ? `REFEREE · ${state.status.toUpperCase()}`
+                    : state.status.toUpperCase()}
+              </div>
+            </div>
+            {outfit && <HeaderOutfitMenu outfit={outfit} />}
+          </div>
         </div>
-        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          {status !== "open"
-            ? "RECONNECTING"
-            : role === "spectator"
-              ? `REFEREE · ${state.status.toUpperCase()}`
-              : state.status.toUpperCase()}
-        </div>
-      </div>
       </header>
     </>
+  );
+}
+
+function HeaderOutfitMenu({
+  outfit,
+}: {
+  outfit: {
+    open: boolean;
+    cosmetics: PlayerCosmetics;
+    onToggle: () => void;
+    onClose: () => void;
+    onChange: (next: PlayerCosmetics) => void;
+  };
+}) {
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={outfit.onToggle}
+        className="pixel-btn flex h-[34px] items-center px-2"
+        aria-expanded={outfit.open}
+      >
+        <span className="font-pixel text-[8px]">OUTFIT</span>
+      </button>
+      {outfit.open && (
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] w-[280px] max-w-[calc(100vw-2rem)]">
+          <CosmeticPicker
+            value={outfit.cosmetics}
+            onChange={outfit.onChange}
+            onClose={outfit.onClose}
+          />
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -631,11 +692,8 @@ function LobbyView({
             onClick={onReady}
             className="pixel-btn lobby-ready-btn"
             data-accent={self?.ready ? undefined : "true"}
-            disabled={self?.ready}
           >
-            <span className="font-pixel text-[12px]">
-              {self?.ready ? "READY · WAITING" : "READY UP"}
-            </span>
+            <span className="font-pixel text-[12px]">{self?.ready ? "UNREADY" : "READY UP"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>
           </button>
           <button onClick={onLeaveSlot} className="pixel-btn">
@@ -943,7 +1001,15 @@ function SpectatorLobbyView({
   );
 }
 
-function CountdownView({ endsAt }: { endsAt: number }) {
+function CountdownView({
+  endsAt,
+  isHost,
+  onCancel,
+}: {
+  endsAt: number;
+  isHost: boolean;
+  onCancel: () => void;
+}) {
   const [n, setN] = useState(() => Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
   useEffect(() => {
     const i = setInterval(() => setN(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000))), 100);
@@ -961,6 +1027,11 @@ function CountdownView({ endsAt }: { endsAt: number }) {
       >
         {n > 0 ? n : "GO!"}
       </div>
+      {isHost && n > 0 && (
+        <button onClick={onCancel} className="pixel-btn">
+          <span className="font-pixel text-[10px]">CANCEL COUNTDOWN</span>
+        </button>
+      )}
     </div>
   );
 }
@@ -969,10 +1040,12 @@ function SelfField({
   player,
   events,
   actionFlash,
+  acting,
 }: {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
   actionFlash: number;
+  acting: boolean;
 }) {
   return (
     <div
@@ -1024,28 +1097,7 @@ function SelfField({
         );
       })()}
 
-      <div
-        className="absolute z-10"
-        style={{
-          transform: `translate3d(${player.pos.x * TILE_SELF}px, ${player.pos.y * TILE_SELF - 10}px, 0)`,
-          width: TILE_SELF,
-          height: TILE_SELF,
-          transition: "transform 35ms linear",
-        }}
-      >
-        <div
-          key={actionFlash}
-          style={{ animation: actionFlash ? "grow 120ms ease-out" : undefined }}
-        >
-          <PixelFarmer
-            direction={player.dir}
-            walking={false}
-            walkFrame={0}
-            acting={actionFlash > 0}
-            tool={player.tool}
-          />
-        </div>
-      </div>
+      <InterpolatedMatchFarmer player={player} actionFlash={actionFlash} acting={acting} />
 
       <MatchArenaAmbience />
 
@@ -1083,6 +1135,101 @@ function SelfField({
       })}
     </div>
   );
+}
+
+function InterpolatedMatchFarmer({
+  player,
+  actionFlash,
+  acting,
+}: {
+  player: PublicPlayer;
+  actionFlash: number;
+  acting: boolean;
+}) {
+  const { pos: displayPos, walkFrame } = useInterpolatedCellPos(player.pos, MOVE_TWEEN_MS);
+  const moving = displayPos.x !== player.pos.x || displayPos.y !== player.pos.y;
+
+  return (
+    <div
+      className="absolute z-10"
+      style={{
+        transform: `translate3d(${displayPos.x * TILE_SELF}px, ${displayPos.y * TILE_SELF - 10}px, 0)`,
+        width: TILE_SELF,
+        height: TILE_SELF,
+        willChange: "transform",
+      }}
+    >
+      <PixelFarmer
+        key={actionFlash}
+        direction={player.dir}
+        walking={moving}
+        walkFrame={walkFrame}
+        acting={acting}
+        tool={player.tool}
+        cosmetics={player.cosmetics}
+      />
+    </div>
+  );
+}
+
+function useInterpolatedCellPos(pos: { x: number; y: number }, durationMs: number) {
+  const [displayPos, setDisplayPos] = useState(pos);
+  const [walkFrame, setWalkFrame] = useState(0);
+  const animationRef = useRef<number | null>(null);
+  const displayPosRef = useRef(pos);
+  const previousTargetRef = useRef(pos);
+
+  useEffect(() => {
+    displayPosRef.current = displayPos;
+  }, [displayPos]);
+
+  useEffect(() => {
+    const previousTarget = previousTargetRef.current;
+    previousTargetRef.current = pos;
+
+    if (previousTarget.x === pos.x && previousTarget.y === pos.y) return;
+
+    if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
+
+    const currentDisplay = displayPosRef.current;
+    const from =
+      Math.abs(currentDisplay.x - pos.x) > 1 || Math.abs(currentDisplay.y - pos.y) > 1
+        ? previousTarget
+        : currentDisplay;
+    if (from !== currentDisplay) {
+      displayPosRef.current = from;
+      setDisplayPos(from);
+    }
+    const startedAt = performance.now();
+
+    const tick = (now: number) => {
+      const t = Math.min(1, (now - startedAt) / durationMs);
+      const eased = 1 - (1 - t) * (1 - t);
+      const next = {
+        x: from.x + (pos.x - from.x) * eased,
+        y: from.y + (pos.y - from.y) * eased,
+      };
+      displayPosRef.current = next;
+      setDisplayPos(next);
+      setWalkFrame(t < 0.5 ? 0 : 1);
+      if (t < 1) {
+        animationRef.current = requestAnimationFrame(tick);
+      } else {
+        animationRef.current = null;
+        displayPosRef.current = pos;
+        setDisplayPos(pos);
+        setWalkFrame(0);
+      }
+    };
+
+    animationRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
+    };
+  }, [durationMs, pos]);
+
+  return { pos: displayPos, walkFrame };
 }
 
 function MatchArenaAmbience() {
@@ -1140,6 +1287,7 @@ function SpectatorMatchView({
               player={player}
               events={events.filter((e) => e.ev.playerId === player.id)}
               actionFlash={0}
+              acting={false}
             />
           </div>
         ))}
@@ -1319,6 +1467,7 @@ function EndOverlay({
   reason,
   selfId,
   players,
+  recap,
   onRematch,
   self,
   spectator = false,
@@ -1327,6 +1476,7 @@ function EndOverlay({
   reason?: "race" | "timeout" | "forfeit" | "kick";
   selfId: string | null;
   players: PublicPlayer[];
+  recap?: MatchRecap;
   onRematch: () => void;
   self?: PublicPlayer;
   spectator?: boolean;
@@ -1367,22 +1517,36 @@ function EndOverlay({
         </div>
         <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">{reasonText}</div>
         <div className="flex flex-col gap-2 w-full">
-          {sortedPlayers.map((p) => (
-            <div
-              key={p.id}
-              className="flex items-center justify-between gap-3 font-pixel text-[10px]"
-            >
-              <span>
-                {p.name}
-                {p.id === selfId ? " (YOU)" : ""}
-              </span>
-              <span className="text-[var(--gold)] flex items-center gap-1">
-                <CoinIcon size={12} />
-                {p.coins}
-              </span>
-            </div>
-          ))}
+          {sortedPlayers.map((p) => {
+            const stat = recap?.players.find((entry) => entry.id === p.id);
+            return (
+              <div key={p.id} className="flex flex-col gap-1 font-pixel text-[10px]">
+                <div className="flex items-center justify-between gap-3">
+                  <span>
+                    {p.name}
+                    {p.id === selfId ? " (YOU)" : ""}
+                  </span>
+                  <span className="text-[var(--gold)] flex items-center gap-1">
+                    <CoinIcon size={12} />
+                    {p.coins}
+                  </span>
+                </div>
+                {stat && (
+                  <div className="flex items-center justify-between gap-3 text-[8px] text-[var(--muted-foreground)]">
+                    <span>HARVEST {stat.harvests}</span>
+                    <span>EARNED {stat.coinsEarned}</span>
+                    <span>TOP {stat.topCrop ? CROPS[stat.topCrop].name : "-"}</span>
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
+        {recap && (
+          <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+            TIME LEFT {Math.ceil(recap.timeRemainingMs / 1000)}s
+          </div>
+        )}
         {!spectator && (
           <button
             onClick={onRematch}

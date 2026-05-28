@@ -72,6 +72,7 @@ export const clientMsg = z.discriminatedUnion("t", [
   z.object({ t: z.literal("cosmetics"), cosmetics: cosmeticsSchema }),
   z.object({ t: z.literal("claim_slot") }),
   z.object({ t: z.literal("leave_slot") }),
+  z.object({ t: z.literal("cancel_countdown") }),
   z.object({ t: z.literal("settings"), settings: roomSettingsSchema }),
   z.object({ t: z.literal("kick"), playerId: z.string().min(1) }),
   z.object({ t: z.literal("rematch") }),
@@ -79,6 +80,12 @@ export const clientMsg = z.discriminatedUnion("t", [
 export type ClientMsg = z.infer<typeof clientMsg>;
 
 export type MatchStatus = "lobby" | "countdown" | "playing" | "ended";
+
+export interface PublicPlayerStats {
+  harvests: number;
+  cropHarvests: Record<CropId, number>;
+  coinsEarned: number;
+}
 
 export interface PublicPlayer {
   id: string;
@@ -92,6 +99,21 @@ export interface PublicPlayer {
   ready: boolean;
   connected: boolean;
   cosmetics: PlayerCosmetics;
+  stats: PublicPlayerStats;
+}
+
+export interface MatchRecap {
+  endedAt: number;
+  durationMs: number;
+  timeRemainingMs: number;
+  players: Array<{
+    id: string;
+    name: string;
+    coins: number;
+    harvests: number;
+    topCrop?: CropId;
+    coinsEarned: number;
+  }>;
 }
 
 export interface PublicMatchState {
@@ -104,6 +126,7 @@ export interface PublicMatchState {
   endsAt?: number;
   winnerId?: string;
   endedReason?: "race" | "timeout" | "forfeit" | "kick";
+  recap?: MatchRecap;
   players: PublicPlayer[];
 }
 

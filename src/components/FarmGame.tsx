@@ -26,7 +26,7 @@ import {
 } from "@/lib/game-types";
 import { applyAction, tickGrowth } from "@/lib/game-logic";
 import { SFX, setMuted, isMuted } from "@/lib/sfx";
-import { readCosmetics, writeCosmetics } from "@/lib/player-cosmetics";
+import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 
 const TILE = 56;
 const COMBO_WINDOW = 2200; // ms to keep combo alive
@@ -50,6 +50,7 @@ export default function FarmGame() {
   const [seedChoice, setSeedChoice] = useState<CropId>("chili");
   const [coins, setCoins] = useState(50);
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
+  const [outfitOpen, setOutfitOpen] = useState(false);
   const [popups, setPopups] = useState<
     { id: number; x: number; y: number; text: string; tone: "good" | "bad" | "info" }[]
   >([]);
@@ -529,6 +530,19 @@ export default function FarmGame() {
           >
             1V1
           </a>
+          <HeaderOutfitMenu
+            outfit={{
+              open: outfitOpen,
+              cosmetics,
+              onToggle: () => setOutfitOpen((current) => !current),
+              onClose: () => setOutfitOpen(false),
+              onChange: (next) => {
+                setCosmetics(next);
+                writeCosmetics(next);
+                SFX.click();
+              },
+            }}
+          />
           <button
             onClick={() => {
               const v = !isMuted();
@@ -544,18 +558,6 @@ export default function FarmGame() {
           </button>
         </div>
       </header>
-
-      <div className="relative z-10 w-full max-w-5xl">
-        <CosmeticPicker
-          value={cosmetics}
-          onChange={(next) => {
-            setCosmetics(next);
-            writeCosmetics(next);
-            SFX.click();
-          }}
-          compact
-        />
-      </div>
 
       {/* Field */}
       <div
@@ -958,6 +960,41 @@ export default function FarmGame() {
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function HeaderOutfitMenu({
+  outfit,
+}: {
+  outfit: {
+    open: boolean;
+    cosmetics: PlayerCosmetics;
+    onToggle: () => void;
+    onClose: () => void;
+    onChange: (next: PlayerCosmetics) => void;
+  };
+}) {
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={outfit.onToggle}
+        className="pixel-btn flex h-[34px] items-center px-2"
+        aria-expanded={outfit.open}
+        style={{ fontSize: 8 }}
+      >
+        OUTFIT
+      </button>
+      {outfit.open && (
+        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-[280px] max-w-[calc(100vw-2rem)]">
+          <CosmeticPicker
+            value={outfit.cosmetics}
+            onChange={outfit.onChange}
+            onClose={outfit.onClose}
+          />
+        </div>
+      )}
     </div>
   );
 }

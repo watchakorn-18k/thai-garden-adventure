@@ -32,14 +32,7 @@ export default function CosmeticPicker({ value, onChange, compact = false, onClo
               cosmetics={value}
             />
           </div>
-          <div className="flex flex-col gap-1">
-            <span className="font-pixel text-[9px] text-[var(--gold)]">OUTFIT</span>
-            {!compact && (
-              <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">
-                สีนี้ใช้ใน multiplayer
-              </span>
-            )}
-          </div>
+          <span className="font-pixel text-[9px] text-[var(--gold)]">OUTFIT</span>
         </div>
         {onClose && (
           <button type="button" onClick={onClose} className="pixel-btn px-2 py-1">

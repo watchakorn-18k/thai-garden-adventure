@@ -42,40 +42,34 @@ const C = {
 
 /** Each cell is a single pixel; the SVG is rendered at TILE size with crisp-edges. */
 function FrontSprite({ swing, palette }: { swing: number; palette: typeof C }) {
-  // 16x16 grid expressed as JSX rects
-  // We'll draw a small farmer with the hat (ngob)
+  const leftForward = swing === 0;
+
   return (
     <>
-      {/* Hat brim wide */}
       <rect x="2" y="3" width="12" height="1" fill={palette.hat} />
       <rect x="3" y="2" width="10" height="1" fill={palette.hat} />
       <rect x="2" y="4" width="12" height="1" fill={palette.hatDark} />
-      {/* Hat cone */}
       <rect x="5" y="1" width="6" height="1" fill={palette.hat} />
       <rect x="6" y="0" width="4" height="1" fill={palette.hatDark} />
-      {/* Face */}
       <rect x="5" y="5" width="6" height="3" fill={palette.skin} />
       <rect x="5" y="8" width="6" height="1" fill={palette.skinDark} />
-      {/* Eyes */}
       <rect x="6" y="6" width="1" height="1" fill={palette.outline} />
       <rect x="9" y="6" width="1" height="1" fill={palette.outline} />
-      {/* Shirt */}
       <rect x="4" y="9" width="8" height="3" fill={palette.shirt} />
       <rect x="4" y="11" width="8" height="1" fill={palette.shirtDark} />
-      {/* Arms */}
-      <rect x="3" y="9" width="1" height="3" fill={palette.skin} />
-      <rect x="12" y="9" width="1" height="3" fill={palette.skin} />
-      {/* Pants */}
+      <rect x="3" y={leftForward ? 10 : 9} width="1" height="3" fill={palette.skin} />
+      <rect x="12" y={leftForward ? 9 : 10} width="1" height="3" fill={palette.skin} />
       <rect x="5" y="12" width="6" height="2" fill={palette.pants} />
       <rect x="5" y="13" width="6" height="1" fill={palette.pantsDark} />
-      {/* Legs animation */}
-      <rect x={swing === 0 ? 5 : 4} y="14" width="2" height="2" fill={palette.shoe} />
-      <rect x={swing === 0 ? 9 : 10} y="14" width="2" height="2" fill={palette.shoe} />
+      <rect x="5" y={leftForward ? 14 : 13} width="2" height="2" fill={palette.shoe} />
+      <rect x="9" y={leftForward ? 13 : 14} width="2" height="2" fill={palette.shoe} />
     </>
   );
 }
 
 function BackSprite({ swing, palette }: { swing: number; palette: typeof C }) {
+  const rightForward = swing === 0;
+
   return (
     <>
       <rect x="2" y="3" width="12" height="1" fill={palette.hat} />
@@ -83,16 +77,14 @@ function BackSprite({ swing, palette }: { swing: number; palette: typeof C }) {
       <rect x="2" y="4" width="12" height="1" fill={palette.hatDark} />
       <rect x="5" y="1" width="6" height="1" fill={palette.hat} />
       <rect x="6" y="0" width="4" height="1" fill={palette.hatDark} />
-      {/* Back of head */}
       <rect x="5" y="5" width="6" height="3" fill={palette.hair} />
       <rect x="5" y="8" width="6" height="1" fill={palette.skinDark} />
-      {/* Shirt back */}
       <rect x="4" y="9" width="8" height="3" fill={palette.shirtDark} />
-      <rect x="3" y="9" width="1" height="3" fill={palette.skin} />
-      <rect x="12" y="9" width="1" height="3" fill={palette.skin} />
+      <rect x="3" y={rightForward ? 9 : 10} width="1" height="3" fill={palette.skinDark} />
+      <rect x="12" y={rightForward ? 10 : 9} width="1" height="3" fill={palette.skinDark} />
       <rect x="5" y="12" width="6" height="2" fill={palette.pantsDark} />
-      <rect x={swing === 0 ? 5 : 4} y="14" width="2" height="2" fill={palette.shoe} />
-      <rect x={swing === 0 ? 9 : 10} y="14" width="2" height="2" fill={palette.shoe} />
+      <rect x="5" y={rightForward ? 13 : 14} width="2" height="2" fill={palette.shoe} />
+      <rect x="9" y={rightForward ? 14 : 13} width="2" height="2" fill={palette.shoe} />
     </>
   );
 }
@@ -144,38 +136,65 @@ export default function PixelFarmer({
     pantsDark: shade(cosmetics.pants, -70),
   };
 
-  // Tool overlay placement & rotation based on direction + acting state
-  const toolOverlay = () => {
+  const sideToolOverlay = () => {
     if (!acting) return null;
     if (tool === "hoe") {
-      // Pixel hoe: handle (brown) + head (metal)
       return (
-        <g className="tool-swing-side" style={{ transformOrigin: "11px 9px" }}>
-          <rect x="11" y="3" width="1" height="7" fill={palette.tool} />
-          <rect x="12" y="2" width="1" height="6" fill={palette.tool} />
-          <rect x="10" y="9" width="3" height="2" fill={palette.toolMetal} />
-          <rect x="10" y="11" width="3" height="1" fill={palette.toolMetalDark} />
+        <g className="tool-hoe-side" style={{ transformOrigin: "10px 11px" }}>
+          <rect x="11" y="3" width="1" height="8" fill={palette.tool} />
+          <rect x="12" y="2" width="1" height="7" fill={palette.tool} />
+          <rect x="9" y="10" width="4" height="2" fill={palette.toolMetal} />
+          <rect x="9" y="12" width="4" height="1" fill={palette.toolMetalDark} />
         </g>
       );
     }
     if (tool === "watering_can") {
       return (
-        <g style={{ transformOrigin: "12px 10px" }} className="tool-tilt">
-          <rect x="11" y="8" width="3" height="3" fill={palette.toolMetal} />
-          <rect x="11" y="10" width="3" height="1" fill={palette.toolMetalDark} />
+        <g style={{ transformOrigin: "12px 10px" }} className="tool-water-side">
+          <rect x="10" y="8" width="4" height="3" fill={palette.toolMetal} />
+          <rect x="10" y="10" width="4" height="1" fill={palette.toolMetalDark} />
           <rect x="14" y="9" width="1" height="1" fill={palette.toolMetal} />
-          {/* water drops */}
           <rect x="15" y="11" width="1" height="1" fill={palette.water} className="drop-a" />
           <rect x="14" y="13" width="1" height="1" fill={palette.water} className="drop-b" />
         </g>
       );
     }
-    // seed
     return (
-      <g className="seed-toss">
-        <rect x="13" y="6" width="1" height="1" fill={palette.seed} />
-        <rect x="14" y="8" width="1" height="1" fill={palette.seed} />
-        <rect x="13" y="10" width="1" height="1" fill={palette.seed} />
+      <g className="tool-seed-side">
+        <rect x="12" y="7" width="1" height="1" fill={palette.seed} />
+        <rect x="14" y="9" width="1" height="1" fill={palette.seed} />
+        <rect x="13" y="11" width="1" height="1" fill={palette.seed} />
+      </g>
+    );
+  };
+
+  const verticalToolOverlay = () => {
+    if (!acting) return null;
+    if (tool === "hoe") {
+      return (
+        <g style={{ transformOrigin: "8px 11px" }} className="tool-hoe-vertical">
+          <rect x="7" y="2" width="2" height="8" fill={palette.tool} />
+          <rect x="6" y="10" width="4" height="2" fill={palette.toolMetal} />
+          <rect x="6" y="12" width="4" height="1" fill={palette.toolMetalDark} />
+        </g>
+      );
+    }
+    if (tool === "watering_can") {
+      return (
+        <g style={{ transformOrigin: "8px 10px" }} className="tool-water-vertical">
+          <rect x="6" y="7" width="4" height="3" fill={palette.toolMetal} />
+          <rect x="6" y="9" width="4" height="1" fill={palette.toolMetalDark} />
+          <rect x="5" y="8" width="1" height="1" fill={palette.toolMetal} />
+          <rect x="7" y="11" width="1" height="1" fill={palette.water} className="drop-a" />
+          <rect x="9" y="12" width="1" height="1" fill={palette.water} className="drop-b" />
+        </g>
+      );
+    }
+    return (
+      <g className="tool-seed-vertical">
+        <rect x="7" y="10" width="1" height="1" fill={palette.seed} />
+        <rect x="9" y="11" width="1" height="1" fill={palette.seed} />
+        <rect x="8" y="13" width="1" height="1" fill={palette.seed} />
       </g>
     );
   };
@@ -199,31 +218,7 @@ export default function PixelFarmer({
       }}
     >
       {body}
-      {/* Tool overlay — for vertical directions only show when not in seed mode if you want, but ok */}
-      {!isVertical && toolOverlay()}
-      {isVertical && acting && (
-        <g style={{ transformOrigin: "8px 9px" }} className="tool-vertical">
-          {tool === "hoe" && (
-            <>
-              <rect x="7" y="2" width="2" height="7" fill={palette.tool} />
-              <rect x="6" y="9" width="4" height="2" fill={palette.toolMetal} />
-            </>
-          )}
-          {tool === "watering_can" && (
-            <>
-              <rect x="6" y="7" width="4" height="3" fill={palette.toolMetal} />
-              <rect x="7" y="11" width="1" height="1" fill={palette.water} className="drop-a" />
-              <rect x="9" y="12" width="1" height="1" fill={palette.water} className="drop-b" />
-            </>
-          )}
-          {tool === "seed" && (
-            <>
-              <rect x="7" y="10" width="1" height="1" fill={palette.seed} />
-              <rect x="9" y="11" width="1" height="1" fill={palette.seed} />
-            </>
-          )}
-        </g>
-      )}
+      {isVertical ? verticalToolOverlay() : sideToolOverlay()}
     </svg>
   );
 }

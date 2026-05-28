@@ -17,7 +17,9 @@ import {
   cosmeticsSchema,
   type PublicMatchState,
   type MatchRole,
+  type MatchRecap,
   type PublicPlayer,
+  type PublicPlayerStats,
   type RoomSettings,
   type ServerEvent,
   type ServerMsg,
@@ -37,6 +39,8 @@ interface PlayerState {
   tiles: Tile[][];
   ready: boolean;
   connected: boolean;
+  disconnectedAt?: number;
+  stats: PublicPlayerStats;
   lastMoveAt: number;
   lastActionAt: number;
 }
@@ -49,6 +53,7 @@ interface StoredRoomState {
   endsAt?: number;
   winnerId?: string;
   endedReason?: "race" | "timeout" | "forfeit" | "kick";
+  recap?: MatchRecap;
   hostId?: string;
   hostSessionId?: string;
   settings?: RoomSettings;
@@ -59,6 +64,7 @@ const MOVE_COOLDOWN_MS = 60;
 const ACTION_COOLDOWN_MS = 80;
 const SNAPSHOT_INTERVAL_MS = 100;
 const GROWTH_INTERVAL_MS = 500;
+const RECONNECT_GRACE_MS = 30_000;
 const MAX_SPECTATORS = 5;
 
 interface SocketAttachment {
@@ -77,6 +83,7 @@ export class MatchRoom implements DurableObject {
   private endsAt?: number;
   private winnerId?: string;
   private endedReason?: "race" | "timeout" | "forfeit" | "kick";
+  private recap?: MatchRecap;
   private hostId?: string;
   private hostSessionId?: string;
   private settings: RoomSettings = DEFAULT_ROOM_SETTINGS;
@@ -143,6 +150,11 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
+    if (msg.t === "cancel_countdown") {
+      this.cancelCountdown(ws);
+      return;
+    }
+
     if (msg.t === "settings") {
       this.updateSettings(ws, msg.settings);
       return;
@@ -178,7 +190,7 @@ export class MatchRoom implements DurableObject {
 
     if (msg.t === "ready") {
       if (this.status !== "lobby") return;
-      player.ready = true;
+      player.ready = !player.ready;
       this.maybeStartCountdown();
       this.persist();
       this.broadcastSnapshot();
@@ -230,6 +242,11 @@ export class MatchRoom implements DurableObject {
       player.tiles = result.tiles;
       player.coins = result.coins;
       for (const ev of result.events) {
+        if (ev.kind === "harvest") {
+          player.stats.harvests += 1;
+          player.stats.coinsEarned += ev.reward;
+          player.stats.cropHarvests[ev.cropId] += 1;
+        }
         this.pendingEvents.push({ ...ev, playerId });
       }
       if (player.coins >= this.settings.targetCoins) this.endMatch(playerId, "race");
@@ -255,11 +272,16 @@ export class MatchRoom implements DurableObject {
     const pid = this.wsToPlayer.get(ws);
     if (!pid) return;
     const p = this.players.get(pid);
-    if (p) p.connected = false;
+    if (p) {
+      p.connected = false;
+      p.disconnectedAt = Date.now();
+    }
     this.wsToPlayer.delete(ws);
     this.wsToRole.delete(ws);
-    if (this.status === "playing" && [...this.players.values()].every((q) => !q.connected)) {
-      this.endMatch(undefined, "forfeit");
+    if (this.status === "playing") {
+      this.scheduleAlarm();
+      this.persist();
+      this.broadcastSnapshot();
       return;
     }
     if (this.status === "countdown") {
@@ -283,9 +305,12 @@ export class MatchRoom implements DurableObject {
       this.startPlaying();
       return;
     }
-    if (this.status === "playing" && this.endsAt && now >= this.endsAt) {
-      this.endByTimeout();
-      return;
+    if (this.status === "playing") {
+      if (this.endsAt && now >= this.endsAt) {
+        this.endByTimeout();
+        return;
+      }
+      if (this.checkReconnectForfeit(now)) return;
     }
     this.scheduleAlarm();
   }
@@ -305,6 +330,7 @@ export class MatchRoom implements DurableObject {
     this.endsAt = stored.endsAt;
     this.winnerId = stored.winnerId;
     this.endedReason = stored.endedReason;
+    this.recap = stored.recap;
     this.hostId = stored.hostId;
     this.hostSessionId = stored.hostSessionId;
     this.settings = roomSettingsSchema.catch(DEFAULT_ROOM_SETTINGS).parse(stored.settings);
@@ -314,6 +340,8 @@ export class MatchRoom implements DurableObject {
         {
           ...p,
           connected: false,
+          disconnectedAt: undefined,
+          stats: p.stats ?? emptyStats(),
           lastMoveAt: 0,
           lastActionAt: 0,
         },
@@ -345,6 +373,7 @@ export class MatchRoom implements DurableObject {
         endsAt: this.endsAt,
         winnerId: this.winnerId,
         endedReason: this.endedReason,
+        recap: this.recap,
         hostId: this.hostId,
         hostSessionId: this.hostSessionId,
         settings: this.settings,
@@ -354,11 +383,22 @@ export class MatchRoom implements DurableObject {
   }
 
   private scheduleAlarm(): void {
+    const reconnectDeadline =
+      this.status === "playing"
+        ? Math.min(
+            ...[...this.players.values()]
+              .filter((p) => !p.connected && p.disconnectedAt)
+              .map((p) => p.disconnectedAt! + RECONNECT_GRACE_MS),
+          )
+        : undefined;
     const time =
       this.status === "countdown"
         ? this.countdownEndsAt
         : this.status === "playing"
-          ? this.endsAt
+          ? minDefined(
+              this.endsAt,
+              Number.isFinite(reconnectDeadline) ? reconnectDeadline : undefined,
+            )
           : undefined;
     if (time) this.ctx.waitUntil(this.ctx.storage.setAlarm(time));
   }
@@ -377,12 +417,13 @@ export class MatchRoom implements DurableObject {
     this.hostId = hostPlayer?.id;
   }
 
-  private canEditRoom(ws: WebSocket): boolean {
+  private isHostSocket(ws: WebSocket): boolean {
     const att = ws.deserializeAttachment() as SocketAttachment | null;
-    return (
-      Boolean(this.hostSessionId && att?.sessionId === this.hostSessionId) &&
-      (this.status === "lobby" || this.status === "ended")
-    );
+    return Boolean(this.hostSessionId && att?.sessionId === this.hostSessionId);
+  }
+
+  private canEditRoom(ws: WebSocket): boolean {
+    return this.isHostSocket(ws) && (this.status === "lobby" || this.status === "ended");
   }
 
   private kickPlayer(ws: WebSocket, hostId: string, targetId: string): void {
@@ -427,6 +468,10 @@ export class MatchRoom implements DurableObject {
       });
       return;
     }
+    if (this.status === "lobby" && [...this.players.values()].some((p) => p.ready)) {
+      this.sendTo(ws, { t: "error", code: "ready_locked", message: "มีผู้เล่นกด READY แล้ว" });
+      return;
+    }
     const settings = roomSettingsSchema.safeParse(rawSettings);
     if (!settings.success) {
       this.sendTo(ws, { t: "error", code: "invalid_settings", message: "ตั้งค่าห้องไม่ถูกต้อง" });
@@ -455,6 +500,10 @@ export class MatchRoom implements DurableObject {
       this.sendTo(ws, { t: "error", code: "room_full", message: "ช่องผู้เล่นเต็มแล้ว" });
       return;
     }
+    if ([...this.players.values()].some((p) => p.ready)) {
+      this.sendTo(ws, { t: "error", code: "ready_locked", message: "มีผู้เล่นกด READY แล้ว" });
+      return;
+    }
 
     const att = ws.deserializeAttachment() as SocketAttachment | null;
     const playerId = crypto.randomUUID();
@@ -476,6 +525,8 @@ export class MatchRoom implements DurableObject {
       tiles: makeEmptyField(),
       ready: false,
       connected: true,
+      disconnectedAt: undefined,
+      stats: emptyStats(),
       lastMoveAt: 0,
       lastActionAt: 0,
     });
@@ -510,6 +561,10 @@ export class MatchRoom implements DurableObject {
       return;
     }
     if (this.wsToRole.get(ws) !== "player") return;
+    if ([...this.players.values()].some((p) => p.ready)) {
+      this.sendTo(ws, { t: "error", code: "ready_locked", message: "มีผู้เล่นกด READY แล้ว" });
+      return;
+    }
     const playerId = this.wsToPlayer.get(ws);
     if (!playerId) return;
     const player = this.players.get(playerId);
@@ -606,6 +661,7 @@ export class MatchRoom implements DurableObject {
     if (playerId) {
       const existing = this.players.get(playerId)!;
       existing.connected = true;
+      existing.disconnectedAt = undefined;
       existing.name = name;
       existing.cosmetics = cosmeticsSchema.parse(cosmetics);
       existing.lastMoveAt = 0;
@@ -630,6 +686,8 @@ export class MatchRoom implements DurableObject {
         tiles: makeEmptyField(),
         ready: false,
         connected: true,
+        disconnectedAt: undefined,
+        stats: emptyStats(),
         lastMoveAt: 0,
         lastActionAt: 0,
       });
@@ -658,6 +716,15 @@ export class MatchRoom implements DurableObject {
     this.broadcastSnapshot();
   }
 
+  private cancelCountdown(ws: WebSocket): void {
+    if (!this.isHostSocket(ws) || this.status !== "countdown") return;
+    this.status = "lobby";
+    this.countdownEndsAt = undefined;
+    for (const player of this.players.values()) player.ready = false;
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
   private maybeStartCountdown(): void {
     if (this.status !== "lobby") return;
     if (this.players.size !== this.settings.maxPlayers) return;
@@ -682,6 +749,8 @@ export class MatchRoom implements DurableObject {
       p.seedChoice = "chili";
       p.dir = "down";
       p.pos = { x: p.pos.x, y: 4 };
+      p.disconnectedAt = undefined;
+      p.stats = emptyStats();
       p.lastMoveAt = 0;
       p.lastActionAt = 0;
     }
@@ -726,6 +795,33 @@ export class MatchRoom implements DurableObject {
     this.endMatch(winners.length === 1 ? winners[0].id : undefined, "timeout");
   }
 
+  private checkReconnectForfeit(now: number): boolean {
+    const expired = [...this.players.values()].filter(
+      (p) => !p.connected && p.disconnectedAt && now - p.disconnectedAt >= RECONNECT_GRACE_MS,
+    );
+    if (!expired.length) return false;
+    const connected = [...this.players.values()].filter((p) => p.connected);
+    this.endMatch(connected.length === 1 ? connected[0].id : undefined, "forfeit");
+    return true;
+  }
+
+  private buildRecap(endedAt: number): MatchRecap {
+    const durationMs = this.startedAt ? endedAt - this.startedAt : 0;
+    return {
+      endedAt,
+      durationMs,
+      timeRemainingMs: this.endsAt ? Math.max(0, this.endsAt - endedAt) : 0,
+      players: [...this.players.values()].map((p) => ({
+        id: p.id,
+        name: p.name,
+        coins: p.coins,
+        harvests: p.stats.harvests,
+        topCrop: topCrop(p.stats.cropHarvests),
+        coinsEarned: p.stats.coinsEarned,
+      })),
+    };
+  }
+
   private endMatch(
     winnerId: string | undefined,
     reason: "race" | "timeout" | "forfeit" | "kick",
@@ -734,6 +830,7 @@ export class MatchRoom implements DurableObject {
     this.status = "ended";
     this.winnerId = winnerId;
     this.endedReason = reason;
+    this.recap = this.buildRecap(Date.now());
     if (this.snapshotTimer) {
       clearInterval(this.snapshotTimer);
       this.snapshotTimer = undefined;
@@ -752,6 +849,7 @@ export class MatchRoom implements DurableObject {
     this.status = "lobby";
     this.winnerId = undefined;
     this.endedReason = undefined;
+    this.recap = undefined;
     this.startedAt = undefined;
     this.endsAt = undefined;
     for (const p of this.players.values()) {
@@ -776,6 +874,7 @@ export class MatchRoom implements DurableObject {
       ready: p.ready,
       connected: p.connected,
       cosmetics: cosmeticsSchema.parse(p.cosmetics ?? DEFAULT_COSMETICS),
+      stats: p.stats,
     }));
     return {
       code: this.code,
@@ -787,6 +886,7 @@ export class MatchRoom implements DurableObject {
       endsAt: this.endsAt,
       winnerId: this.winnerId,
       endedReason: this.endedReason,
+      recap: this.recap,
       players,
     };
   }
@@ -813,6 +913,33 @@ export class MatchRoom implements DurableObject {
       /* noop */
     }
   }
+}
+
+function emptyStats(): PublicPlayerStats {
+  return {
+    harvests: 0,
+    coinsEarned: 0,
+    cropHarvests: {
+      chili: 0,
+      rice: 0,
+      morning_glory: 0,
+      eggplant: 0,
+    },
+  };
+}
+
+function topCrop(crops: Record<CropId, number>): CropId | undefined {
+  let best: CropId | undefined;
+  for (const id of Object.keys(crops) as CropId[]) {
+    if (!best || crops[id] > crops[best]) best = id;
+  }
+  return best && crops[best] > 0 ? best : undefined;
+}
+
+function minDefined(a?: number, b?: number): number | undefined {
+  if (a === undefined) return b;
+  if (b === undefined) return a;
+  return Math.min(a, b);
 }
 
 // keep static field constants alive for tree-shake protection
