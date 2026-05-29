@@ -13,7 +13,6 @@ import {
   WaterCanIcon,
 } from "./PixelIcons";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
-import { movePos } from "@/lib/game-logic";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
 import {
@@ -88,13 +87,9 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
   const keys = useRef<Set<string>>(new Set());
   const lastSentDir = useRef<{ dir: Direction; at: number } | null>(null);
+  const nextDiagonalAxis = useRef<"vertical" | "horizontal">("vertical");
   const selfRef = useRef<PublicPlayer | undefined>(undefined);
   const statusRef = useRef<string | undefined>(undefined);
-  const [predictedMove, setPredictedMove] = useState<{
-    playerId: string;
-    pos: { x: number; y: number };
-    dir: Direction;
-  } | null>(null);
   const [actionFlash, setActionFlash] = useState(0);
   const [acting, setActing] = useState(false);
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -103,12 +98,6 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
   const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
   const opp = state?.players.find((p) => p.id !== selfId);
-  const renderSelf = self
-    ? predictedMove?.playerId === self.id
-      ? { ...self, pos: predictedMove.pos, dir: predictedMove.dir }
-      : self
-    : undefined;
-
   useEffect(() => {
     selfRef.current = self;
     statusRef.current = state?.status;
@@ -117,13 +106,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const sendMove = useCallback(
     (dir: Direction) => {
       if (isSpectator) return;
-      const currentSelf = selfRef.current;
-      if (!currentSelf || statusRef.current !== "playing") return;
-      setPredictedMove((current) => ({
-        playerId: currentSelf.id,
-        pos: movePos(current?.playerId === currentSelf.id ? current.pos : currentSelf.pos, dir),
-        dir,
-      }));
+      if (!selfRef.current || statusRef.current !== "playing") return;
       send({ t: "move", dir });
     },
     [isSpectator, send],
@@ -146,7 +129,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       keys.current.add(k);
       if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) e.preventDefault();
       const dir = keyToDir(k);
-      if (dir && !e.repeat) {
+      if (dir && !e.repeat && keys.current.size === 1) {
         lastSentDir.current = { dir, at: Date.now() };
         sendMove(dir);
       }
@@ -170,7 +153,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     if (state?.status !== "playing") return;
     const i = setInterval(() => {
       const k = keys.current;
-      const dir = keysToDir(k);
+      const dir = keysToDir(k, nextDiagonalAxis);
       if (!dir) {
         lastSentDir.current = null;
         return;
@@ -183,13 +166,6 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     }, 60);
     return () => clearInterval(i);
   }, [isSpectator, state?.status, sendMove]);
-
-  useEffect(() => {
-    if (!self || !predictedMove || predictedMove.playerId !== self.id) return;
-    if (self.pos.x === predictedMove.pos.x && self.pos.y === predictedMove.pos.y) {
-      setPredictedMove(null);
-    }
-  }, [self, predictedMove]);
 
   useEffect(() => {
     return () => {
@@ -278,7 +254,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
                   <OpponentField player={opp} />
                 ))}
               <SelfField
-                player={renderSelf ?? self}
+                player={self}
                 events={events.filter((e) => e.ev.playerId === self.id)}
                 actionFlash={actionFlash}
                 acting={acting}
@@ -398,18 +374,30 @@ function keyToDir(k: string): Direction | null {
   return null;
 }
 
-function keysToDir(keys: Set<string>): Direction | null {
-  return keyToDir(
+function keysToDir(
+  keys: Set<string>,
+  nextDiagonalAxis: React.MutableRefObject<"vertical" | "horizontal">,
+): Direction | null {
+  const vertical =
     keys.has("w") || keys.has("arrowup")
-      ? "w"
+      ? "up"
       : keys.has("s") || keys.has("arrowdown")
-        ? "s"
-        : keys.has("a") || keys.has("arrowleft")
-          ? "a"
-          : keys.has("d") || keys.has("arrowright")
-            ? "d"
-            : "",
-  );
+        ? "down"
+        : null;
+  const horizontal =
+    keys.has("a") || keys.has("arrowleft")
+      ? "left"
+      : keys.has("d") || keys.has("arrowright")
+        ? "right"
+        : null;
+
+  if (vertical && horizontal) {
+    const dir = nextDiagonalAxis.current === "vertical" ? vertical : horizontal;
+    nextDiagonalAxis.current = nextDiagonalAxis.current === "vertical" ? "horizontal" : "vertical";
+    return dir;
+  }
+
+  return vertical ?? horizontal;
 }
 
 function CenterMsg({ main, sub }: { main: string; sub?: string }) {
