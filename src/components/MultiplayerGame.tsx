@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PixelFarmer from "./PixelFarmer";
-import PixelCrop from "./PixelCrop";
 import CosmeticPicker from "./CosmeticPicker";
+import PhaserField from "./PhaserField";
 import {
   ChiliIcon,
   CoinIcon,
@@ -12,7 +12,7 @@ import {
   SeedIcon,
   WaterCanIcon,
 } from "./PixelIcons";
-import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
+import { CROPS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
 import {
@@ -26,9 +26,7 @@ import {
   type ServerEvent,
 } from "@/lib/match-protocol";
 
-const TILE_SELF = 56;
 const MOVE_REPEAT_MS = 70;
-const MOVE_TWEEN_MS = 85;
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
@@ -1027,7 +1025,6 @@ function CountdownView({
 function SelfField({
   player,
   events,
-  actionFlash,
   acting,
 }: {
   player: PublicPlayer;
@@ -1035,221 +1032,7 @@ function SelfField({
   actionFlash: number;
   acting: boolean;
 }) {
-  return (
-    <div
-      className="relative field-frame scanlines"
-      style={{ width: COLS * TILE_SELF, height: ROWS * TILE_SELF }}
-    >
-      {player.tiles.map((row, y) =>
-        row.map((c, x) => {
-          const cls =
-            c.type === "grass"
-              ? "tile-grass"
-              : c.type === "watered"
-                ? "tile-watered"
-                : "tile-tilled";
-          return (
-            <div
-              key={`${x}-${y}`}
-              className={`absolute tile-edge ${cls}`}
-              style={{
-                left: x * TILE_SELF,
-                top: y * TILE_SELF,
-                width: TILE_SELF,
-                height: TILE_SELF,
-              }}
-            >
-              {c.crop && (
-                <div className="absolute inset-1">
-                  <PixelCrop id={c.crop.id} stage={c.crop.stage} />
-                </div>
-              )}
-            </div>
-          );
-        }),
-      )}
-
-      {/* facing marker */}
-      {(() => {
-        let { x, y } = player.pos;
-        if (player.dir === "up") y -= 1;
-        else if (player.dir === "down") y += 1;
-        else if (player.dir === "left") x -= 1;
-        else if (player.dir === "right") x += 1;
-        if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return null;
-        return (
-          <div
-            className="absolute facing-marker pointer-events-none"
-            style={{ left: x * TILE_SELF, top: y * TILE_SELF, width: TILE_SELF, height: TILE_SELF }}
-          />
-        );
-      })()}
-
-      <InterpolatedMatchFarmer player={player} actionFlash={actionFlash} acting={acting} />
-
-      <MatchArenaAmbience />
-
-      {events.map(({ id, ev }) => {
-        if (ev.kind === "insufficient_funds") return null;
-        const text =
-          ev.kind === "harvest"
-            ? `+${ev.reward}`
-            : ev.kind === "till"
-              ? "ขุด"
-              : ev.kind === "water"
-                ? "รดน้ำ"
-                : ev.kind === "plant"
-                  ? CROPS[ev.cropId].name
-                  : "";
-        const color = ev.kind === "harvest" ? "#ffd24a" : "#f4e4c1";
-        return (
-          <div
-            key={id}
-            className="absolute pointer-events-none font-pixel z-20"
-            style={{
-              left: ev.x * TILE_SELF + TILE_SELF / 2 - 24,
-              top: ev.y * TILE_SELF,
-              width: 48,
-              textAlign: "center",
-              fontSize: 10,
-              color,
-              textShadow: "1px 1px 0 #000, -1px 1px 0 #000, 1px -1px 0 #000, -1px -1px 0 #000",
-              animation: "float-up 0.95s ease-out forwards",
-            }}
-          >
-            {text}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function InterpolatedMatchFarmer({
-  player,
-  actionFlash,
-  acting,
-}: {
-  player: PublicPlayer;
-  actionFlash: number;
-  acting: boolean;
-}) {
-  const { pos: displayPos, walkFrame } = useInterpolatedCellPos(player.pos, MOVE_TWEEN_MS);
-  const moving = displayPos.x !== player.pos.x || displayPos.y !== player.pos.y;
-
-  return (
-    <div
-      className="absolute z-10"
-      style={{
-        transform: `translate3d(${displayPos.x * TILE_SELF}px, ${displayPos.y * TILE_SELF - 10}px, 0)`,
-        width: TILE_SELF,
-        height: TILE_SELF,
-        willChange: "transform",
-      }}
-    >
-      <PixelFarmer
-        key={actionFlash}
-        direction={player.dir}
-        walking={moving}
-        walkFrame={walkFrame}
-        acting={acting}
-        tool={player.tool}
-        cosmetics={player.cosmetics}
-      />
-    </div>
-  );
-}
-
-function useInterpolatedCellPos(pos: { x: number; y: number }, durationMs: number) {
-  const [displayPos, setDisplayPos] = useState(pos);
-  const [walkFrame, setWalkFrame] = useState(0);
-  const animationRef = useRef<number | null>(null);
-  const displayPosRef = useRef(pos);
-  const previousTargetRef = useRef(pos);
-
-  useEffect(() => {
-    displayPosRef.current = displayPos;
-  }, [displayPos]);
-
-  useEffect(() => {
-    const previousTarget = previousTargetRef.current;
-    previousTargetRef.current = pos;
-
-    if (previousTarget.x === pos.x && previousTarget.y === pos.y) return;
-
-    if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
-
-    const currentDisplay = displayPosRef.current;
-    const from =
-      Math.abs(currentDisplay.x - pos.x) > 1 || Math.abs(currentDisplay.y - pos.y) > 1
-        ? previousTarget
-        : currentDisplay;
-    if (from !== currentDisplay) {
-      displayPosRef.current = from;
-      setDisplayPos(from);
-    }
-    const startedAt = performance.now();
-
-    const tick = (now: number) => {
-      const t = Math.min(1, (now - startedAt) / durationMs);
-      const eased = 1 - (1 - t) * (1 - t);
-      const next = {
-        x: from.x + (pos.x - from.x) * eased,
-        y: from.y + (pos.y - from.y) * eased,
-      };
-      displayPosRef.current = next;
-      setDisplayPos(next);
-      setWalkFrame(t < 0.5 ? 0 : 1);
-      if (t < 1) {
-        animationRef.current = requestAnimationFrame(tick);
-      } else {
-        animationRef.current = null;
-        displayPosRef.current = pos;
-        setDisplayPos(pos);
-        setWalkFrame(0);
-      }
-    };
-
-    animationRef.current = requestAnimationFrame(tick);
-
-    return () => {
-      if (animationRef.current !== null) cancelAnimationFrame(animationRef.current);
-    };
-  }, [durationMs, pos]);
-
-  return { pos: displayPos, walkFrame };
-}
-
-function MatchArenaAmbience() {
-  return (
-    <>
-      <div className="absolute inset-0 pointer-events-none z-20">
-        {Array.from({ length: 10 }).map((_, i) => (
-          <div
-            key={`sp-${i}`}
-            className="match-sparkle"
-            style={{
-              left: `${6 + ((i * 19) % 88)}%`,
-              top: `${8 + ((i * 31) % 78)}%`,
-              animationDelay: `${i * 0.45}s`,
-            }}
-          />
-        ))}
-        {Array.from({ length: 7 }).map((_, i) => (
-          <div
-            key={`leaf-${i}`}
-            className="match-leaf"
-            style={{
-              left: `${-10 + i * 18}%`,
-              top: `${10 + ((i * 29) % 70)}%`,
-              animationDelay: `${i * 1.2}s`,
-              background: i % 2 ? "#8bc967" : "#ffd24a",
-            }}
-          />
-        ))}
-      </div>
-    </>
-  );
+  return <PhaserField player={player} events={events} acting={acting} />;
 }
 
 function SpectatorMatchView({
