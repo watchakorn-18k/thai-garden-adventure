@@ -5,7 +5,6 @@
 ![Stack](https://img.shields.io/badge/React-19-61dafb) ![Vite](https://img.shields.io/badge/Vite-7-646cff) ![TanStack](https://img.shields.io/badge/TanStack-Start-ff4154) ![Tailwind](https://img.shields.io/badge/Tailwind-v4-38bdf8) ![Bun](https://img.shields.io/badge/Bun-package%20manager-f9f1e1)
 
 ## ฟีเจอร์
-
 - 🌱 ระบบปลูกผักไทย (ผักบุ้ง, พริก, มะเขือ ฯลฯ) บน grid
 - 👨‍🌾 ตัวละคร pixel art เคลื่อนไหวได้
 - ⛏️ FX ขุด/ปลูก/เก็บเกี่ยว
