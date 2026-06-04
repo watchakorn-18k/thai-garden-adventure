@@ -17,6 +17,7 @@ import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/playe
 import { useMatch } from "@/lib/match-client";
 import {
   DEFAULT_ROOM_SETTINGS,
+  ROOM_SETTING_LIMITS,
   type MatchRecap,
   type MatchRole,
   type PublicMatchState,
@@ -804,8 +805,14 @@ function SettingsModal({
   onSave: (settings: RoomSettings) => void;
 }) {
   const [draft, setDraft] = useState<RoomSettings>(settings);
-  const setNumber = (key: "targetCoins" | "durationMs", value: number) => {
-    setDraft((current) => ({ ...current, [key]: value }));
+  const setNumber = (
+    key: "targetCoins" | "durationMs",
+    value: number,
+    limits: { min: number; max: number },
+  ) => {
+    if (!Number.isFinite(value)) return;
+    const clamped = Math.min(limits.max, Math.max(limits.min, Math.round(value)));
+    setDraft((current) => ({ ...current, [key]: clamped }));
   };
 
   return (
@@ -855,11 +862,13 @@ function SettingsModal({
             <input
               className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3"
               type="number"
-              min={200}
-              max={1500}
+              min={ROOM_SETTING_LIMITS.targetCoins.min}
+              max={ROOM_SETTING_LIMITS.targetCoins.max}
               step={50}
               value={draft.targetCoins}
-              onChange={(e) => setNumber("targetCoins", Number(e.target.value))}
+              onChange={(e) =>
+                setNumber("targetCoins", Number(e.target.value), ROOM_SETTING_LIMITS.targetCoins)
+              }
             />
           </SettingField>
           <SettingField
@@ -870,11 +879,17 @@ function SettingsModal({
             <input
               className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3"
               type="number"
-              min={2}
-              max={10}
+              min={ROOM_SETTING_LIMITS.durationMs.min / 60000}
+              max={ROOM_SETTING_LIMITS.durationMs.max / 60000}
               step={1}
               value={Math.round(draft.durationMs / 60000)}
-              onChange={(e) => setNumber("durationMs", Number(e.target.value) * 60000)}
+              onChange={(e) =>
+                setNumber(
+                  "durationMs",
+                  Number(e.target.value) * 60000,
+                  ROOM_SETTING_LIMITS.durationMs,
+                )
+              }
             />
           </SettingField>
           <SettingField label="SLOTS" helper="ตอนนี้ล็อก 2 คน" value={draft.maxPlayers}>

@@ -24,7 +24,70 @@ bun run dev
 
 เปิด http://localhost:5173/lobby → สร้างห้อง → แชร์รหัส 6 ตัวให้คู่แข่ง → กด READY ทั้งคู่ → เริ่มแข่ง.
 
-Production: deploy `bun run deploy:match` แล้วตั้ง `VITE_MATCH_WS_URL=wss://thai-garden-match.<sub>.workers.dev` ใน main app env.
+Production มี 2 ทาง:
+
+- Cloudflare: deploy `bun run deploy:match` แล้วตั้ง `VITE_MATCH_WS_URL=wss://thai-garden-match.<sub>.workers.dev` ตอน build main app.
+- VPS/Podman: รัน web image + match image แยกกัน ดูหัวข้อ Docker deploy.
+
+## Docker deploy บน VPS
+
+GitHub Actions build/push 2 images:
+
+- `ghcr.io/watchakorn-18k/thai-garden-adventure:latest` — web app, container port `3000`
+- `ghcr.io/watchakorn-18k/thai-garden-match:latest` — match WebSocket worker, container port `8787`
+
+ตั้ง GitHub Actions variable ก่อน build web image:
+
+```text
+VITE_MATCH_WS_URL=ws://45.136.254.176:8787
+```
+
+ถ้าเว็บอยู่หลัง HTTPS ให้ใช้ `wss://...` แทน `ws://...`.
+
+รันบน VPS:
+
+```bash
+podman pull ghcr.io/watchakorn-18k/thai-garden-adventure:latest
+podman pull ghcr.io/watchakorn-18k/thai-garden-match:latest
+
+podman rm -f thai-garden-match 2>/dev/null
+podman run -d \
+  --name thai-garden-match \
+  --restart=always \
+  --memory=512m \
+  -p 8787:8787 \
+  ghcr.io/watchakorn-18k/thai-garden-match:latest
+
+podman rm -f thai-garden-adventure 2>/dev/null
+podman run -d \
+  --name thai-garden-adventure \
+  --restart=always \
+  --memory=256m \
+  -p 8080:3000 \
+  ghcr.io/watchakorn-18k/thai-garden-adventure:latest
+```
+
+เปิด firewall:
+
+```bash
+sudo ufw allow 8080/tcp
+sudo ufw allow 8787/tcp
+sudo ufw reload
+```
+
+เช็ค worker:
+
+```bash
+curl http://127.0.0.1:8787/health
+curl http://45.136.254.176:8787/health
+podman logs --tail=100 thai-garden-match
+```
+
+เปิดเว็บ:
+
+```text
+http://45.136.254.176:8080
+```
 
 ## เริ่มต้น
 

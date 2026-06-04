@@ -468,10 +468,6 @@ export class MatchRoom implements DurableObject {
       });
       return;
     }
-    if (this.status === "lobby" && [...this.players.values()].some((p) => p.ready)) {
-      this.sendTo(ws, { t: "error", code: "ready_locked", message: "มีผู้เล่นกด READY แล้ว" });
-      return;
-    }
     const settings = roomSettingsSchema.safeParse(rawSettings);
     if (!settings.success) {
       this.sendTo(ws, { t: "error", code: "invalid_settings", message: "ตั้งค่าห้องไม่ถูกต้อง" });
