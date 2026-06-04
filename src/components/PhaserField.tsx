@@ -13,6 +13,7 @@ import {
 } from "@/lib/pixel-art";
 
 const TILE = 56;
+const MOVE_SPEED_TILES_PER_SECOND = 5.8;
 // Time constant for exponential movement smoothing (ms). Lower = snappier and
 // closer to the server position, higher = smoother but more trailing.
 const MOVE_TAU = 45;
@@ -23,7 +24,16 @@ const TYPE_CODE: Record<"grass" | "tilled" | "watered", number> = {
   tilled: 1,
   watered: 2,
 };
-const CROP_CODE: Record<string, number> = { chili: 1, rice: 2, morning_glory: 3, eggplant: 4 };
+const CROP_CODE: Record<string, number> = {
+  chili: 1,
+  rice: 2,
+  morning_glory: 3,
+  eggplant: 4,
+  mango: 5,
+  lemongrass: 6,
+  papaya: 7,
+  basil: 8,
+};
 
 interface Props {
   player: PublicPlayer;

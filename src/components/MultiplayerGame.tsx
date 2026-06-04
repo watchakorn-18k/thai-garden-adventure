@@ -434,25 +434,30 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   useEffect(() => {
     if (isSpectator) return;
     const onDown = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
+      const k = normalizedKeyboardKey(e);
       keys.current.add(k);
-      if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) e.preventDefault();
+      if (["space", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
+        e.preventDefault();
+      }
       const dir = keyToDir(k);
       if (dir) setMovement(keysToDir(keys.current, nextDiagonalAxis));
-      if ((k === " " || k === "enter") && !e.repeat) sendAction();
-      if (k === "r" && (statusRef.current === "lobby" || statusRef.current === "crop_selection")) {
+      if ((k === "space" || k === "enter") && !e.repeat) sendAction();
+      if (
+        k === "keyr" &&
+        (statusRef.current === "lobby" || statusRef.current === "crop_selection")
+      ) {
         SFX.click();
         send({ t: "ready" });
       }
-      if (k === "1") {
+      if (k === "digit1") {
         SFX.click();
         send({ t: "tool", tool: "hoe" });
       }
-      if (k === "2") {
+      if (k === "digit2") {
         SFX.click();
         send({ t: "tool", tool: "watering_can" });
       }
-      if (k === "3") {
+      if (k === "digit3") {
         SFX.click();
         send({ t: "tool", tool: "seed" });
       }
@@ -462,7 +467,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       setMovement(null);
     };
     const onUp = (e: KeyboardEvent) => {
-      keys.current.delete(e.key.toLowerCase());
+      keys.current.delete(normalizedKeyboardKey(e));
       setMovement(keysToDir(keys.current, nextDiagonalAxis));
     };
     const onVisibilityChange = () => {
@@ -499,10 +504,10 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       const k = keys.current;
       let dx = 0;
       let dy = 0;
-      if (k.has("w") || k.has("arrowup")) dy -= 1;
-      if (k.has("s") || k.has("arrowdown")) dy += 1;
-      if (k.has("a") || k.has("arrowleft")) dx -= 1;
-      if (k.has("d") || k.has("arrowright")) dx += 1;
+      if (k.has("keyw") || k.has("arrowup")) dy -= 1;
+      if (k.has("keys") || k.has("arrowdown")) dy += 1;
+      if (k.has("keya") || k.has("arrowleft")) dx -= 1;
+      if (k.has("keyd") || k.has("arrowright")) dx += 1;
       if (dx || dy) {
         const len = Math.hypot(dx, dy) || 1;
         dx /= len;
@@ -836,11 +841,35 @@ function GuideAction({ keys, label, sub }: { keys: string; label: string; sub: s
   );
 }
 
+function normalizedKeyboardKey(e: KeyboardEvent): string {
+  const code = e.code.toLowerCase();
+  if (code && code !== "unidentified") return code;
+
+  const key = e.key.toLowerCase();
+  const thaiFallback: Record<string, string> = {
+    ไ: "keyw",
+    ฟ: "keya",
+    ห: "keys",
+    ก: "keyd",
+    พ: "keyr",
+    " ": "space",
+    enter: "enter",
+    arrowup: "arrowup",
+    arrowdown: "arrowdown",
+    arrowleft: "arrowleft",
+    arrowright: "arrowright",
+    "1": "digit1",
+    "2": "digit2",
+    "3": "digit3",
+  };
+  return thaiFallback[key] ?? key;
+}
+
 function keyToDir(k: string): Direction | null {
-  if (k === "w" || k === "arrowup") return "up";
-  if (k === "s" || k === "arrowdown") return "down";
-  if (k === "a" || k === "arrowleft") return "left";
-  if (k === "d" || k === "arrowright") return "right";
+  if (k === "keyw" || k === "arrowup") return "up";
+  if (k === "keys" || k === "arrowdown") return "down";
+  if (k === "keya" || k === "arrowleft") return "left";
+  if (k === "keyd" || k === "arrowright") return "right";
   return null;
 }
 
@@ -849,15 +878,15 @@ function keysToDir(
   nextDiagonalAxis: React.MutableRefObject<"vertical" | "horizontal">,
 ): Direction | null {
   const vertical =
-    keys.has("w") || keys.has("arrowup")
+    keys.has("keyw") || keys.has("arrowup")
       ? "up"
-      : keys.has("s") || keys.has("arrowdown")
+      : keys.has("keys") || keys.has("arrowdown")
         ? "down"
         : null;
   const horizontal =
-    keys.has("a") || keys.has("arrowleft")
+    keys.has("keya") || keys.has("arrowleft")
       ? "left"
-      : keys.has("d") || keys.has("arrowright")
+      : keys.has("keyd") || keys.has("arrowright")
         ? "right"
         : null;
 
