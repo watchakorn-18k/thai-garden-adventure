@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PixelFarmer from "./PixelFarmer";
 import CosmeticPicker from "./CosmeticPicker";
+import CropIndexBook from "./CropIndexBook";
 import PhaserField from "./PhaserField";
 import {
   ChiliIcon,
@@ -493,6 +494,18 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
       )}
+      <CropIndexBook
+        compact
+        marketPrices={state.marketPrices}
+        selectedCropId={self?.seedChoice}
+        onSelectCrop={
+          !isSpectator && self
+            ? (id) => {
+                send({ t: "seed", id });
+              }
+            : undefined
+        }
+      />
       {state.status === "playing" && self && !isSpectator && (
         <MobileControls setMovement={setMovement} sendAction={sendAction} />
       )}
@@ -1402,72 +1415,75 @@ function Toolbar({
   marketPrices?: Record<CropId, number>;
 }) {
   return (
-    <div className="relative z-10 w-full max-w-5xl flex flex-wrap items-center justify-center gap-3 px-6 py-3 pixel-panel">
-      <div className="flex items-center gap-2">
-        {(
-          [
-            { id: "hoe", label: "HOE", Icon: HoeIcon, key: "1" },
-            { id: "watering_can", label: "CAN", Icon: WaterCanIcon, key: "2" },
-            { id: "seed", label: "SEED", Icon: SeedIcon, key: "3" },
-          ] as {
-            id: Tool;
-            label: string;
-            Icon: React.ComponentType<{ size?: number }>;
-            key: string;
-          }[]
-        ).map((t) => (
-          <button
-            key={t.id}
-            onClick={() => {
-              SFX.click();
-              send({ t: "tool", tool: t.id });
-            }}
-            className="pixel-btn flex items-center gap-2"
-            data-active={self.tool === t.id}
-          >
-            <t.Icon size={18} />
-            <span>{t.label}</span>
-            <span className="opacity-60 ml-1">[{t.key}]</span>
-          </button>
-        ))}
-      </div>
-      <div className="mx-2 self-stretch" style={{ width: 4, background: "#1a0f1f" }} />
-      <div className="flex items-center gap-2">
-        {Object.values(CROPS).map((c) => {
-          const Icon = CROP_ICONS[c.id];
-          const active = self.seedChoice === c.id && self.tool === "seed";
-          const currentSell = marketPrices ? Math.round(marketPrices[c.id]) : c.sellPrice;
-          return (
+    <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
+      <div className="farm-toolbar-section farm-toolbar-tools">
+        <span className="farm-toolbar-label">TOOLS</span>
+        <div className="farm-tool-grid">
+          {(
+            [
+              { id: "hoe", label: "HOE", Icon: HoeIcon, key: "1" },
+              { id: "watering_can", label: "CAN", Icon: WaterCanIcon, key: "2" },
+              { id: "seed", label: "SEED", Icon: SeedIcon, key: "3" },
+            ] as {
+              id: Tool;
+              label: string;
+              Icon: React.ComponentType<{ size?: number }>;
+              key: string;
+            }[]
+          ).map((t) => (
             <button
-              key={c.id}
+              key={t.id}
               onClick={() => {
                 SFX.click();
-                send({ t: "seed", id: c.id });
+                send({ t: "tool", tool: t.id });
               }}
-              className="pixel-btn flex items-center gap-2"
-              data-active={active}
-              style={{ fontSize: 9 }}
-              title={`ราคาซื้อ: ${c.seedCost} | ราคาขายตลาดปัจจุบัน: ${currentSell}`}
+              className="farm-tool-btn pixel-btn"
+              data-active={self.tool === t.id}
             >
-              <Icon size={16} />
-              <span>{c.name}</span>
-              <span
-                className="flex flex-col items-start gap-0.5 opacity-80"
-                style={{ fontSize: 7 }}
-              >
-                <span className="flex items-center gap-0.5">
-                  <span className="opacity-60 text-[6px]">ซื้อ:</span>
-                  <CoinIcon size={8} />
-                  <span>{c.seedCost}</span>
-                </span>
-                <span className="flex items-center gap-0.5">
-                  <span className="opacity-60 text-[6px]">ขาย:</span>
-                  <span className="text-[var(--gold)]">{currentSell}</span>
-                </span>
-              </span>
+              <t.Icon size={20} />
+              <span>{t.label}</span>
+              <span className="farm-key-hint">[{t.key}]</span>
             </button>
-          );
-        })}
+          ))}
+        </div>
+      </div>
+
+      <div className="farm-toolbar-section farm-toolbar-crops">
+        <span className="farm-toolbar-label">CROPS</span>
+        <div className="farm-crop-grid">
+          {Object.values(CROPS).map((c) => {
+            const Icon = CROP_ICONS[c.id];
+            const active = self.seedChoice === c.id && self.tool === "seed";
+            const currentSell = marketPrices ? Math.round(marketPrices[c.id]) : c.sellPrice;
+            return (
+              <button
+                key={c.id}
+                onClick={() => {
+                  SFX.click();
+                  send({ t: "seed", id: c.id });
+                }}
+                className="farm-crop-card pixel-btn"
+                data-active={active}
+                title={`ราคาซื้อ: ${c.seedCost} | ราคาขายตลาดปัจจุบัน: ${currentSell}`}
+              >
+                <span className="farm-crop-icon">
+                  <Icon size={24} />
+                </span>
+                <span className="farm-crop-body">
+                  <span className="farm-crop-name">{c.name}</span>
+                  <span className="farm-crop-prices">
+                    <span>
+                      ซื้อ <CoinIcon size={10} /> <b>{c.seedCost}</b>
+                    </span>
+                    <span>
+                      ขาย <b>{currentSell}</b>
+                    </span>
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     </div>
   );

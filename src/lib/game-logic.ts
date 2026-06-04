@@ -103,7 +103,7 @@ export function applyAction(input: ActionInput): ActionResult {
     const baseReward = input.marketPrices
       ? (input.marketPrices[tile.crop.id] ?? crop.sellPrice)
       : crop.sellPrice;
-    const reward = tile.crop.stage === 3 ? 0 : baseReward;
+    const reward = tile.crop.stage === 3 ? 0 : Math.round(baseReward);
     coins += reward;
     events.push({
       kind: "harvest",

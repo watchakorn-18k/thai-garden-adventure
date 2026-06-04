@@ -3,7 +3,9 @@
     "allow": [
       "PowerShell(Get-ChildItem -Path \"$env:LOCALAPPDATA\" -Recurse -Filter \"bun.exe\" -ErrorAction SilentlyContinue)",
       "PowerShell(npx tsc --noEmit --project worker/match/tsconfig.json)",
-      "PowerShell(npx tsc --noEmit)"
+      "PowerShell(npx tsc --noEmit)",
+      "PowerShell(& \"C:\\\\Users\\\\ovens\\\\.bun\\\\bin\\\\bun.exe\" run lint)",
+      "PowerShell(& \"C:\\\\Users\\\\ovens\\\\.bun\\\\bin\\\\bun.exe\" run build)"
     ]
   }
 }
