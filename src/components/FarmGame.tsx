@@ -23,6 +23,7 @@ import {
   CROPS,
   ROWS,
   makeEmptyField,
+  type Crop,
   type CropId,
   type Direction,
   type Tile,
