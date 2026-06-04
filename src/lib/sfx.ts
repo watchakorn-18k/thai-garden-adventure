@@ -92,6 +92,25 @@ function noiseBurst(dur: number, vol = 0.3) {
   src.stop(now + dur + 0.05);
 }
 
+function pop() {
+  const a = ensure();
+  if (!a || muted || !master) return;
+  const now = a.currentTime;
+  const o = a.createOscillator();
+  const g = a.createGain();
+  o.type = "sine";
+  o.frequency.setValueAtTime(420, now);
+  o.frequency.exponentialRampToValueAtTime(920, now + 0.035);
+  o.frequency.exponentialRampToValueAtTime(520, now + 0.08);
+  g.gain.setValueAtTime(0.0001, now);
+  g.gain.exponentialRampToValueAtTime(0.35, now + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, now + 0.09);
+  o.connect(g);
+  g.connect(master);
+  o.start(now);
+  o.stop(now + 0.11);
+}
+
 export const SFX = {
   till() {
     noiseBurst(0.18, 0.35);
@@ -149,6 +168,6 @@ export const SFX = {
     noiseBurst(0.04, 0.06);
   },
   click() {
-    play([{ freq: 660, dur: 0.04, type: "square", vol: 0.25 }]);
+    pop();
   },
 };

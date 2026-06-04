@@ -141,10 +141,10 @@ export default function PixelFarmer({
     if (tool === "hoe") {
       return (
         <g className="tool-hoe-side" style={{ transformOrigin: "10px 11px" }}>
-          <rect x="11" y="3" width="1" height="8" fill={palette.tool} />
-          <rect x="12" y="2" width="1" height="7" fill={palette.tool} />
-          <rect x="9" y="10" width="4" height="2" fill={palette.toolMetal} />
-          <rect x="9" y="12" width="4" height="1" fill={palette.toolMetalDark} />
+          <rect x="11" y="6" width="1" height="8" fill={palette.tool} />
+          <rect x="12" y="7" width="1" height="7" fill={palette.tool} />
+          <rect x="12" y="3" width="4" height="2" fill={palette.toolMetal} />
+          <rect x="12" y="5" width="4" height="1" fill={palette.toolMetalDark} />
         </g>
       );
     }
@@ -173,9 +173,9 @@ export default function PixelFarmer({
     if (tool === "hoe") {
       return (
         <g style={{ transformOrigin: "8px 11px" }} className="tool-hoe-vertical">
-          <rect x="7" y="2" width="2" height="8" fill={palette.tool} />
-          <rect x="6" y="10" width="4" height="2" fill={palette.toolMetal} />
-          <rect x="6" y="12" width="4" height="1" fill={palette.toolMetalDark} />
+          <rect x="7" y="6" width="2" height="8" fill={palette.tool} />
+          <rect x="6" y="2" width="4" height="2" fill={palette.toolMetal} />
+          <rect x="6" y="4" width="4" height="1" fill={palette.toolMetalDark} />
         </g>
       );
     }

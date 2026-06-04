@@ -1,3 +1,4 @@
+import { Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import PixelFarmer from "./PixelFarmer";
 import CosmeticPicker from "./CosmeticPicker";
@@ -17,6 +18,7 @@ import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/playe
 import { useMatch } from "@/lib/match-client";
 import { SFX } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
+import gamePlayMusicUrl from "../../game_play.wav";
 import {
   DEFAULT_ROOM_SETTINGS,
   ROOM_SETTING_LIMITS,
@@ -57,8 +59,13 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outfitOpen, setOutfitOpen] = useState(false);
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
+  const [musicEnabled, setMusicEnabled] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return localStorage.getItem("tg.lobbyMusic") !== "off";
+  });
   const evIdRef = useRef(0);
   const lobbyMusicRef = useRef<HTMLAudioElement | null>(null);
+  const gamePlayMusicRef = useRef<HTMLAudioElement | null>(null);
   const {
     state,
     selfId,
@@ -120,7 +127,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   });
 
   useEffect(() => {
-    const shouldPlayLobbyMusic = state?.status === "lobby";
+    const shouldPlayLobbyMusic = musicEnabled && state?.status === "lobby";
     const audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
     lobbyMusicRef.current = audio;
     audio.loop = true;
@@ -144,7 +151,43 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       window.removeEventListener("keydown", play);
       audio.pause();
     };
-  }, [state?.status]);
+  }, [musicEnabled, state?.status]);
+
+  useEffect(() => {
+    const shouldPlayGameMusic = musicEnabled && state?.status === "playing";
+    const audio = gamePlayMusicRef.current ?? new Audio(gamePlayMusicUrl);
+    gamePlayMusicRef.current = audio;
+    audio.loop = true;
+    audio.volume = 0.3;
+
+    if (!shouldPlayGameMusic) {
+      audio.pause();
+      audio.currentTime = 0;
+      return;
+    }
+
+    const play = () => {
+      void audio.play().catch(() => undefined);
+    };
+    play();
+    window.addEventListener("pointerdown", play, { once: true });
+    window.addEventListener("keydown", play, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", play);
+      window.removeEventListener("keydown", play);
+      audio.pause();
+    };
+  }, [musicEnabled, state?.status]);
+
+  const toggleLobbyMusic = useCallback(() => {
+    SFX.click();
+    setMusicEnabled((current) => {
+      const next = !current;
+      localStorage.setItem("tg.lobbyMusic", next ? "on" : "off");
+      return next;
+    });
+  }, []);
 
   const keys = useRef<Set<string>>(new Set());
   const nextDiagonalAxis = useRef<"vertical" | "horizontal">("vertical");
@@ -412,7 +455,19 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         }
       />
 
-      {state.status === "lobby" &&
+      {state.status === "lobby" && (
+        <button
+          onClick={toggleLobbyMusic}
+          className="pixel-btn fixed right-4 top-4 z-50 flex h-12 w-12 items-center justify-center p-0"
+          data-active={musicEnabled ? "true" : undefined}
+          aria-label={musicEnabled ? "Mute lobby music" : "Play lobby music"}
+          title={musicEnabled ? "Mute lobby music" : "Play lobby music"}
+        >
+          {musicEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
+        </button>
+      )}
+
+      {(state.status === "lobby" || state.status === "countdown") &&
         (isSpectator ? (
           <SpectatorLobbyView
             players={state.players}
