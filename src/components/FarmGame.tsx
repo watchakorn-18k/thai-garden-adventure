@@ -265,7 +265,9 @@ export default function FarmGame() {
       const k = e.key.toLowerCase();
       keys.current.add(k);
       if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) e.preventDefault();
-      if (k === " " || k === "enter") doAction();
+      if (k === " " || k === "enter") {
+        if (!e.repeat) doAction();
+      }
       if (k === "1") setTool("hoe");
       if (k === "2") setTool("watering_can");
       if (k === "3") setTool("seed");
