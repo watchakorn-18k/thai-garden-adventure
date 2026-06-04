@@ -216,3 +216,7 @@ Cloudflare bind env ตอน **request time**. `process.env.X` ที่ module
 ## License
 
 Private project.
+
+```
+podman pull ghcr.io/watchakorn-18k/thai-garden-adventure:latest && podman pull ghcr.io/watchakorn-18k/thai-garden-match:latest &&  podman rm -f thai-garden-match 2>/dev/null && podman rm -f thai-garden-adventure 2>/dev/null && podman run -d   --name thai-garden-match   --restart=always   --memory=512m   -p 127.0.0.1:8787:8787   ghcr.io/watchakorn-18k/thai-garden-match:latest && podman run -d   --name thai-garden-adventure   --restart=always   --memory=256m   -p 127.0.0.1:8080:3000   ghcr.io/watchakorn-18k/thai-garden-adventure:latest
+```
