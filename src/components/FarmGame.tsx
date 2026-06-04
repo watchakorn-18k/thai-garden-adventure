@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
 import CosmeticPicker from "./CosmeticPicker";
+import CropIndexBook from "./CropIndexBook";
 import {
   HoeIcon,
   WaterCanIcon,
@@ -12,6 +13,10 @@ import {
   RiceIcon,
   MorningGloryIcon,
   EggplantIcon,
+  MangoIcon,
+  LemongrassIcon,
+  PapayaIcon,
+  BasilIcon,
 } from "./PixelIcons";
 import {
   COLS,
@@ -24,7 +29,7 @@ import {
   type Tile,
   type Tool,
 } from "@/lib/game-types";
-import { applyAction, tickGrowth } from "@/lib/game-logic";
+import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from "@/lib/game-logic";
 import { SFX, setMuted, isMuted } from "@/lib/sfx";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 
@@ -36,6 +41,10 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   rice: RiceIcon,
   morning_glory: MorningGloryIcon,
   eggplant: EggplantIcon,
+  mango: MangoIcon,
+  lemongrass: LemongrassIcon,
+  papaya: PapayaIcon,
+  basil: BasilIcon,
 };
 
 export default function FarmGame() {
@@ -49,6 +58,21 @@ export default function FarmGame() {
   const [tool, setTool] = useState<Tool>("hoe");
   const [seedChoice, setSeedChoice] = useState<CropId>("chili");
   const [coins, setCoins] = useState(50);
+  const [marketPrices, setMarketPrices] = useState<Record<CropId, number>>(() => ({
+    chili: CROPS.chili.sellPrice,
+    rice: CROPS.rice.sellPrice,
+    morning_glory: CROPS.morning_glory.sellPrice,
+    eggplant: CROPS.eggplant.sellPrice,
+    mango: CROPS.mango.sellPrice,
+    lemongrass: CROPS.lemongrass.sellPrice,
+    papaya: CROPS.papaya.sellPrice,
+    basil: CROPS.basil.sellPrice,
+  }));
+  const [comboState, setComboState] = useState<ComboState>({
+    combo: 0,
+    lastHarvestAt: 0,
+    crops: [],
+  });
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
   const [outfitOpen, setOutfitOpen] = useState(false);
   const [popups, setPopups] = useState<
@@ -182,19 +206,6 @@ export default function FarmGame() {
     setTimeout(() => setCrits((c) => c.filter((q) => q.id !== id)), 500);
   };
 
-  const bumpCombo = (x: number, y: number) => {
-    setCombo((c) => {
-      const next = c + 1;
-      const id = ++popupId.current;
-      setComboShown({ id, level: next, x, y });
-      setTimeout(() => setComboShown((cs) => (cs && cs.id === id ? null : cs)), 1100);
-      if (next >= 2) SFX.combo(next);
-      return next;
-    });
-    if (comboTimer.current) clearTimeout(comboTimer.current);
-    comboTimer.current = setTimeout(() => setCombo(0), COMBO_WINDOW);
-  };
-
   const doAction = useCallback(() => {
     const t = facingTile();
     if (!t) return;
@@ -209,6 +220,7 @@ export default function FarmGame() {
         dir,
         tool,
         seedChoice,
+        marketPrices,
         now: Date.now(),
       });
       let nextCoins = result.coins;
@@ -218,16 +230,61 @@ export default function FarmGame() {
             addPopup(ev.x, ev.y, "เหี่ยว", "bad");
             burstParticles(ev.x, ev.y, "dirt");
             SFX.till();
+            setCombo(0);
+            setComboState({ combo: 0, lastHarvestAt: Date.now(), crops: [] });
           } else {
             const isCrit = Math.random() < 0.18;
-            const comboBonus = combo >= 2 ? Math.floor(ev.reward * 0.25 * Math.min(combo, 6)) : 0;
+            const { bonus, nextState } = updateComboAndGetBonus(
+              comboState,
+              ev.cropId,
+              ev.reward,
+              Date.now(),
+            );
+            setComboState(nextState);
+            setCombo(nextState.combo);
+
             const critBonus = isCrit ? ev.reward : 0;
-            const total = ev.reward + comboBonus + critBonus;
+            const total = ev.reward + bonus + critBonus;
             nextCoins += total - ev.reward; // applyAction already added ev.reward
-            addPopup(ev.x, ev.y, isCrit ? `CRIT +${total}` : `+${total}`, "good");
+
+            const variety = nextState.crops.length;
+            let popupText = `+${total}`;
+            if (variety > 1) {
+              popupText += ` Mix x${variety}`;
+            }
+            if (isCrit) {
+              popupText = `CRIT ${popupText}`;
+            }
+            addPopup(ev.x, ev.y, popupText, "good");
+
             burstParticles(ev.x, ev.y, "sparkle");
             spawnFlyCoins(ev.x, ev.y, Math.min(8, Math.max(3, Math.floor(total / 10))));
-            bumpCombo(ev.x, ev.y);
+
+            if (nextState.combo >= 2) {
+              const id = ++popupId.current;
+              setComboShown({ id, level: nextState.combo, x: ev.x, y: ev.y });
+              setTimeout(() => setComboShown((cs) => (cs && cs.id === id ? null : cs)), 1100);
+              SFX.combo(nextState.combo);
+            }
+            if (comboTimer.current) clearTimeout(comboTimer.current);
+            comboTimer.current = setTimeout(() => {
+              setCombo(0);
+              setComboState({ combo: 0, lastHarvestAt: Date.now(), crops: [] });
+            }, COMBO_WINDOW);
+
+            const basePrice = CROPS[ev.cropId].sellPrice;
+            setMarketPrices((prev) => {
+              const next = { ...prev };
+              next[ev.cropId] = Math.max(basePrice * 0.5, prev[ev.cropId] - basePrice * 0.1);
+              for (const cId of Object.keys(prev) as CropId[]) {
+                if (cId !== ev.cropId) {
+                  const otherBase = CROPS[cId].sellPrice;
+                  next[cId] = Math.min(otherBase * 1.2, prev[cId] + otherBase * 0.03);
+                }
+              }
+              return next;
+            });
+
             if (isCrit) {
               spawnCrit(ev.x, ev.y);
               triggerScreenShake(1);
@@ -256,13 +313,36 @@ export default function FarmGame() {
       if (nextCoins !== coins) setCoins(nextCoins);
       return result.tiles;
     });
-  }, [facingTile, tool, seedChoice, coins, pos, dir, combo]);
+  }, [facingTile, tool, seedChoice, coins, pos, dir, comboState, marketPrices]);
 
-  // crop growth tick
+  // crop growth tick (every 500ms)
   useEffect(() => {
     const i = setInterval(() => {
       setTiles((grid) => tickGrowth(grid, Date.now()).tiles);
     }, 500);
+    return () => clearInterval(i);
+  }, []);
+
+  // market price recovery tick (every 1000ms)
+  useEffect(() => {
+    const i = setInterval(() => {
+      setMarketPrices((prev) => {
+        const next = { ...prev };
+        let changed = false;
+        for (const cId of Object.keys(prev) as CropId[]) {
+          const base = CROPS[cId].sellPrice;
+          const current = prev[cId];
+          if (current < base) {
+            next[cId] = Math.min(base, current + base * 0.005);
+            changed = true;
+          } else if (current > base) {
+            next[cId] = Math.max(base, current - base * 0.005);
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }, 1000);
     return () => clearInterval(i);
   }, []);
 
@@ -433,7 +513,7 @@ export default function FarmGame() {
   );
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col items-center justify-center p-6 gap-6 overflow-hidden">
+    <div className="relative min-h-screen w-full flex flex-col items-center justify-start px-6 pb-6 gap-6 overflow-hidden">
       {/* Sky decoration */}
       <div className="sky-stars" />
       {cloudConfig.map((c, i) => (
@@ -549,6 +629,15 @@ export default function FarmGame() {
                 writeCosmetics(next);
                 SFX.click();
               },
+            }}
+          />
+          <CropIndexBook
+            iconOnly
+            marketPrices={marketPrices}
+            selectedCropId={seedChoice}
+            onSelectCrop={(id) => {
+              setSeedChoice(id);
+              setTool("seed");
             }}
           />
           <button
@@ -830,63 +919,75 @@ export default function FarmGame() {
       </div>
 
       {/* Toolbar */}
-      <div className="relative z-10 w-full max-w-5xl flex flex-wrap items-center justify-center gap-3 px-6 py-4 pixel-panel">
-        <div className="flex items-center gap-3">
-          {(
-            [
-              { id: "hoe", label: "HOE", Icon: HoeIcon, key: "1" },
-              { id: "watering_can", label: "CAN", Icon: WaterCanIcon, key: "2" },
-              { id: "seed", label: "SEED", Icon: SeedIcon, key: "3" },
-            ] as {
-              id: Tool;
-              label: string;
-              Icon: React.ComponentType<{ size?: number }>;
-              key: string;
-            }[]
-          ).map((t) => (
-            <button
-              key={t.id}
-              onClick={() => {
-                setTool(t.id);
-                SFX.click();
-              }}
-              className="pixel-btn flex items-center gap-2"
-              data-active={tool === t.id}
-            >
-              <t.Icon size={20} />
-              <span>{t.label}</span>
-              <span className="opacity-60 ml-1">[{t.key}]</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="mx-2 self-stretch" style={{ width: 4, background: "#1a0f1f" }} />
-
-        <div className="flex items-center gap-2">
-          {(Object.values(CROPS) as Crop[]).map((c) => {
-            const active = seedChoice === c.id && tool === "seed";
-            const Icon = CROP_ICONS[c.id];
-            return (
+      <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
+        <div className="farm-toolbar-section farm-toolbar-tools">
+          <span className="farm-toolbar-label">TOOLS</span>
+          <div className="farm-tool-grid">
+            {(
+              [
+                { id: "hoe", label: "HOE", Icon: HoeIcon, key: "1" },
+                { id: "watering_can", label: "CAN", Icon: WaterCanIcon, key: "2" },
+                { id: "seed", label: "SEED", Icon: SeedIcon, key: "3" },
+              ] as {
+                id: Tool;
+                label: string;
+                Icon: React.ComponentType<{ size?: number }>;
+                key: string;
+              }[]
+            ).map((t) => (
               <button
-                key={c.id}
+                key={t.id}
                 onClick={() => {
-                  setSeedChoice(c.id);
-                  setTool("seed");
+                  setTool(t.id);
                   SFX.click();
                 }}
-                className="pixel-btn flex items-center gap-2"
-                data-active={active}
-                style={{ fontSize: 9 }}
+                className="farm-tool-btn pixel-btn"
+                data-active={tool === t.id}
               >
-                <Icon size={18} />
-                <span>{c.name}</span>
-                <span className="flex items-center gap-1 opacity-80">
-                  <CoinIcon size={10} />
-                  {c.seedCost}
-                </span>
+                <t.Icon size={20} />
+                <span>{t.label}</span>
+                <span className="farm-key-hint">[{t.key}]</span>
               </button>
-            );
-          })}
+            ))}
+          </div>
+        </div>
+
+        <div className="farm-toolbar-section farm-toolbar-crops">
+          <span className="farm-toolbar-label">CROPS</span>
+          <div className="farm-crop-grid">
+            {(Object.values(CROPS) as Crop[]).map((c) => {
+              const active = seedChoice === c.id && tool === "seed";
+              const Icon = CROP_ICONS[c.id];
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => {
+                    setSeedChoice(c.id);
+                    setTool("seed");
+                    SFX.click();
+                  }}
+                  className="farm-crop-card pixel-btn"
+                  data-active={active}
+                  title={`ราคาซื้อ: ${c.seedCost} | ราคาขายตลาดปัจจุบัน: ${Math.round(marketPrices[c.id])}`}
+                >
+                  <span className="farm-crop-icon">
+                    <Icon size={24} />
+                  </span>
+                  <span className="farm-crop-body">
+                    <span className="farm-crop-name">{c.name}</span>
+                    <span className="farm-crop-prices">
+                      <span>
+                        ซื้อ <CoinIcon size={10} /> <b>{c.seedCost}</b>
+                      </span>
+                      <span>
+                        ขาย <b>{Math.round(marketPrices[c.id])}</b>
+                      </span>
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

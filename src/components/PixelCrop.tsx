@@ -1,4 +1,12 @@
-type CropId = "chili" | "rice" | "morning_glory" | "eggplant";
+type CropId =
+  | "chili"
+  | "rice"
+  | "morning_glory"
+  | "eggplant"
+  | "mango"
+  | "lemongrass"
+  | "papaya"
+  | "basil";
 
 interface Props {
   id: CropId;
@@ -152,6 +160,87 @@ function Eggplant() {
   );
 }
 
+function Mango() {
+  return (
+    <>
+      <rect x="5" y="14" width="6" height="1" fill={SOIL} />
+      {/* stem */}
+      <rect x="7" y="9" width="2" height="5" fill="#3a6b2a" />
+      {/* leaves */}
+      <rect x="4" y="7" width="4" height="3" fill="#5fa148" />
+      <rect x="8" y="7" width="4" height="3" fill="#5fa148" />
+      {/* mango fruit */}
+      <rect x="5" y="5" width="6" height="2" fill="#f4d864" />
+      <rect x="4" y="7" width="8" height="3" fill="#f4a824" />
+      <rect x="4" y="7" width="8" height="1" fill="#f4d864" />
+      <rect x="5" y="10" width="6" height="2" fill="#e88c14" />
+      {/* highlight */}
+      <rect x="5" y="8" width="2" height="1" fill="#fbe07a" />
+    </>
+  );
+}
+
+function Lemongrass() {
+  return (
+    <>
+      <rect x="5" y="14" width="6" height="1" fill={SOIL} />
+      {/* tall stalks */}
+      <rect x="5" y="4" width="1" height="10" fill="#6ab04c" />
+      <rect x="7" y="3" width="1" height="11" fill="#8bc967" />
+      <rect x="10" y="5" width="1" height="9" fill="#6ab04c" />
+      {/* blades spreading */}
+      <rect x="3" y="6" width="3" height="1" fill="#5fa148" />
+      <rect x="2" y="7" width="2" height="1" fill="#4e8c3a" />
+      <rect x="11" y="5" width="3" height="1" fill="#5fa148" />
+      <rect x="12" y="6" width="2" height="1" fill="#4e8c3a" />
+      <rect x="8" y="4" width="3" height="1" fill="#5fa148" />
+      {/* base bulb */}
+      <rect x="5" y="13" width="6" height="1" fill="#3a6b2a" />
+    </>
+  );
+}
+
+function Papaya() {
+  return (
+    <>
+      <rect x="5" y="14" width="6" height="1" fill={SOIL} />
+      {/* trunk */}
+      <rect x="7" y="8" width="2" height="6" fill="#8b6420" />
+      {/* crown leaves */}
+      <rect x="4" y="5" width="3" height="3" fill="#5fa148" />
+      <rect x="9" y="5" width="3" height="3" fill="#5fa148" />
+      <rect x="6" y="3" width="4" height="3" fill="#6ab04c" />
+      <rect x="5" y="4" width="2" height="1" fill="#8bc967" />
+      <rect x="9" y="4" width="2" height="1" fill="#8bc967" />
+      {/* papaya fruits hanging */}
+      <rect x="5" y="8" width="2" height="4" fill="#f47820" />
+      <rect x="5" y="8" width="2" height="1" fill="#f4c060" />
+      <rect x="9" y="9" width="2" height="4" fill="#f47820" />
+      <rect x="9" y="9" width="2" height="1" fill="#f4c060" />
+    </>
+  );
+}
+
+function Basil() {
+  return (
+    <>
+      <rect x="5" y="14" width="6" height="1" fill={SOIL} />
+      {/* main stem */}
+      <rect x="7" y="7" width="2" height="7" fill="#3a6b2a" />
+      {/* bushy leaves */}
+      <rect x="4" y="8" width="4" height="4" fill="#5fa148" />
+      <rect x="4" y="8" width="4" height="1" fill="#8bc967" />
+      <rect x="8" y="8" width="4" height="4" fill="#5fa148" />
+      <rect x="8" y="8" width="4" height="1" fill="#8bc967" />
+      <rect x="5" y="5" width="6" height="4" fill="#6ab04c" />
+      <rect x="5" y="5" width="6" height="1" fill="#8bc967" />
+      {/* purple flower tip */}
+      <rect x="7" y="3" width="2" height="2" fill="#9b59d4" />
+      <rect x="8" y="4" width="1" height="1" fill="#fff" />
+    </>
+  );
+}
+
 export default function PixelCrop({ id, stage }: Props) {
   let body;
   if (stage === 0) body = <Sprout />;
@@ -163,12 +252,24 @@ export default function PixelCrop({ id, stage }: Props) {
           ? "#9bb84a"
           : id === "morning_glory"
             ? "#6ab04c"
-            : "#5fa148";
+            : id === "mango"
+              ? "#f4a824"
+              : id === "lemongrass"
+                ? "#8bc967"
+                : id === "papaya"
+                  ? "#f47820"
+                  : id === "basil"
+                    ? "#6ab04c"
+                    : "#5fa148";
     body = <Mid color={color} />;
   } else if (stage === 2) {
     if (id === "chili") body = <Chili />;
     else if (id === "rice") body = <Rice />;
     else if (id === "morning_glory") body = <MorningGlory />;
+    else if (id === "mango") body = <Mango />;
+    else if (id === "lemongrass") body = <Lemongrass />;
+    else if (id === "papaya") body = <Papaya />;
+    else if (id === "basil") body = <Basil />;
     else body = <Eggplant />;
   } else {
     body = <Withered />;

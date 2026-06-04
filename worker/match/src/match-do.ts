@@ -1,4 +1,4 @@
-import { applyAction, tickGrowth } from "../../../src/lib/game-logic";
+import { applyAction, tickGrowth, updateComboAndGetBonus } from "../../../src/lib/game-logic";
 import {
   COLS,
   CROPS,
@@ -44,6 +44,9 @@ interface PlayerState {
   inputDir?: Direction;
   lastMovementAt: number;
   lastActionAt: number;
+  combo: number;
+  lastHarvestAt: number;
+  comboCrops: CropId[];
 }
 
 interface StoredRoomState {
@@ -59,6 +62,7 @@ interface StoredRoomState {
   hostSessionId?: string;
   settings?: RoomSettings;
   players: Omit<PlayerState, "connected" | "inputDir" | "lastMovementAt" | "lastActionAt">[];
+  marketPrices?: Record<CropId, number>;
 }
 
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -90,12 +94,19 @@ export class MatchRoom implements DurableObject {
   private hostSessionId?: string;
   private settings: RoomSettings = DEFAULT_ROOM_SETTINGS;
   private players = new Map<string, PlayerState>();
+  private marketPrices: Record<CropId, number> = {
+    chili: CROPS.chili.sellPrice,
+    rice: CROPS.rice.sellPrice,
+    morning_glory: CROPS.morning_glory.sellPrice,
+    eggplant: CROPS.eggplant.sellPrice,
+  };
   private initialized?: Promise<void>;
   private wsToPlayer = new WeakMap<WebSocket, string>();
   private wsToRole = new WeakMap<WebSocket, MatchRole>();
   private pendingEvents: ServerEvent[] = [];
   private dirty = false;
   private lastPersistAt = 0;
+  private lastPriceUpdateAt = 0;
   private snapshotTimer?: ReturnType<typeof setInterval>;
   private growthTimer?: ReturnType<typeof setInterval>;
 
@@ -252,18 +263,58 @@ export class MatchRoom implements DurableObject {
         dir: player.dir,
         tool: player.tool,
         seedChoice: player.seedChoice,
+        marketPrices: this.marketPrices,
         now,
       });
       player.tiles = result.tiles;
       player.coins = result.coins;
+      let coinsBonus = 0;
       for (const ev of result.events) {
         if (ev.kind === "harvest") {
           player.stats.harvests += 1;
-          player.stats.coinsEarned += ev.reward;
           player.stats.cropHarvests[ev.cropId] += 1;
+          if (ev.reward > 0) {
+            const { bonus, nextState } = updateComboAndGetBonus(
+              {
+                combo: player.combo,
+                lastHarvestAt: player.lastHarvestAt,
+                crops: player.comboCrops,
+              },
+              ev.cropId,
+              ev.reward,
+              now,
+            );
+            player.combo = nextState.combo;
+            player.lastHarvestAt = nextState.lastHarvestAt;
+            player.comboCrops = nextState.crops;
+            coinsBonus += bonus;
+            ev.reward += bonus;
+
+            // Update dynamic market prices
+            const basePrice = CROPS[ev.cropId].sellPrice;
+            this.marketPrices[ev.cropId] = Math.max(
+              basePrice * 0.5,
+              this.marketPrices[ev.cropId] - basePrice * 0.1,
+            );
+            for (const cId of Object.keys(this.marketPrices) as CropId[]) {
+              if (cId !== ev.cropId) {
+                const otherBase = CROPS[cId].sellPrice;
+                this.marketPrices[cId] = Math.min(
+                  otherBase * 1.2,
+                  this.marketPrices[cId] + otherBase * 0.03,
+                );
+              }
+            }
+          } else {
+            player.combo = 0;
+            player.lastHarvestAt = now;
+            player.comboCrops = [];
+          }
+          player.stats.coinsEarned += ev.reward;
         }
         this.pendingEvents.push({ ...ev, playerId });
       }
+      player.coins += coinsBonus;
       if (player.coins >= this.settings.targetCoins) this.endMatch(playerId, "race");
       else {
         this.persist();
@@ -360,9 +411,18 @@ export class MatchRoom implements DurableObject {
           inputDir: undefined,
           lastMovementAt: Date.now(),
           lastActionAt: 0,
+          combo: p.combo ?? 0,
+          lastHarvestAt: p.lastHarvestAt ?? 0,
+          comboCrops: p.comboCrops ?? [],
         },
       ]),
     );
+    this.marketPrices = stored.marketPrices ?? {
+      chili: CROPS.chili.sellPrice,
+      rice: CROPS.rice.sellPrice,
+      morning_glory: CROPS.morning_glory.sellPrice,
+      eggplant: CROPS.eggplant.sellPrice,
+    };
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
       this.wsToRole.set(ws, att?.role ?? "player");
@@ -402,6 +462,7 @@ export class MatchRoom implements DurableObject {
         hostSessionId: this.hostSessionId,
         settings: this.settings,
         players,
+        marketPrices: this.marketPrices,
       } satisfies StoredRoomState),
     );
   }
@@ -572,6 +633,9 @@ export class MatchRoom implements DurableObject {
       inputDir: undefined,
       lastMovementAt: Date.now(),
       lastActionAt: 0,
+      combo: 0,
+      lastHarvestAt: 0,
+      comboCrops: [],
     });
     ws.serializeAttachment({
       playerId,
@@ -735,6 +799,9 @@ export class MatchRoom implements DurableObject {
         inputDir: undefined,
         lastMovementAt: Date.now(),
         lastActionAt: 0,
+        combo: 0,
+        lastHarvestAt: 0,
+        comboCrops: [],
       });
     } else {
       this.sendTo(ws, { t: "error", code: "room_full", message: "Room is full" });
@@ -787,6 +854,13 @@ export class MatchRoom implements DurableObject {
     this.startedAt = now;
     this.endsAt = now + this.settings.durationMs;
     this.countdownEndsAt = undefined;
+    this.marketPrices = {
+      chili: CROPS.chili.sellPrice,
+      rice: CROPS.rice.sellPrice,
+      morning_glory: CROPS.morning_glory.sellPrice,
+      eggplant: CROPS.eggplant.sellPrice,
+    };
+    this.lastPriceUpdateAt = now;
     for (const p of this.players.values()) {
       p.coins = 50;
       p.tiles = makeEmptyField();
@@ -799,6 +873,9 @@ export class MatchRoom implements DurableObject {
       p.inputDir = undefined;
       p.lastMovementAt = now;
       p.lastActionAt = 0;
+      p.combo = 0;
+      p.lastHarvestAt = 0;
+      p.comboCrops = [];
     }
     this.startTimers();
     this.scheduleAlarm();
@@ -838,7 +915,26 @@ export class MatchRoom implements DurableObject {
         changed = true;
       }
     }
-    if (changed) this.dirty = true;
+
+    // Market price recovery runs every 1 second
+    if (now - this.lastPriceUpdateAt >= 1000) {
+      this.lastPriceUpdateAt = now;
+      let pricesChanged = false;
+      for (const cId of Object.keys(this.marketPrices) as CropId[]) {
+        const base = CROPS[cId].sellPrice;
+        const current = this.marketPrices[cId];
+        if (current < base) {
+          this.marketPrices[cId] = Math.min(base, current + base * 0.005);
+          pricesChanged = true;
+        } else if (current > base) {
+          this.marketPrices[cId] = Math.max(base, current - base * 0.005);
+          pricesChanged = true;
+        }
+      }
+      if (pricesChanged) this.dirty = true;
+    } else if (changed) {
+      this.dirty = true;
+    }
   }
 
   private endByTimeout(): void {
@@ -905,10 +1001,20 @@ export class MatchRoom implements DurableObject {
     this.recap = undefined;
     this.startedAt = undefined;
     this.endsAt = undefined;
+    this.marketPrices = {
+      chili: CROPS.chili.sellPrice,
+      rice: CROPS.rice.sellPrice,
+      morning_glory: CROPS.morning_glory.sellPrice,
+      eggplant: CROPS.eggplant.sellPrice,
+    };
+    this.lastPriceUpdateAt = 0;
     for (const p of this.players.values()) {
       p.ready = false;
       p.coins = 50;
       p.tiles = makeEmptyField();
+      p.combo = 0;
+      p.lastHarvestAt = 0;
+      p.comboCrops = [];
     }
     this.persist();
     this.maybeStartCountdown();
@@ -941,6 +1047,7 @@ export class MatchRoom implements DurableObject {
       endedReason: this.endedReason,
       recap: this.recap,
       players,
+      marketPrices: this.marketPrices,
     };
   }
 

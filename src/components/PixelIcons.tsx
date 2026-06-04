@@ -195,3 +195,83 @@ export function EggplantIcon({ size = 24 }: IconProps) {
     </>,
   );
 }
+
+export function MangoIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* stem + leaf */}
+      <rect x="8" y="2" width="1" height="2" fill="#3a6b2a" />
+      <rect x="9" y="2" width="2" height="1" fill="#5fa148" />
+      {/* mango body */}
+      <rect x="5" y="4" width="7" height="2" fill="#f4d864" />
+      <rect x="4" y="6" width="9" height="5" fill="#f4a824" />
+      <rect x="4" y="6" width="9" height="1" fill="#f4d864" />
+      <rect x="5" y="11" width="7" height="2" fill="#e88c14" />
+      <rect x="6" y="13" width="5" height="1" fill="#c87010" />
+      {/* highlight */}
+      <rect x="5" y="7" width="2" height="2" fill="#fbe07a" />
+    </>,
+  );
+}
+
+export function LemongrassIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* stalks */}
+      <rect x="6" y="4" width="1" height="10" fill="#6ab04c" />
+      <rect x="8" y="3" width="1" height="11" fill="#8bc967" />
+      <rect x="10" y="5" width="1" height="9" fill="#6ab04c" />
+      {/* blades */}
+      <rect x="4" y="6" width="3" height="1" fill="#5fa148" />
+      <rect x="3" y="7" width="2" height="1" fill="#4e8c3a" />
+      <rect x="9" y="5" width="3" height="1" fill="#5fa148" />
+      <rect x="11" y="6" width="2" height="1" fill="#4e8c3a" />
+      {/* base */}
+      <rect x="5" y="13" width="6" height="1" fill="#3a6b2a" />
+      <rect x="6" y="14" width="4" height="1" fill="#2a4a1e" />
+    </>,
+  );
+}
+
+export function PapayaIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* crown leaves */}
+      <rect x="5" y="2" width="2" height="2" fill="#5fa148" />
+      <rect x="9" y="2" width="2" height="2" fill="#5fa148" />
+      <rect x="7" y="1" width="2" height="2" fill="#6ab04c" />
+      {/* stem */}
+      <rect x="7" y="3" width="2" height="2" fill="#3a6b2a" />
+      {/* papaya body */}
+      <rect x="5" y="5" width="6" height="2" fill="#f4a030" />
+      <rect x="4" y="7" width="8" height="5" fill="#f47820" />
+      <rect x="4" y="7" width="8" height="1" fill="#f4c060" />
+      <rect x="5" y="12" width="6" height="2" fill="#d05810" />
+      {/* highlight */}
+      <rect x="5" y="8" width="2" height="2" fill="#f8d080" />
+    </>,
+  );
+}
+
+export function BasilIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* stem */}
+      <rect x="7" y="10" width="2" height="4" fill="#3a6b2a" />
+      {/* leaves */}
+      <rect x="4" y="7" width="4" height="4" fill="#5fa148" />
+      <rect x="4" y="7" width="4" height="1" fill="#8bc967" />
+      <rect x="8" y="7" width="4" height="4" fill="#5fa148" />
+      <rect x="8" y="7" width="4" height="1" fill="#8bc967" />
+      <rect x="5" y="4" width="6" height="4" fill="#6ab04c" />
+      <rect x="5" y="4" width="6" height="1" fill="#8bc967" />
+      {/* tiny purple flowers at tip */}
+      <rect x="7" y="2" width="2" height="2" fill="#9b59d4" />
+      <rect x="8" y="3" width="1" height="1" fill="#fff" />
+    </>,
+  );
+}

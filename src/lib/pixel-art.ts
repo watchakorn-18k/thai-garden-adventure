@@ -309,6 +309,66 @@ function eggplant(): Rect[] {
   ];
 }
 
+function mango(): Rect[] {
+  return [
+    [5, 14, 6, 1, SOIL],
+    [7, 9, 2, 5, "#3a6b2a"],
+    [4, 7, 4, 3, "#5fa148"],
+    [8, 7, 4, 3, "#5fa148"],
+    [5, 5, 6, 2, "#f4d864"],
+    [4, 7, 8, 3, "#f4a824"],
+    [4, 7, 8, 1, "#f4d864"],
+    [5, 10, 6, 2, "#e88c14"],
+    [5, 8, 2, 1, "#fbe07a"],
+  ];
+}
+
+function lemongrass(): Rect[] {
+  return [
+    [5, 14, 6, 1, SOIL],
+    [5, 4, 1, 10, "#6ab04c"],
+    [7, 3, 1, 11, "#8bc967"],
+    [10, 5, 1, 9, "#6ab04c"],
+    [3, 6, 3, 1, "#5fa148"],
+    [2, 7, 2, 1, "#4e8c3a"],
+    [11, 5, 3, 1, "#5fa148"],
+    [12, 6, 2, 1, "#4e8c3a"],
+    [8, 4, 3, 1, "#5fa148"],
+    [5, 13, 6, 1, "#3a6b2a"],
+  ];
+}
+
+function papaya(): Rect[] {
+  return [
+    [5, 14, 6, 1, SOIL],
+    [7, 8, 2, 6, "#8b6420"],
+    [4, 5, 3, 3, "#5fa148"],
+    [9, 5, 3, 3, "#5fa148"],
+    [6, 3, 4, 3, "#6ab04c"],
+    [5, 4, 2, 1, "#8bc967"],
+    [9, 4, 2, 1, "#8bc967"],
+    [5, 8, 2, 4, "#f47820"],
+    [5, 8, 2, 1, "#f4c060"],
+    [9, 9, 2, 4, "#f47820"],
+    [9, 9, 2, 1, "#f4c060"],
+  ];
+}
+
+function basil(): Rect[] {
+  return [
+    [5, 14, 6, 1, SOIL],
+    [7, 7, 2, 7, "#3a6b2a"],
+    [4, 8, 4, 4, "#5fa148"],
+    [4, 8, 4, 1, "#8bc967"],
+    [8, 8, 4, 4, "#5fa148"],
+    [8, 8, 4, 1, "#8bc967"],
+    [5, 5, 6, 4, "#6ab04c"],
+    [5, 5, 6, 1, "#8bc967"],
+    [7, 3, 2, 2, "#9b59d4"],
+    [8, 4, 1, 1, "#ffffff"],
+  ];
+}
+
 export function cropRects(id: CropId, stage: number): Rect[] {
   if (stage === 0) return sprout();
   if (stage === 1) {
@@ -319,13 +379,25 @@ export function cropRects(id: CropId, stage: number): Rect[] {
           ? "#9bb84a"
           : id === "morning_glory"
             ? "#6ab04c"
-            : "#5fa148";
+            : id === "mango"
+              ? "#f4a824"
+              : id === "lemongrass"
+                ? "#8bc967"
+                : id === "papaya"
+                  ? "#f47820"
+                  : id === "basil"
+                    ? "#6ab04c"
+                    : "#5fa148";
     return mid(color);
   }
   if (stage === 2) {
     if (id === "chili") return chili();
     if (id === "rice") return rice();
     if (id === "morning_glory") return morningGlory();
+    if (id === "mango") return mango();
+    if (id === "lemongrass") return lemongrass();
+    if (id === "papaya") return papaya();
+    if (id === "basil") return basil();
     return eggplant();
   }
   return withered();

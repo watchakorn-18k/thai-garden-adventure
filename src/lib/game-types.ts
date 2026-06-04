@@ -1,6 +1,14 @@
 export type Direction = "up" | "down" | "left" | "right";
 export type TileType = "grass" | "tilled" | "watered";
-export type CropId = "chili" | "rice" | "morning_glory" | "eggplant";
+export type CropId =
+  | "chili"
+  | "rice"
+  | "morning_glory"
+  | "eggplant"
+  | "mango"
+  | "lemongrass"
+  | "papaya"
+  | "basil";
 export type Tool = "hoe" | "watering_can" | "seed";
 
 export interface Crop {
@@ -20,8 +28,6 @@ export const COLS = 12;
 export const ROWS = 8;
 
 export const CROPS: Record<CropId, Crop> = {
-  chili: { id: "chili", name: "พริก", growTime: 6000, sellPrice: 25, seedCost: 8 },
-  rice: { id: "rice", name: "ข้าว", growTime: 9000, sellPrice: 40, seedCost: 12 },
   morning_glory: {
     id: "morning_glory",
     name: "ผักบุ้ง",
@@ -29,7 +35,13 @@ export const CROPS: Record<CropId, Crop> = {
     sellPrice: 18,
     seedCost: 5,
   },
-  eggplant: { id: "eggplant", name: "มะเขือ", growTime: 8000, sellPrice: 35, seedCost: 10 },
+  basil: { id: "basil", name: "กะเพรา", growTime: 7000, sellPrice: 22, seedCost: 7 },
+  chili: { id: "chili", name: "พริก", growTime: 9000, sellPrice: 32, seedCost: 10 },
+  lemongrass: { id: "lemongrass", name: "ตะไคร้", growTime: 11000, sellPrice: 36, seedCost: 12 },
+  rice: { id: "rice", name: "ข้าว", growTime: 14000, sellPrice: 46, seedCost: 15 },
+  eggplant: { id: "eggplant", name: "มะเขือ", growTime: 17000, sellPrice: 52, seedCost: 18 },
+  papaya: { id: "papaya", name: "มะละกอ", growTime: 22000, sellPrice: 70, seedCost: 25 },
+  mango: { id: "mango", name: "มะม่วง", growTime: 30000, sellPrice: 96, seedCost: 35 },
 };
 
 export function makeEmptyField(): Tile[][] {
