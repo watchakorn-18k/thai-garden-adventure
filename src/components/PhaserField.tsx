@@ -2,7 +2,15 @@ import { useEffect, useRef } from "react";
 import type Phaser from "phaser";
 import { COLS, CROPS, ROWS, type Direction } from "@/lib/game-types";
 import type { PublicPlayer, ServerEvent } from "@/lib/match-protocol";
-import { ART_GRID, cropRects, farmerRects, type Rect } from "@/lib/pixel-art";
+import {
+  ART_GRID,
+  cropRects,
+  farmerRects,
+  paletteFor,
+  sideToolOverlay,
+  verticalToolOverlay,
+  type Rect,
+} from "@/lib/pixel-art";
 
 const TILE = 56;
 // Time constant for exponential movement smoothing (ms). Lower = snappier and
@@ -67,6 +75,7 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
         private cropG!: Phaser.GameObjects.Graphics;
         private markerG!: Phaser.GameObjects.Graphics;
         private farmerG!: Phaser.GameObjects.Graphics;
+        private toolG!: Phaser.GameObjects.Graphics;
         private sparkles: Phaser.GameObjects.Arc[] = [];
         // farmer display position in tile units (float for interpolation)
         private disp = { x: 0, y: 0 };
@@ -74,6 +83,8 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
         private target = { x: 0, y: 0 };
         private moving = false;
         private walkFrame = 0;
+        private acting = false;
+        private actingTimer?: Phaser.Time.TimerEvent;
         // signature of the last drawn tile/crop layout; skip redraw when unchanged
         private lastSig = -1;
 
@@ -81,11 +92,22 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
           super("field");
         }
 
+        triggerAction() {
+          this.acting = true;
+          if (this.actingTimer) this.actingTimer.remove();
+          this.actingTimer = this.time.delayedCall(320, () => {
+            this.acting = false;
+            this.drawFarmer();
+          });
+          this.drawFarmer();
+        }
+
         create() {
           this.tileG = this.add.graphics();
           this.cropG = this.add.graphics();
           this.markerG = this.add.graphics();
           this.farmerG = this.add.graphics();
+          this.toolG = this.add.graphics();
 
           // ambient sparkles
           for (let i = 0; i < 10; i++) {
@@ -210,12 +232,13 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
         drawFarmer() {
           const p = playerRef.current;
           this.farmerG.clear();
+          this.toolG.clear();
           const flip = p.dir === "left";
           const swing = this.moving ? this.walkFrame % 2 : 0;
           const rects = farmerRects({
             direction: p.dir,
             swing,
-            acting: actingRef.current,
+            acting: false,
             tool: p.tool,
             cosmetics: p.cosmetics,
           });
@@ -232,6 +255,104 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
               const mx = ART_GRID - rx - rw;
               this.farmerG.fillRect(baseX + mx * s, baseY + ry * s, rw * s, rh * s);
             }
+          }
+
+          const isActing = this.acting || actingRef.current;
+          if (isActing) {
+            const isVertical = p.dir === "up" || p.dir === "down";
+            const palette = paletteFor(p.cosmetics ?? {});
+            const toolRects = isVertical
+              ? verticalToolOverlay(p.tool, palette)
+              : sideToolOverlay(p.tool, palette);
+
+            let toolAngle = 0;
+            let toolOffsetX = 0;
+            let toolOffsetY = 0;
+
+            const elapsed = this.actingTimer ? this.actingTimer.getElapsed() : 160;
+            const progress = Math.min(1, Math.max(0, elapsed / 320));
+
+            if (p.tool === "hoe") {
+              if (!isVertical) {
+                if (progress < 0.42) {
+                  const t = progress / 0.42;
+                  toolAngle = -62 + (28 - -62) * t;
+                  toolOffsetX = -1 + (1 - -1) * t;
+                  toolOffsetY = -2 + (2 - -2) * t;
+                } else if (progress < 0.68) {
+                  const t = (progress - 0.42) / (0.68 - 0.42);
+                  toolAngle = 28 + (16 - 28) * t;
+                  toolOffsetX = 1 + (0 - 1) * t;
+                  toolOffsetY = 2 + (1 - 2) * t;
+                } else {
+                  const t = (progress - 0.68) / (1 - 0.68);
+                  toolAngle = 16 + (0 - 16) * t;
+                  toolOffsetX = 0;
+                  toolOffsetY = 1 + (0 - 1) * t;
+                }
+              } else {
+                if (progress < 0.42) {
+                  const t = progress / 0.42;
+                  toolOffsetY = -5 + (3 - -5) * t;
+                } else if (progress < 0.68) {
+                  const t = (progress - 0.42) / (0.68 - 0.42);
+                  toolOffsetY = 3 + (1 - 3) * t;
+                } else {
+                  const t = (progress - 0.68) / (1 - 0.68);
+                  toolOffsetY = 1 + (0 - 1) * t;
+                }
+              }
+            } else if (p.tool === "watering_can") {
+              if (!isVertical) {
+                if (progress < 0.45) {
+                  const t = progress / 0.45;
+                  toolAngle = t * -28;
+                  toolOffsetY = t * 1;
+                } else {
+                  const t = (progress - 0.45) / 0.55;
+                  toolAngle = -28 + t * 28;
+                  toolOffsetY = 1 - t * 1;
+                }
+              } else {
+                if (progress < 0.45) {
+                  const t = progress / 0.45;
+                  toolAngle = t * 18;
+                  toolOffsetY = t * 1;
+                } else {
+                  const t = (progress - 0.45) / 0.55;
+                  toolAngle = 18 - t * 18;
+                  toolOffsetY = 1 - t * 1;
+                }
+              }
+            }
+
+            const pivotX = isVertical ? 8 : 10;
+            const pivotY = 11;
+            const s = TILE / ART_GRID;
+
+            const relativeRects: Rect[] = toolRects.map(([rx, ry, rw, rh, color]) => [
+              rx - pivotX,
+              ry - pivotY,
+              rw,
+              rh,
+              color,
+            ]);
+
+            drawRects(this.toolG, relativeRects, 0, 0);
+
+            let finalPivotX = baseX + pivotX * s;
+            if (flip) {
+              finalPivotX = baseX + (ART_GRID - pivotX) * s;
+            }
+
+            this.toolG.setPosition(
+              finalPivotX + toolOffsetX * s * (flip ? -1 : 1),
+              baseY + pivotY * s + toolOffsetY * s,
+            );
+            this.toolG.setAngle(toolAngle * (flip ? -1 : 1));
+          } else {
+            this.toolG.setPosition(0, 0);
+            this.toolG.setAngle(0);
           }
         }
 
@@ -267,6 +388,7 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
 
         spawnEvent(ev: ServerEvent) {
           if (ev.kind === "insufficient_funds") return;
+          this.triggerAction();
           const isWithered = ev.kind === "harvest" && ev.reward === 0;
           const text =
             ev.kind === "harvest"
@@ -317,15 +439,28 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
             if (Math.abs(this.target.y - this.disp.y) < 0.03) this.disp.y = this.target.y;
             this.moving = true;
             this.walkFrame = Math.floor(time / 110) % 2;
+
+            if (!predictedDir) {
+              if (Math.abs(dx) > Math.abs(dy)) {
+                playerRef.current.dir = dx > 0 ? "right" : "left";
+              } else {
+                playerRef.current.dir = dy > 0 ? "down" : "up";
+              }
+            }
+
             this.drawMarker();
             this.drawFarmer();
-          } else if (this.moving) {
-            this.disp.x = this.target.x;
-            this.disp.y = this.target.y;
-            this.moving = false;
-            this.walkFrame = 0;
-            this.drawMarker();
-            this.drawFarmer();
+          } else {
+            if (this.moving) {
+              this.disp.x = this.target.x;
+              this.disp.y = this.target.y;
+              this.moving = false;
+              this.walkFrame = 0;
+              this.drawMarker();
+              this.drawFarmer();
+            } else if (this.acting) {
+              this.drawFarmer();
+            }
           }
         }
       }
@@ -361,7 +496,11 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
 
   // Redraw the farmer when the action pose toggles (may arrive without a snapshot).
   useEffect(() => {
-    sceneRef.current?.refreshFarmer();
+    if (acting) {
+      sceneRef.current?.triggerAction();
+    } else {
+      sceneRef.current?.refreshFarmer();
+    }
   }, [acting]);
 
   // Spawn floating text for events not yet shown.
@@ -396,4 +535,5 @@ interface FieldScene {
   refreshFarmer(): void;
   setPredictedDir(dir: Direction | null): void;
   spawnEvent(ev: ServerEvent): void;
+  triggerAction(): void;
 }

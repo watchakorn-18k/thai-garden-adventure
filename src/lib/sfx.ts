@@ -167,6 +167,20 @@ export const SFX = {
   step() {
     noiseBurst(0.04, 0.06);
   },
+  countdown(n: number) {
+    play([
+      { freq: n > 1 ? 660 : 880, dur: 0.09, type: "square", vol: 0.45 },
+      { freq: n > 1 ? 330 : 440, dur: 0.09, type: "triangle", vol: 0.25 },
+    ]);
+  },
+  epicSlot() {
+    play([
+      { freq: 196, dur: 0.12, type: "triangle", vol: 0.35 },
+      { freq: 392, dur: 0.12, type: "square", vol: 0.35, delay: 0.05 },
+      { freq: 587, dur: 0.14, type: "square", vol: 0.35, delay: 0.11 },
+      { freq: 784, dur: 0.22, type: "triangle", vol: 0.4, delay: 0.18 },
+    ]);
+  },
   click() {
     pop();
   },

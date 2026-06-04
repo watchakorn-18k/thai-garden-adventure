@@ -19,6 +19,8 @@ import { useMatch } from "@/lib/match-client";
 import { SFX } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
 import gamePlayMusicUrl from "../../game_play.wav";
+import winnerSoundUrl from "../../winner_sound.mp3";
+import loserSoundUrl from "../../loser_sound.mp3";
 import {
   DEFAULT_ROOM_SETTINGS,
   ROOM_SETTING_LIMITS,
@@ -66,6 +68,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const evIdRef = useRef(0);
   const lobbyMusicRef = useRef<HTMLAudioElement | null>(null);
   const gamePlayMusicRef = useRef<HTMLAudioElement | null>(null);
+  const winnerSoundRef = useRef<HTMLAudioElement | null>(null);
   const {
     state,
     selfId,
@@ -161,6 +164,33 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     audio.volume = 0.3;
 
     if (!shouldPlayGameMusic) {
+      audio.pause();
+      audio.currentTime = 0;
+      return;
+    }
+
+    const play = () => {
+      void audio.play().catch(() => undefined);
+    };
+    play();
+    window.addEventListener("pointerdown", play, { once: true });
+    window.addEventListener("keydown", play, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", play);
+      window.removeEventListener("keydown", play);
+      audio.pause();
+    };
+  }, [musicEnabled, state?.status]);
+
+  useEffect(() => {
+    const shouldPlayWinnerSound = musicEnabled && state?.status === "ended";
+    const audio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
+    winnerSoundRef.current = audio;
+    audio.loop = true;
+    audio.volume = 0.22; // low volume as requested
+
+    if (!shouldPlayWinnerSound) {
       audio.pause();
       audio.currentTime = 0;
       return;
@@ -1287,7 +1317,7 @@ function SpectatorLobbyView({
         <div className="lobby-ruleline" />
         <button
           onClick={() => {
-            SFX.click();
+            SFX.epicSlot();
             onClaimSlot();
           }}
           className="pixel-btn lobby-ready-btn"
@@ -1320,13 +1350,12 @@ function CountdownView({
   }, [endsAt]);
 
   useEffect(() => {
-    if (n > 0) {
-      SFX.click();
-    }
+    if (n > 0) SFX.countdown(n);
+    else SFX.crit();
   }, [n]);
 
   return (
-    <div className="relative z-10 flex flex-col items-center gap-4 mt-16">
+    <div className="pointer-events-none fixed inset-0 z-40 flex flex-col items-center justify-center gap-4">
       <div
         className="font-pixel text-[96px] text-[var(--gold)]"
         style={{
@@ -1343,7 +1372,7 @@ function CountdownView({
             SFX.click();
             onCancel();
           }}
-          className="pixel-btn"
+          className="pixel-btn pointer-events-auto"
         >
           <span className="font-pixel text-[10px]">CANCEL COUNTDOWN</span>
         </button>

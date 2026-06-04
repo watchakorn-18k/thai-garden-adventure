@@ -31,7 +31,7 @@ const BASE = {
   seed: "#5a8a3a",
 };
 
-interface Palette {
+export interface Palette {
   hat: string;
   hatDark: string;
   skin: string;
@@ -50,7 +50,7 @@ interface Palette {
   seed: string;
 }
 
-function paletteFor(cosmetics: PlayerCosmetics): Palette {
+export function paletteFor(cosmetics: PlayerCosmetics): Palette {
   return {
     ...BASE,
     hat: cosmetics.hat,
@@ -123,13 +123,13 @@ function sideBody(swing: number, p: Palette): Rect[] {
   ];
 }
 
-function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
+export function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
   if (tool === "hoe") {
     return [
-      [11, 3, 1, 8, p.tool],
-      [12, 2, 1, 7, p.tool],
-      [9, 10, 4, 2, p.toolMetal],
-      [9, 12, 4, 1, p.toolMetalDark],
+      [11, 6, 1, 8, p.tool],
+      [12, 7, 1, 7, p.tool],
+      [12, 3, 4, 2, p.toolMetal],
+      [12, 5, 4, 1, p.toolMetalDark],
     ];
   }
   if (tool === "watering_can") {
@@ -148,12 +148,12 @@ function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
   ];
 }
 
-function verticalToolOverlay(tool: Tool, p: Palette): Rect[] {
+export function verticalToolOverlay(tool: Tool, p: Palette): Rect[] {
   if (tool === "hoe") {
     return [
-      [7, 2, 2, 8, p.tool],
-      [6, 10, 4, 2, p.toolMetal],
-      [6, 12, 4, 1, p.toolMetalDark],
+      [7, 6, 2, 8, p.tool],
+      [6, 2, 4, 2, p.toolMetal],
+      [6, 4, 4, 1, p.toolMetalDark],
     ];
   }
   if (tool === "watering_can") {

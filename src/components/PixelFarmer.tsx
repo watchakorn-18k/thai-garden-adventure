@@ -213,6 +213,7 @@ export default function PixelFarmer({
       style={{
         transform: flip ? "scaleX(-1)" : undefined,
         imageRendering: "pixelated",
+        overflow: "visible",
         filter: "drop-shadow(0 2px 0 rgba(0,0,0,0.35))",
         animation: walking ? "pixel-bob 0.28s steps(2) infinite" : "none",
       }}
