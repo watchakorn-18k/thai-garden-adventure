@@ -3,6 +3,7 @@
 let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = false;
+let noiseBuffer: AudioBuffer | null = null;
 
 function ensure() {
   if (typeof window === "undefined") return null;
@@ -14,6 +15,15 @@ function ensure() {
     master = ctx.createGain();
     master.gain.value = 0.25;
     master.connect(ctx.destination);
+
+    // Pre-generate 2-second shared white noise buffer to prevent runtime allocations
+    const sampleRate = ctx.sampleRate;
+    const size = sampleRate * 2;
+    noiseBuffer = ctx.createBuffer(1, size, sampleRate);
+    const data = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < size; i++) {
+      data[i] = Math.random() * 2 - 1;
+    }
   }
   if (ctx.state === "suspended") ctx.resume();
   return ctx;
@@ -59,21 +69,27 @@ function play(notes: Note[]) {
 
 function noiseBurst(dur: number, vol = 0.3) {
   const a = ensure();
-  if (!a || muted || !master) return;
-  const buf = a.createBuffer(1, Math.floor(a.sampleRate * dur), a.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / data.length);
+  if (!a || muted || !master || !noiseBuffer) return;
   const src = a.createBufferSource();
-  src.buffer = buf;
+  src.buffer = noiseBuffer;
   const g = a.createGain();
-  g.gain.value = vol;
   const filt = a.createBiquadFilter();
   filt.type = "lowpass";
   filt.frequency.value = 1200;
+
+  const now = a.currentTime;
+  g.gain.setValueAtTime(vol, now);
+  g.gain.linearRampToValueAtTime(0.0001, now + dur);
+
   src.connect(filt);
   filt.connect(g);
   g.connect(master);
-  src.start();
+
+  // Play from a random offset in the 2-second buffer to prevent repetitive sound patterns
+  const maxOffset = Math.max(0, 2 - dur);
+  const offset = Math.random() * maxOffset;
+  src.start(now, offset, dur);
+  src.stop(now + dur + 0.05);
 }
 
 export const SFX = {
