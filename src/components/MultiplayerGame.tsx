@@ -15,6 +15,7 @@ import {
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
+import { SFX } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
 import {
   DEFAULT_ROOM_SETTINGS,
@@ -78,6 +79,40 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           const id = ++evIdRef.current;
           next.push({ id, ev });
           setTimeout(() => setEvents((p) => p.filter((q) => q.id !== id)), 950);
+
+          // Play SFX on match events
+          if (ev.kind === "till") {
+            SFX.till();
+          } else if (ev.kind === "water") {
+            SFX.water();
+          } else if (ev.kind === "plant") {
+            SFX.plant();
+          } else if (ev.kind === "harvest") {
+            if (ev.reward === 0) {
+              SFX.till();
+            } else {
+              SFX.harvest();
+              if (ev.playerId === selfId || matchRole === "spectator") {
+                const coinCount = Math.min(3, Math.ceil(ev.reward / 10));
+                for (let i = 0; i < coinCount; i++) {
+                  setTimeout(() => SFX.coin(), i * 80);
+                }
+              }
+              if (ev.playerId === selfId) {
+                setCombo((c) => {
+                  const n = c + 1;
+                  if (n >= 2) SFX.combo(n);
+                  if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
+                  comboTimerRef.current = setTimeout(() => setCombo(0), 2200);
+                  return n;
+                });
+              }
+            }
+          } else if (ev.kind === "insufficient_funds") {
+            if (ev.playerId === selfId) {
+              SFX.bad();
+            }
+          }
         }
         return next;
       });
@@ -118,9 +153,12 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const [predictedDir, setPredictedDir] = useState<Direction | null>(null);
   const selfRef = useRef<PublicPlayer | undefined>(undefined);
   const statusRef = useRef<string | undefined>(undefined);
+  const lastStatus = useRef<string | undefined>(undefined);
   const [actionFlash, setActionFlash] = useState(0);
   const [acting, setActing] = useState(false);
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [combo, setCombo] = useState(0);
+  const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSpectator = matchRole === "spectator";
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
@@ -187,10 +225,22 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       const dir = keyToDir(k);
       if (dir) setMovement(keysToDir(keys.current, nextDiagonalAxis));
       if ((k === " " || k === "enter") && !e.repeat) sendAction();
-      if (k === "r" && statusRef.current === "lobby") send({ t: "ready" });
-      if (k === "1") send({ t: "tool", tool: "hoe" });
-      if (k === "2") send({ t: "tool", tool: "watering_can" });
-      if (k === "3") send({ t: "tool", tool: "seed" });
+      if (k === "r" && statusRef.current === "lobby") {
+        SFX.click();
+        send({ t: "ready" });
+      }
+      if (k === "1") {
+        SFX.click();
+        send({ t: "tool", tool: "hoe" });
+      }
+      if (k === "2") {
+        SFX.click();
+        send({ t: "tool", tool: "watering_can" });
+      }
+      if (k === "3") {
+        SFX.click();
+        send({ t: "tool", tool: "seed" });
+      }
     };
     const stopAll = () => {
       keys.current.clear();
@@ -286,8 +336,37 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   useEffect(() => {
     return () => {
       if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
+      if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
     };
   }, []);
+
+  useEffect(() => {
+    if (!predictedDir || state?.status !== "playing") return;
+    SFX.step();
+    const interval = setInterval(() => {
+      SFX.step();
+    }, 220);
+    return () => clearInterval(interval);
+  }, [predictedDir, state?.status]);
+
+  useEffect(() => {
+    if (!state?.status) return;
+    if (lastStatus.current !== state.status) {
+      lastStatus.current = state.status;
+      if (state.status === "countdown") {
+        SFX.click();
+      } else if (state.status === "playing") {
+        SFX.crit();
+      } else if (state.status === "ended") {
+        const won = state.winnerId && state.winnerId === selfId;
+        if (won) {
+          SFX.crit();
+        } else {
+          SFX.bad();
+        }
+      }
+    }
+  }, [state?.status, state?.winnerId, selfId]);
 
   if (!state) {
     return (
@@ -315,9 +394,16 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             ? {
                 open: outfitOpen,
                 cosmetics,
-                onToggle: () => setOutfitOpen((current) => !current),
-                onClose: () => setOutfitOpen(false),
+                onToggle: () => {
+                  SFX.click();
+                  setOutfitOpen((current) => !current);
+                },
+                onClose: () => {
+                  SFX.click();
+                  setOutfitOpen(false);
+                },
                 onChange: (next: PlayerCosmetics) => {
+                  SFX.click();
                   setCosmetics(next);
                   writeCosmetics(next);
                   send({ t: "cosmetics", cosmetics: next });
@@ -569,6 +655,7 @@ function MatchHUD({
     return () => clearInterval(i);
   }, [state.status]);
   const copyRoom = async () => {
+    SFX.click();
     try {
       await navigator.clipboard.writeText(code);
       setCopied("ok");
@@ -794,14 +881,23 @@ function LobbyView({
         <div className="lobby-ruleline" />
         <div className="flex flex-wrap items-center justify-center gap-3">
           <button
-            onClick={onReady}
+            onClick={() => {
+              SFX.click();
+              onReady();
+            }}
             className="pixel-btn lobby-ready-btn"
             data-accent={self?.ready ? undefined : "true"}
           >
             <span className="font-pixel text-[12px]">{self?.ready ? "UNREADY" : "READY UP"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>
           </button>
-          <button onClick={onLeaveSlot} className="pixel-btn">
+          <button
+            onClick={() => {
+              SFX.click();
+              onLeaveSlot();
+            }}
+            className="pixel-btn"
+          >
             <span className="font-pixel text-[10px]">LEAVE SLOT</span>
           </button>
         </div>
@@ -835,7 +931,13 @@ function RoomSettingsSummary({
         SLOTS {settings.maxPlayers}
       </span>
       {isHost ? (
-        <button onClick={onOpenSettings} className="pixel-btn px-3 py-2">
+        <button
+          onClick={() => {
+            SFX.click();
+            onOpenSettings();
+          }}
+          className="pixel-btn px-3 py-2"
+        >
           <span className="font-pixel text-[8px]">SETTINGS</span>
         </button>
       ) : (
@@ -902,7 +1004,10 @@ function PlayerCard({
       </div>
       {canKick && player && (
         <button
-          onClick={() => onKick?.(player.id)}
+          onClick={() => {
+            SFX.click();
+            onKick?.(player.id);
+          }}
           className="pixel-btn mt-3 px-3 py-2"
           data-accent="true"
         >
@@ -951,7 +1056,13 @@ function SettingsModal({
               ตั้งค่าห้อง
             </h3>
           </div>
-          <button onClick={onClose} className="pixel-btn px-4 py-3">
+          <button
+            onClick={() => {
+              SFX.click();
+              onClose();
+            }}
+            className="pixel-btn px-4 py-3"
+          >
             <span className="font-pixel text-[10px]">CLOSE</span>
           </button>
         </div>
@@ -960,7 +1071,10 @@ function SettingsModal({
           {(Object.keys(STAGE_COPY) as RoomStage[]).map((stage) => (
             <button
               key={stage}
-              onClick={() => setDraft((current) => ({ ...current, stage }))}
+              onClick={() => {
+                SFX.click();
+                setDraft((current) => ({ ...current, stage }));
+              }}
               className="pixel-panel p-4 text-left transition-transform active:translate-y-[1px]"
               data-ready={draft.stage === stage ? "true" : undefined}
               style={{ background: draft.stage === stage ? "#4a2b58" : "#2b1836" }}
@@ -1023,10 +1137,23 @@ function SettingsModal({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-3">
-          <button onClick={onClose} className="pixel-btn px-5 py-4">
+          <button
+            onClick={() => {
+              SFX.click();
+              onClose();
+            }}
+            className="pixel-btn px-5 py-4"
+          >
             <span className="font-pixel text-[11px]">CANCEL</span>
           </button>
-          <button onClick={() => onSave(draft)} className="pixel-btn px-5 py-4" data-accent="true">
+          <button
+            onClick={() => {
+              SFX.click();
+              onSave(draft);
+            }}
+            className="pixel-btn px-5 py-4"
+            data-accent="true"
+          >
             <span className="font-pixel text-[11px]">SAVE SETTINGS</span>
           </button>
         </div>
@@ -1105,7 +1232,10 @@ function SpectatorLobbyView({
       <div className="lobby-ready-row">
         <div className="lobby-ruleline" />
         <button
-          onClick={onClaimSlot}
+          onClick={() => {
+            SFX.click();
+            onClaimSlot();
+          }}
           className="pixel-btn lobby-ready-btn"
           data-accent={!slotsFull ? "true" : undefined}
           disabled={slotsFull}
@@ -1134,6 +1264,13 @@ function CountdownView({
     const i = setInterval(() => setN(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000))), 100);
     return () => clearInterval(i);
   }, [endsAt]);
+
+  useEffect(() => {
+    if (n > 0) {
+      SFX.click();
+    }
+  }, [n]);
+
   return (
     <div className="relative z-10 flex flex-col items-center gap-4 mt-16">
       <div
@@ -1147,7 +1284,13 @@ function CountdownView({
         {n > 0 ? n : "GO!"}
       </div>
       {isHost && n > 0 && (
-        <button onClick={onCancel} className="pixel-btn">
+        <button
+          onClick={() => {
+            SFX.click();
+            onCancel();
+          }}
+          className="pixel-btn"
+        >
           <span className="font-pixel text-[10px]">CANCEL COUNTDOWN</span>
         </button>
       )}
@@ -1271,7 +1414,10 @@ function Toolbar({
         ).map((t) => (
           <button
             key={t.id}
-            onClick={() => send({ t: "tool", tool: t.id })}
+            onClick={() => {
+              SFX.click();
+              send({ t: "tool", tool: t.id });
+            }}
             className="pixel-btn flex items-center gap-2"
             data-active={self.tool === t.id}
           >
@@ -1289,7 +1435,10 @@ function Toolbar({
           return (
             <button
               key={c.id}
-              onClick={() => send({ t: "seed", id: c.id })}
+              onClick={() => {
+                SFX.click();
+                send({ t: "seed", id: c.id });
+              }}
               className="pixel-btn flex items-center gap-2"
               data-active={active}
               style={{ fontSize: 9 }}
@@ -1449,7 +1598,10 @@ function EndOverlay({
         )}
         {!spectator && (
           <button
-            onClick={onRematch}
+            onClick={() => {
+              SFX.click();
+              onRematch();
+            }}
             className="pixel-btn"
             data-accent={!self?.ready ? "true" : undefined}
             disabled={self?.ready}
@@ -1461,6 +1613,7 @@ function EndOverlay({
         )}
         <a
           href="/lobby"
+          onClick={() => SFX.click()}
           className="font-pixel text-[9px] text-[var(--muted-foreground)] opacity-70 hover:opacity-100"
         >
           ออกจากห้อง
