@@ -438,7 +438,30 @@ export default function PhaserField({
 
         override update(time: number, delta: number) {
           const predictedDir = predictedDirRef.current;
-          if (predictedDir) playerRef.current.dir = predictedDir;
+          const p = playerRef.current;
+          if (predictedDir) p.dir = predictedDir;
+
+          const serverDir = predictedDir ? undefined : p.inputDir;
+          if (serverDir) {
+            const step = (delta / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+            p.dir = serverDir;
+            if (serverDir === "up") this.disp.y = Math.max(0, this.disp.y - step);
+            if (serverDir === "down") this.disp.y = Math.min(ROWS - 1, this.disp.y + step);
+            if (serverDir === "left") this.disp.x = Math.max(0, this.disp.x - step);
+            if (serverDir === "right") this.disp.x = Math.min(COLS - 1, this.disp.x + step);
+
+            const correctionX = this.target.x - this.disp.x;
+            const correctionY = this.target.y - this.disp.y;
+            const correction = 1 - Math.exp(-delta / 120);
+            this.disp.x += correctionX * correction;
+            this.disp.y += correctionY * correction;
+
+            this.moving = true;
+            this.walkFrame = Math.floor(time / 110) % 2;
+            this.drawMarker();
+            this.drawFarmer();
+            return;
+          }
 
           const dx = this.target.x - this.disp.x;
           const dy = this.target.y - this.disp.y;

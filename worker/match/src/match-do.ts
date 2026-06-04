@@ -1034,6 +1034,7 @@ export class MatchRoom implements DurableObject {
       connected: p.connected,
       cosmetics: cosmeticsSchema.parse(p.cosmetics ?? DEFAULT_COSMETICS),
       stats: p.stats,
+      inputDir: p.inputDir,
     }));
     return {
       code: this.code,

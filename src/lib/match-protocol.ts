@@ -118,6 +118,7 @@ export interface PublicPlayer {
   connected: boolean;
   cosmetics: PlayerCosmetics;
   stats: PublicPlayerStats;
+  inputDir?: Direction;
 }
 
 export interface MatchRecap {
