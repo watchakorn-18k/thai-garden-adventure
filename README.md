@@ -39,7 +39,7 @@ GitHub Actions build/push 2 images:
 ตั้ง GitHub Actions variable ก่อน build web image:
 
 ```text
-VITE_MATCH_WS_URL=ws://45.136.254.176:8787
+VITE_MATCH_WS_URL=ws://localhost:8787
 ```
 
 ถ้าเว็บอยู่หลัง HTTPS ให้ใช้ `wss://...` แทน `ws://...`.
@@ -79,14 +79,14 @@ sudo ufw reload
 
 ```bash
 curl http://127.0.0.1:8787/health
-curl http://45.136.254.176:8787/health
+curl http://localhost:8787/health
 podman logs --tail=100 thai-garden-match
 ```
 
 เปิดเว็บ:
 
 ```text
-http://45.136.254.176:8080
+http://localhost:8080
 ```
 
 ## เริ่มต้น
