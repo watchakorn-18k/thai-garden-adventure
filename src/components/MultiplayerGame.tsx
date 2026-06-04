@@ -13,6 +13,7 @@ import {
   SeedIcon,
   WaterCanIcon,
 } from "./PixelIcons";
+import { applyAction, facingTile } from "@/lib/game-logic";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
@@ -72,6 +73,69 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const winnerSoundRef = useRef<HTMLAudioElement | null>(null);
   const loserSoundRef = useRef<HTMLAudioElement | null>(null);
   const drawSoundRef = useRef<HTMLAudioElement | null>(null);
+
+  const selfRef = useRef<PublicPlayer | undefined>(undefined);
+  const statusRef = useRef<string | undefined>(undefined);
+  const localPlayerRef = useRef<PublicPlayer | undefined>(undefined);
+  const [localPlayer, setLocalPlayer] = useState<PublicPlayer | undefined>(undefined);
+
+  const pendingActions = useRef<
+    Array<{
+      time: number;
+      pos: { x: number; y: number };
+      dir: Direction;
+      tool: Tool;
+      seedChoice: CropId;
+    }>
+  >([]);
+
+  const recalculateLocalPlayer = useCallback(() => {
+    const s = selfRef.current;
+    if (!s) {
+      localPlayerRef.current = undefined;
+      setLocalPlayer(undefined);
+      return;
+    }
+    const current = localPlayerRef.current;
+
+    if (statusRef.current !== "playing") {
+      pendingActions.current = [];
+    }
+
+    // Prune expired actions (older than 700ms)
+    const now = Date.now();
+    pendingActions.current = pendingActions.current.filter((a) => now - a.time < 700);
+
+    let predictedTiles = s.tiles;
+    let predictedCoins = s.coins;
+
+    // Apply pending actions sequentially
+    for (const act of pendingActions.current) {
+      const res = applyAction({
+        tiles: predictedTiles,
+        coins: predictedCoins,
+        pos: act.pos,
+        dir: act.dir,
+        tool: act.tool,
+        seedChoice: act.seedChoice,
+        now: act.time,
+      });
+      predictedTiles = res.tiles;
+      predictedCoins = res.coins;
+    }
+
+    const next: PublicPlayer = {
+      ...s,
+      tiles: predictedTiles,
+      coins: predictedCoins,
+      pos: current ? current.pos : s.pos,
+      dir: current ? current.dir : s.dir,
+    };
+
+    localPlayerRef.current = next;
+    setLocalPlayer(next);
+  }, []);
+
   const {
     state,
     selfId,
@@ -88,23 +152,38 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     onEvents: (batch) => {
       setEvents((prev) => {
         const next = [...prev];
+        let hasSelfEvent = false;
         for (const ev of batch) {
           const id = ++evIdRef.current;
           next.push({ id, ev });
           setTimeout(() => setEvents((p) => p.filter((q) => q.id !== id)), 950);
 
+          if (ev.playerId === selfId) {
+            hasSelfEvent = true;
+            const idx = pendingActions.current.findIndex((p) => {
+              if (ev.kind === "till") return p.tool === "hoe";
+              if (ev.kind === "water") return p.tool === "watering_can";
+              if (ev.kind === "plant") return p.tool === "seed";
+              if (ev.kind === "harvest") return true;
+              return false;
+            });
+            if (idx !== -1) {
+              pendingActions.current.splice(idx, 1);
+            }
+          }
+
           // Play SFX on match events
           if (ev.kind === "till") {
             if (ev.playerId !== selfId || matchRole === "spectator") SFX.hoe();
           } else if (ev.kind === "water") {
-            SFX.water();
+            if (ev.playerId !== selfId || matchRole === "spectator") SFX.water();
           } else if (ev.kind === "plant") {
-            SFX.plant();
+            if (ev.playerId !== selfId || matchRole === "spectator") SFX.plant();
           } else if (ev.kind === "harvest") {
             if (ev.reward === 0) {
               if (ev.playerId !== selfId || matchRole === "spectator") SFX.hoe();
             } else {
-              SFX.harvest();
+              if (ev.playerId !== selfId || matchRole === "spectator") SFX.harvest();
               if (ev.playerId === selfId || matchRole === "spectator") {
                 const coinCount = Math.min(3, Math.ceil(ev.reward / 10));
                 for (let i = 0; i < coinCount; i++) {
@@ -126,6 +205,9 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
               SFX.bad();
             }
           }
+        }
+        if (hasSelfEvent) {
+          recalculateLocalPlayer();
         }
         return next;
       });
@@ -251,8 +333,6 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const nextDiagonalAxis = useRef<"vertical" | "horizontal">("vertical");
   const lastInputDir = useRef<Direction | null>(null);
   const [predictedDir, setPredictedDir] = useState<Direction | null>(null);
-  const selfRef = useRef<PublicPlayer | undefined>(undefined);
-  const statusRef = useRef<string | undefined>(undefined);
   const lastStatus = useRef<string | undefined>(undefined);
   const [actionFlash, setActionFlash] = useState(0);
   const [acting, setActing] = useState(false);
@@ -262,8 +342,6 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
   const isSpectator = matchRole === "spectator";
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
-  const localPlayerRef = useRef<PublicPlayer | undefined>(undefined);
-  const [localPlayer, setLocalPlayer] = useState<PublicPlayer | undefined>(undefined);
   const renderedSelf = localPlayer ?? self;
   const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
   const opp = state?.players.find((p) => p.id !== selfId);
@@ -273,25 +351,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   }, [self, state?.status]);
 
   useEffect(() => {
-    if (!self) {
-      localPlayerRef.current = undefined;
-      setLocalPlayer(undefined);
-      return;
-    }
-    const current = localPlayerRef.current;
-    if (!current || current.id !== self.id || state?.status !== "playing") {
-      localPlayerRef.current = self;
-      setLocalPlayer(self);
-      return;
-    }
-    const next = {
-      ...self,
-      pos: current.pos,
-      dir: current.dir,
-    };
-    localPlayerRef.current = next;
-    setLocalPlayer(next);
-  }, [self, state?.status]);
+    recalculateLocalPlayer();
+  }, [self, state?.status, recalculateLocalPlayer]);
 
   const setMovement = useCallback(
     (dir: Direction | null) => {
@@ -313,9 +374,46 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
     actionTimerRef.current = setTimeout(() => setActing(false), 320);
     const local = localPlayerRef.current;
-    if (local?.tool === "hoe") SFX.hoe();
-    send({ t: "action", pos: local?.pos, dir: local?.dir });
-  }, [isSpectator, send]);
+    if (local) {
+      const target = facingTile(local.pos, local.dir);
+      if (target) {
+        const tile = local.tiles[target.y]?.[target.x];
+        if (tile) {
+          if (tile.crop && tile.crop.stage >= 2) {
+            SFX.harvest();
+          } else if (local.tool === "hoe" && tile.type === "grass") {
+            SFX.hoe();
+          } else if (
+            local.tool === "watering_can" &&
+            (tile.type === "tilled" || (tile.crop && tile.type !== "watered"))
+          ) {
+            SFX.water();
+          } else if (
+            local.tool === "seed" &&
+            (tile.type === "tilled" || tile.type === "watered") &&
+            !tile.crop
+          ) {
+            const crop = CROPS[local.seedChoice];
+            if (local.coins >= crop.seedCost) {
+              SFX.plant();
+            } else {
+              SFX.bad();
+            }
+          }
+        }
+      }
+
+      pendingActions.current.push({
+        time: Date.now(),
+        pos: { ...local.pos },
+        dir: local.dir,
+        tool: local.tool,
+        seedChoice: local.seedChoice,
+      });
+      recalculateLocalPlayer();
+      send({ t: "action", pos: local.pos, dir: local.dir });
+    }
+  }, [isSpectator, send, recalculateLocalPlayer]);
 
   useEffect(() => {
     if (isSpectator) return;
@@ -574,6 +672,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
                 actionFlash={actionFlash}
                 acting={acting}
                 predictedDir={predictedDir}
+                isSelf={true}
               />
             </div>
           )
@@ -1415,15 +1514,23 @@ function SelfField({
   events,
   acting,
   predictedDir,
+  isSelf = false,
 }: {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
   actionFlash: number;
   acting: boolean;
   predictedDir?: Direction | null;
+  isSelf?: boolean;
 }) {
   return (
-    <PhaserField player={player} events={events} acting={acting} predictedDir={predictedDir} />
+    <PhaserField
+      player={player}
+      events={events}
+      acting={acting}
+      predictedDir={predictedDir}
+      isSelf={isSelf}
+    />
   );
 }
 

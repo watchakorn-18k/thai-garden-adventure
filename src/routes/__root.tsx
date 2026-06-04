@@ -72,14 +72,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "สวนผักไทย — Thai Farm Game" },
+      { name: "description", content: "แข่งปลูกผักกัน" },
+      { name: "author", content: "watchakorn-18k" },
+      { property: "og:title", content: "สวนผักไทย — Thai Farm Game" },
+      { property: "og:description", content: "แข่งปลูกผักกัน" },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
+      { name: "twitter:site", content: "@watchakorn-18k" },
     ],
     links: [
       {

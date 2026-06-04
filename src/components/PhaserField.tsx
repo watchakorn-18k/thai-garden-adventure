@@ -30,6 +30,7 @@ interface Props {
   events: { id: number; ev: ServerEvent }[];
   acting: boolean;
   predictedDir?: Direction | null;
+  isSelf?: boolean;
 }
 
 function hexNum(hex: string): number {
@@ -49,7 +50,13 @@ function drawRects(g: Phaser.GameObjects.Graphics, rects: Rect[], ox: number, oy
  * marker, ambience and floating event text) inside a Phaser canvas. The React
  * shell (HUD, lobby, toolbar, …) stays outside in MultiplayerGame.
  */
-export default function PhaserField({ player, events, acting, predictedDir }: Props) {
+export default function PhaserField({
+  player,
+  events,
+  acting,
+  predictedDir,
+  isSelf = false,
+}: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<FieldScene | null>(null);
   const seenEvents = useRef<Set<number>>(new Set());
@@ -58,9 +65,11 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
   const playerRef = useRef(player);
   const actingRef = useRef(acting);
   const predictedDirRef = useRef<Direction | null>(predictedDir ?? null);
+  const isSelfRef = useRef(isSelf);
   playerRef.current = player;
   actingRef.current = acting;
   predictedDirRef.current = predictedDir ?? null;
+  isSelfRef.current = isSelf;
 
   useEffect(() => {
     let game: Phaser.Game | null = null;
@@ -389,7 +398,9 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
 
         spawnEvent(ev: ServerEvent) {
           if (ev.kind === "insufficient_funds") return;
-          this.triggerAction();
+          if (!isSelfRef.current) {
+            this.triggerAction();
+          }
           const isWithered = ev.kind === "harvest" && ev.reward === 0;
           const text =
             ev.kind === "harvest"
