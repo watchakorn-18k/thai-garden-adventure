@@ -7,8 +7,7 @@ COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile
 
 COPY . .
-# Override default Cloudflare Workers target to produce a Node.js server bundle
-RUN NITRO_PRESET=node bun run build
+RUN bun run build
 
 # Runtime stage
 FROM node:22-alpine AS runner
@@ -18,8 +17,8 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000
 
-COPY --from=builder /app/.output ./.output
+COPY --from=builder /app/dist ./dist
 
 EXPOSE 3000
 
-CMD ["node", ".output/server/index.mjs"]
+CMD ["node", "dist/server/index.mjs"]

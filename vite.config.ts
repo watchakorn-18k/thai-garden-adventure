@@ -12,4 +12,6 @@ export default defineConfig({
     // nitro/vite builds from this
     server: { entry: "server" },
   },
+  // Force Nitro in local/CI builds; the Lovable preset only enables it automatically in Lovable sandboxes.
+  nitro: { preset: "node-server" },
 });
