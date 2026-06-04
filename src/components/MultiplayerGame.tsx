@@ -120,14 +120,13 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   });
 
   useEffect(() => {
-    const waitingForOpponent =
-      state?.status === "lobby" && state.players.length < state.settings.maxPlayers;
+    const shouldPlayLobbyMusic = state?.status === "lobby";
     const audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
     lobbyMusicRef.current = audio;
     audio.loop = true;
     audio.volume = 0.35;
 
-    if (!waitingForOpponent) {
+    if (!shouldPlayLobbyMusic) {
       audio.pause();
       audio.currentTime = 0;
       return;
@@ -145,7 +144,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       window.removeEventListener("keydown", play);
       audio.pause();
     };
-  }, [state?.players.length, state?.settings.maxPlayers, state?.status]);
+  }, [state?.status]);
 
   const keys = useRef<Set<string>>(new Set());
   const nextDiagonalAxis = useRef<"vertical" | "horizontal">("vertical");
