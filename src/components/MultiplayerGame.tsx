@@ -15,6 +15,7 @@ import {
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
+import lobbyMusicUrl from "../../lobby_music.wav";
 import {
   DEFAULT_ROOM_SETTINGS,
   ROOM_SETTING_LIMITS,
@@ -56,6 +57,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const [outfitOpen, setOutfitOpen] = useState(false);
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
   const evIdRef = useRef(0);
+  const lobbyMusicRef = useRef<HTMLAudioElement | null>(null);
   const {
     state,
     selfId,
@@ -81,6 +83,34 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       });
     },
   });
+
+  useEffect(() => {
+    const waitingForOpponent =
+      state?.status === "lobby" && state.players.length < state.settings.maxPlayers;
+    const audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
+    lobbyMusicRef.current = audio;
+    audio.loop = true;
+    audio.volume = 0.35;
+
+    if (!waitingForOpponent) {
+      audio.pause();
+      audio.currentTime = 0;
+      return;
+    }
+
+    const play = () => {
+      void audio.play().catch(() => undefined);
+    };
+    play();
+    window.addEventListener("pointerdown", play, { once: true });
+    window.addEventListener("keydown", play, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", play);
+      window.removeEventListener("keydown", play);
+      audio.pause();
+    };
+  }, [state?.players.length, state?.settings.maxPlayers, state?.status]);
 
   const keys = useRef<Set<string>>(new Set());
   const nextDiagonalAxis = useRef<"vertical" | "horizontal">("vertical");
