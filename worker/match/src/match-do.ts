@@ -64,6 +64,7 @@ const MOVE_COOLDOWN_MS = 60;
 const ACTION_COOLDOWN_MS = 80;
 const SNAPSHOT_INTERVAL_MS = 100;
 const GROWTH_INTERVAL_MS = 500;
+const PERSIST_INTERVAL_MS = 1000;
 const RECONNECT_GRACE_MS = 30_000;
 const MAX_SPECTATORS = 5;
 
@@ -92,6 +93,8 @@ export class MatchRoom implements DurableObject {
   private wsToPlayer = new WeakMap<WebSocket, string>();
   private wsToRole = new WeakMap<WebSocket, MatchRole>();
   private pendingEvents: ServerEvent[] = [];
+  private dirty = false;
+  private lastPersistAt = 0;
   private snapshotTimer?: ReturnType<typeof setInterval>;
   private growthTimer?: ReturnType<typeof setInterval>;
 
@@ -223,8 +226,7 @@ export class MatchRoom implements DurableObject {
       player.lastMoveAt = now;
       player.dir = msg.dir;
       player.pos = movePos(player.pos, msg.dir);
-      this.persist();
-      this.broadcastSnapshot();
+      this.dirty = true;
       return;
     }
     if (msg.t === "action") {
@@ -364,6 +366,8 @@ export class MatchRoom implements DurableObject {
     const players = [...this.players.values()].map(
       ({ connected: _connected, lastMoveAt: _lastMoveAt, lastActionAt: _lastActionAt, ...p }) => p,
     );
+    this.lastPersistAt = Date.now();
+    this.dirty = false;
     this.ctx.waitUntil(
       this.ctx.storage.put("room", {
         code: this.code,
@@ -380,6 +384,12 @@ export class MatchRoom implements DurableObject {
         players,
       } satisfies StoredRoomState),
     );
+  }
+
+  private persistDirty(now = Date.now()): void {
+    if (!this.dirty) return;
+    if (now - this.lastPersistAt < PERSIST_INTERVAL_MS) return;
+    this.persist();
   }
 
   private scheduleAlarm(): void {
@@ -763,11 +773,13 @@ export class MatchRoom implements DurableObject {
 
   private tickSnapshot(): void {
     if (this.status !== "playing") return;
-    if (this.endsAt && Date.now() >= this.endsAt) {
+    const now = Date.now();
+    if (this.endsAt && now >= this.endsAt) {
       this.endByTimeout();
       return;
     }
     this.broadcastSnapshot();
+    this.persistDirty(now);
     if (this.pendingEvents.length) {
       this.broadcast({ t: "events", events: this.pendingEvents });
       this.pendingEvents = [];
@@ -777,11 +789,15 @@ export class MatchRoom implements DurableObject {
   private tickGrowthAll(): void {
     if (this.status !== "playing") return;
     const now = Date.now();
+    let changed = false;
     for (const p of this.players.values()) {
       const res = tickGrowth(p.tiles, now);
-      if (res.changed) p.tiles = res.tiles;
+      if (res.changed) {
+        p.tiles = res.tiles;
+        changed = true;
+      }
     }
-    this.persist();
+    if (changed) this.dirty = true;
   }
 
   private endByTimeout(): void {

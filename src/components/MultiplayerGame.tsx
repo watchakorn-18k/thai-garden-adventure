@@ -87,6 +87,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const keys = useRef<Set<string>>(new Set());
   const lastSentDir = useRef<{ dir: Direction; at: number } | null>(null);
   const nextDiagonalAxis = useRef<"vertical" | "horizontal">("vertical");
+  const predictedMoveSeq = useRef(0);
+  const [predictedMove, setPredictedMove] = useState<{ seq: number; dir: Direction }>();
   const selfRef = useRef<PublicPlayer | undefined>(undefined);
   const statusRef = useRef<string | undefined>(undefined);
   const [actionFlash, setActionFlash] = useState(0);
@@ -106,6 +108,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     (dir: Direction) => {
       if (isSpectator) return;
       if (!selfRef.current || statusRef.current !== "playing") return;
+      predictedMoveSeq.current += 1;
+      setPredictedMove({ seq: predictedMoveSeq.current, dir });
       send({ t: "move", dir });
     },
     [isSpectator, send],
@@ -132,7 +136,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         lastSentDir.current = { dir, at: Date.now() };
         sendMove(dir);
       }
-      if (k === " " || k === "enter") sendAction();
+      if ((k === " " || k === "enter") && !e.repeat) sendAction();
       if (k === "r" && statusRef.current === "lobby") send({ t: "ready" });
       if (k === "1") send({ t: "tool", tool: "hoe" });
       if (k === "2") send({ t: "tool", tool: "watering_can" });
@@ -257,6 +261,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
                 events={events.filter((e) => e.ev.playerId === self.id)}
                 actionFlash={actionFlash}
                 acting={acting}
+                predictedMove={predictedMove}
               />
             </div>
           )
@@ -1041,13 +1046,17 @@ function SelfField({
   player,
   events,
   acting,
+  predictedMove,
 }: {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
   actionFlash: number;
   acting: boolean;
+  predictedMove?: { seq: number; dir: Direction };
 }) {
-  return <PhaserField player={player} events={events} acting={acting} />;
+  return (
+    <PhaserField player={player} events={events} acting={acting} predictedMove={predictedMove} />
+  );
 }
 
 function SpectatorMatchView({

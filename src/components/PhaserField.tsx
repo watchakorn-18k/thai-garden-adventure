@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type Phaser from "phaser";
-import { COLS, CROPS, ROWS } from "@/lib/game-types";
+import { COLS, CROPS, ROWS, type Direction } from "@/lib/game-types";
 import type { PublicPlayer, ServerEvent } from "@/lib/match-protocol";
 import { ART_GRID, cropRects, farmerRects, type Rect } from "@/lib/pixel-art";
 
@@ -21,6 +21,7 @@ interface Props {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
   acting: boolean;
+  predictedMove?: { seq: number; dir: Direction };
 }
 
 function hexNum(hex: string): number {
@@ -40,10 +41,11 @@ function drawRects(g: Phaser.GameObjects.Graphics, rects: Rect[], ox: number, oy
  * marker, ambience and floating event text) inside a Phaser canvas. The React
  * shell (HUD, lobby, toolbar, …) stays outside in MultiplayerGame.
  */
-export default function PhaserField({ player, events, acting }: Props) {
+export default function PhaserField({ player, events, acting, predictedMove }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<FieldScene | null>(null);
   const seenEvents = useRef<Set<number>>(new Set());
+  const lastPredictedSeq = useRef(0);
 
   // Latest props for the scene to read once it boots.
   const playerRef = useRef(player);
@@ -254,6 +256,19 @@ export default function PhaserField({ player, events, acting }: Props) {
           this.drawFarmer();
         }
 
+        predictMove(dir: Direction) {
+          const next = { ...this.target };
+          if (dir === "up") next.y = Math.max(0, next.y - 1);
+          if (dir === "down") next.y = Math.min(ROWS - 1, next.y + 1);
+          if (dir === "left") next.x = Math.max(0, next.x - 1);
+          if (dir === "right") next.x = Math.min(COLS - 1, next.x + 1);
+          this.target = next;
+          const p = playerRef.current;
+          p.dir = dir;
+          this.drawMarker();
+          this.drawFarmer();
+        }
+
         spawnEvent(ev: ServerEvent) {
           if (ev.kind === "insufficient_funds") return;
           const text =
@@ -335,6 +350,13 @@ export default function PhaserField({ player, events, acting }: Props) {
     sceneRef.current?.applyPlayer();
   }, [player]);
 
+  // Apply local movement immediately for the controlled player.
+  useEffect(() => {
+    if (!predictedMove || predictedMove.seq === lastPredictedSeq.current) return;
+    lastPredictedSeq.current = predictedMove.seq;
+    sceneRef.current?.predictMove(predictedMove.dir);
+  }, [predictedMove]);
+
   // Redraw the farmer when the action pose toggles (may arrive without a snapshot).
   useEffect(() => {
     sceneRef.current?.refreshFarmer();
@@ -370,5 +392,6 @@ export default function PhaserField({ player, events, acting }: Props) {
 interface FieldScene {
   applyPlayer(): void;
   refreshFarmer(): void;
+  predictMove(dir: Direction): void;
   spawnEvent(ev: ServerEvent): void;
 }
