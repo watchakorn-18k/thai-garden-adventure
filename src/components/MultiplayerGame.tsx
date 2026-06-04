@@ -490,7 +490,9 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         />
       )}
 
-      {state.status === "playing" && self && !isSpectator && <Toolbar self={self} send={send} />}
+      {state.status === "playing" && self && !isSpectator && (
+        <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
+      )}
       {state.status === "playing" && self && !isSpectator && (
         <MobileControls setMovement={setMovement} sendAction={sendAction} />
       )}
@@ -1393,9 +1395,11 @@ function OpponentField({ player }: { player: PublicPlayer }) {
 function Toolbar({
   self,
   send,
+  marketPrices,
 }: {
   self: PublicPlayer;
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
+  marketPrices?: Record<CropId, number>;
 }) {
   return (
     <div className="relative z-10 w-full max-w-5xl flex flex-wrap items-center justify-center gap-3 px-6 py-3 pixel-panel">
@@ -1432,6 +1436,7 @@ function Toolbar({
         {Object.values(CROPS).map((c) => {
           const Icon = CROP_ICONS[c.id];
           const active = self.seedChoice === c.id && self.tool === "seed";
+          const currentSell = marketPrices ? Math.round(marketPrices[c.id]) : c.sellPrice;
           return (
             <button
               key={c.id}
@@ -1442,12 +1447,23 @@ function Toolbar({
               className="pixel-btn flex items-center gap-2"
               data-active={active}
               style={{ fontSize: 9 }}
+              title={`ราคาซื้อ: ${c.seedCost} | ราคาขายตลาดปัจจุบัน: ${currentSell}`}
             >
               <Icon size={16} />
               <span>{c.name}</span>
-              <span className="flex items-center gap-1 opacity-80">
-                <CoinIcon size={10} />
-                {c.seedCost}
+              <span
+                className="flex flex-col items-start gap-0.5 opacity-80"
+                style={{ fontSize: 7 }}
+              >
+                <span className="flex items-center gap-0.5">
+                  <span className="opacity-60 text-[6px]">ซื้อ:</span>
+                  <CoinIcon size={8} />
+                  <span>{c.seedCost}</span>
+                </span>
+                <span className="flex items-center gap-0.5">
+                  <span className="opacity-60 text-[6px]">ขาย:</span>
+                  <span className="text-[var(--gold)]">{currentSell}</span>
+                </span>
               </span>
             </button>
           );

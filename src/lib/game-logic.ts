@@ -15,12 +15,60 @@ export interface ActionInput {
   tool: Tool;
   seedChoice: CropId;
   now: number;
+  marketPrices?: Record<CropId, number>;
 }
 
 export interface ActionResult {
   tiles: Tile[][];
   coins: number;
   events: GameEvent[];
+}
+
+export interface ComboState {
+  combo: number;
+  lastHarvestAt: number;
+  crops: CropId[];
+}
+
+export function updateComboAndGetBonus(
+  state: ComboState,
+  cropId: CropId,
+  baseReward: number,
+  now: number,
+): { bonus: number; nextState: ComboState } {
+  if (baseReward === 0) {
+    return {
+      bonus: 0,
+      nextState: {
+        combo: 0,
+        lastHarvestAt: now,
+        crops: [],
+      },
+    };
+  }
+
+  const isCombo = now - state.lastHarvestAt < 2200;
+  const nextCombo = isCombo ? state.combo + 1 : 1;
+  const nextCrops = isCombo ? [...state.crops] : [];
+  if (!nextCrops.includes(cropId)) {
+    nextCrops.push(cropId);
+  }
+
+  // 1. Combo bonus: 25% * baseReward * min(combo, 6)
+  const comboBonus = nextCombo >= 2 ? Math.floor(baseReward * 0.25 * Math.min(nextCombo, 6)) : 0;
+
+  // 2. Crop Rotation (variety) bonus: 15% * baseReward * (variety - 1)
+  const variety = nextCrops.length;
+  const rotationBonus = variety > 1 ? Math.floor(baseReward * 0.15 * (variety - 1)) : 0;
+
+  return {
+    bonus: comboBonus + rotationBonus,
+    nextState: {
+      combo: nextCombo,
+      lastHarvestAt: now,
+      crops: nextCrops,
+    },
+  };
 }
 
 export function facingTile(
@@ -52,7 +100,10 @@ export function applyAction(input: ActionInput): ActionResult {
 
   if (tile.crop && tile.crop.stage >= 2) {
     const crop = CROPS[tile.crop.id];
-    const reward = tile.crop.stage === 3 ? 0 : crop.sellPrice;
+    const baseReward = input.marketPrices
+      ? (input.marketPrices[tile.crop.id] ?? crop.sellPrice)
+      : crop.sellPrice;
+    const reward = tile.crop.stage === 3 ? 0 : baseReward;
     coins += reward;
     events.push({
       kind: "harvest",
@@ -111,7 +162,7 @@ export function tickGrowth(tiles: Tile[][], now: number): { tiles: Tile[][]; cha
           changed = true;
           return {
             ...c,
-            type: "tilled", // soil dries up
+            type: "tilled" as const, // soil dries up
             crop: { ...c.crop, stage: c.crop.stage + 1, plantedAt: now },
           };
         }

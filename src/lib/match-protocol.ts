@@ -137,6 +137,7 @@ export interface PublicMatchState {
   endedReason?: "race" | "timeout" | "forfeit" | "kick";
   recap?: MatchRecap;
   players: PublicPlayer[];
+  marketPrices?: Record<CropId, number>;
 }
 
 export type ServerEvent =
