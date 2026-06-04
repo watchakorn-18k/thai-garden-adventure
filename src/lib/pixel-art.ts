@@ -197,6 +197,18 @@ export function farmerRects(opts: {
 
 const SOIL = "#3a2010";
 
+function withered(): Rect[] {
+  return [
+    [5, 14, 6, 1, SOIL],
+    [7, 11, 2, 3, "#5c4033"],
+    [6, 12, 1, 2, "#5c4033"],
+    [9, 12, 1, 2, "#5c4033"],
+    [4, 13, 2, 1, "#4a3525"],
+    [10, 13, 2, 1, "#4a3525"],
+    [6, 10, 4, 1, "#4a3525"],
+  ];
+}
+
 function sprout(): Rect[] {
   return [
     [7, 11, 2, 3, "#3a6b2a"],
@@ -310,8 +322,11 @@ export function cropRects(id: CropId, stage: number): Rect[] {
             : "#5fa148";
     return mid(color);
   }
-  if (id === "chili") return chili();
-  if (id === "rice") return rice();
-  if (id === "morning_glory") return morningGlory();
-  return eggplant();
+  if (stage === 2) {
+    if (id === "chili") return chili();
+    if (id === "rice") return rice();
+    if (id === "morning_glory") return morningGlory();
+    return eggplant();
+  }
+  return withered();
 }

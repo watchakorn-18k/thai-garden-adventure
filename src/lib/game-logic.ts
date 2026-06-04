@@ -52,13 +52,14 @@ export function applyAction(input: ActionInput): ActionResult {
 
   if (tile.crop && tile.crop.stage >= 2) {
     const crop = CROPS[tile.crop.id];
-    coins += crop.sellPrice;
+    const reward = tile.crop.stage === 3 ? 0 : crop.sellPrice;
+    coins += reward;
     events.push({
       kind: "harvest",
       x: target.x,
       y: target.y,
       cropId: tile.crop.id,
-      reward: crop.sellPrice,
+      reward,
     });
     next[target.y][target.x] = { type: "grass" };
     return { tiles: next, coins, events };
@@ -70,8 +71,11 @@ export function applyAction(input: ActionInput): ActionResult {
       events.push({ kind: "till", x: target.x, y: target.y });
     }
   } else if (input.tool === "watering_can") {
-    if (tile.type === "tilled" || (tile.crop && tile.type !== "watered")) {
-      next[target.y][target.x] = { ...tile, type: "watered" };
+    // Only water if tile is tilled, or if it has a growing crop (stage < 2) on dry soil
+    const isGrowingCrop = tile.crop && tile.crop.stage < 2;
+    if (tile.type === "tilled" || (isGrowingCrop && tile.type !== "watered")) {
+      const updatedCrop = tile.crop ? { ...tile.crop, plantedAt: input.now } : undefined;
+      next[target.y][target.x] = { ...tile, type: "watered", crop: updatedCrop };
       events.push({ kind: "water", x: target.x, y: target.y });
     }
   } else if (input.tool === "seed") {
@@ -97,13 +101,33 @@ export function tickGrowth(tiles: Tile[][], now: number): { tiles: Tile[][]; cha
   let changed = false;
   const next = tiles.map((row) =>
     row.map((c) => {
-      if (c.crop && c.type === "watered" && c.crop.stage < 2) {
-        const crop = CROPS[c.crop.id];
-        if (now - c.crop.plantedAt > crop.growTime * (c.crop.stage + 1)) {
+      if (!c.crop) return c;
+
+      const crop = CROPS[c.crop.id];
+
+      // Grow growing crops on watered soil
+      if (c.type === "watered" && c.crop.stage < 2) {
+        if (now - c.crop.plantedAt > crop.growTime) {
           changed = true;
-          return { ...c, crop: { ...c.crop, stage: c.crop.stage + 1 } };
+          return {
+            ...c,
+            type: "tilled", // soil dries up
+            crop: { ...c.crop, stage: c.crop.stage + 1, plantedAt: now },
+          };
         }
       }
+
+      // Decay/wither ripe crops
+      if (c.crop.stage === 2) {
+        if (now - c.crop.plantedAt > crop.growTime * 1.5) {
+          changed = true;
+          return {
+            ...c,
+            crop: { ...c.crop, stage: 3, plantedAt: now },
+          };
+        }
+      }
+
       return c;
     }),
   );
