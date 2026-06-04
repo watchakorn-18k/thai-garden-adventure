@@ -230,6 +230,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       musicEnabled &&
       (state?.status === "lobby" ||
         state?.status === "countdown" ||
+        state?.status === "crop_ban" ||
         state?.status === "crop_selection" ||
         state?.status === "prepare_countdown");
     const audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
@@ -635,6 +636,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
       {(state.status === "lobby" ||
         state.status === "countdown" ||
+        state.status === "crop_ban" ||
         state.status === "crop_selection" ||
         state.status === "prepare_countdown") && (
         <button
@@ -680,12 +682,22 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         />
       )}
 
+      {state.status === "crop_ban" && (
+        <CropBanView
+          state={state}
+          self={self}
+          isSpectator={isSpectator}
+          onBanCrop={(id) => send({ t: "ban_crop", id })}
+        />
+      )}
+
       {(state.status === "crop_selection" || state.status === "prepare_countdown") && (
         <CropSelectionView
           state={state}
           self={self}
           isSpectator={isSpectator}
           isLocked={state.status === "prepare_countdown"}
+          bannedCrops={bannedCropIds(state.players)}
           onSelectCrops={(ids) => send({ t: "select_crops", ids })}
           onReady={() => send({ t: "ready" })}
         />
@@ -746,23 +758,25 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
       )}
-      {state.status !== "crop_selection" && state.status !== "prepare_countdown" && (
-        <CropIndexBook
-          compact
-          marketPrices={state.marketPrices}
-          selectedCropId={self?.seedChoice}
-          availableCropIds={
-            state.status === "playing" && self ? selectedCropPool(self.selectedCrops) : undefined
-          }
-          onSelectCrop={
-            !isSpectator && self && state.status === "playing"
-              ? (id) => {
-                  send({ t: "seed", id });
-                }
-              : undefined
-          }
-        />
-      )}
+      {state.status !== "crop_ban" &&
+        state.status !== "crop_selection" &&
+        state.status !== "prepare_countdown" && (
+          <CropIndexBook
+            compact
+            marketPrices={state.marketPrices}
+            selectedCropId={self?.seedChoice}
+            availableCropIds={
+              state.status === "playing" && self ? selectedCropPool(self.selectedCrops) : undefined
+            }
+            onSelectCrop={
+              !isSpectator && self && state.status === "playing"
+                ? (id) => {
+                    send({ t: "seed", id });
+                  }
+                : undefined
+            }
+          />
+        )}
       {state.status === "playing" && self && !isSpectator && (
         <MobileControls setMovement={setMovement} sendAction={sendAction} />
       )}
@@ -931,7 +945,13 @@ function MatchHUD({
   code: string;
   self?: PublicPlayer;
   opp?: PublicPlayer;
-  state: { status: string; endsAt?: number; countdownEndsAt?: number; selectionEndsAt?: number };
+  state: {
+    status: string;
+    endsAt?: number;
+    countdownEndsAt?: number;
+    banEndsAt?: number;
+    selectionEndsAt?: number;
+  };
   settings: RoomSettings;
   status: string;
   role: MatchRole;
@@ -947,7 +967,11 @@ function MatchHUD({
   const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
   const [copyToast, setCopyToast] = useState<"ok" | "fail" | null>(null);
   useEffect(() => {
-    if (!["playing", "countdown", "crop_selection", "prepare_countdown"].includes(state.status))
+    if (
+      !["playing", "countdown", "crop_ban", "crop_selection", "prepare_countdown"].includes(
+        state.status,
+      )
+    )
       return;
     const i = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(i);
@@ -968,9 +992,11 @@ function MatchHUD({
   const timerEndsAt =
     state.status === "playing"
       ? state.endsAt
-      : state.status === "crop_selection"
-        ? state.selectionEndsAt
-        : state.countdownEndsAt;
+      : state.status === "crop_ban"
+        ? state.banEndsAt
+        : state.status === "crop_selection"
+          ? state.selectionEndsAt
+          : state.countdownEndsAt;
   const remaining = timerEndsAt ? Math.max(0, timerEndsAt - now) : settings.durationMs;
   const mm = Math.floor(remaining / 60000)
     .toString()
@@ -1226,11 +1252,103 @@ function LobbyView({
   );
 }
 
+function CropBanView({
+  state,
+  self,
+  isSpectator,
+  onBanCrop,
+}: {
+  state: PublicMatchState;
+  self?: PublicPlayer;
+  isSpectator: boolean;
+  onBanCrop: (id: CropId) => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!state.banEndsAt) return;
+    const i = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(i);
+  }, [state.banEndsAt]);
+
+  const remaining = state.banEndsAt ? Math.max(0, state.banEndsAt - now) : 0;
+  const ss = Math.ceil(remaining / 1000)
+    .toString()
+    .padStart(2, "0");
+
+  return (
+    <section className="lobby-stage relative z-10 w-full max-w-5xl">
+      <div className="lobby-title-card pixel-panel">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
+            CROP BAN
+          </span>
+          <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
+            00:{ss}
+          </span>
+        </div>
+        <h2 className="font-pixel lobby-title">แบนผัก 1 อย่าง</h2>
+        <p className="lobby-subtitle">แบนซ้ำกันได้ · หลังหมดเวลา จะเลือกได้เฉพาะผักที่ไม่โดนแบน</p>
+      </div>
+
+      <div className="pixel-panel my-4 grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
+        {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
+          const Icon = CROP_ICONS[crop.id];
+          const active = self?.bannedCrop === crop.id;
+          return (
+            <button
+              key={crop.id}
+              type="button"
+              onClick={() => {
+                if (isSpectator) return;
+                SFX.click();
+                onBanCrop(crop.id);
+              }}
+              disabled={isSpectator}
+              className="farm-crop-card pixel-btn text-left"
+              data-active={active ? "true" : undefined}
+              title={`แบน ${crop.name}`}
+            >
+              <span className="farm-crop-icon">
+                <Icon size={26} />
+              </span>
+              <span className="farm-crop-body">
+                <span className="farm-crop-name">{crop.name}</span>
+                <span className="farm-crop-prices">
+                  <span>ซื้อ {crop.seedCost}</span>
+                  <span>ขาย {crop.sellPrice}</span>
+                </span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="pixel-panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex flex-wrap gap-2">
+          {state.players.map((player) => (
+            <span
+              key={player.id}
+              className="pixel-chip font-pixel text-[8px]"
+              data-gold={player.bannedCrop ? "true" : undefined}
+            >
+              {player.name}: {player.bannedCrop ? CROPS[player.bannedCrop].name : "ยังไม่แบน"}
+            </span>
+          ))}
+        </div>
+        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+          ไม่ต้องกด READY · หมดเวลาแล้วไปเลือกเมล็ด
+        </span>
+      </div>
+    </section>
+  );
+}
+
 function CropSelectionView({
   state,
   self,
   isSpectator,
   isLocked,
+  bannedCrops,
   onSelectCrops,
   onReady,
 }: {
@@ -1238,6 +1356,7 @@ function CropSelectionView({
   self?: PublicPlayer;
   isSpectator: boolean;
   isLocked: boolean;
+  bannedCrops: CropId[];
   onSelectCrops: (ids: CropId[]) => void;
   onReady: () => void;
 }) {
@@ -1248,7 +1367,7 @@ function CropSelectionView({
     return () => clearInterval(i);
   }, [state.selectionEndsAt]);
 
-  const selected = self?.selectedCrops ?? [];
+  const selected = (self?.selectedCrops ?? []).filter((id) => !bannedCrops.includes(id));
   const remaining = state.selectionEndsAt ? Math.max(0, state.selectionEndsAt - now) : 0;
   const mm = Math.floor(remaining / 60000)
     .toString()
@@ -1259,6 +1378,10 @@ function CropSelectionView({
 
   const toggleCrop = (id: CropId) => {
     if (isSpectator || isLocked || !self) return;
+    if (bannedCrops.includes(id)) {
+      SFX.bad();
+      return;
+    }
     const exists = selected.includes(id);
     const next = exists ? selected.filter((cropId) => cropId !== id) : [...selected, id];
     if (next.length > SELECTED_CROP_COUNT) {
@@ -1334,12 +1457,13 @@ function CropSelectionView({
           {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
             const Icon = CROP_ICONS[crop.id];
             const active = selected.includes(crop.id);
+            const banned = bannedCrops.includes(crop.id);
             return (
               <button
                 key={crop.id}
                 type="button"
                 onClick={() => toggleCrop(crop.id)}
-                disabled={isSpectator || isLocked}
+                disabled={isSpectator || isLocked || banned}
                 className="farm-crop-card pixel-btn text-left"
                 data-active={active ? "true" : undefined}
                 title={`${crop.name} · ซื้อ ${crop.seedCost} · ขาย ${crop.sellPrice}`}
@@ -1349,6 +1473,7 @@ function CropSelectionView({
                 </span>
                 <span className="farm-crop-body">
                   <span className="farm-crop-name">{crop.name}</span>
+                  {banned && <span className="font-pixel text-[7px] text-[#ff6b6b]">BANNED</span>}
                   <span className="farm-crop-prices">
                     <span>ซื้อ {crop.seedCost}</span>
                     <span>ขาย {crop.sellPrice}</span>
@@ -1391,6 +1516,14 @@ function CropSelectionView({
       </div>
     </section>
   );
+}
+
+function bannedCropIds(players: PublicPlayer[]): CropId[] {
+  const banned: CropId[] = [];
+  for (const player of players) {
+    if (player.bannedCrop && !banned.includes(player.bannedCrop)) banned.push(player.bannedCrop);
+  }
+  return banned;
 }
 
 function RoomSettingsSummary({

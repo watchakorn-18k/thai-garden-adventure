@@ -230,7 +230,10 @@ export class MatchRoom implements DurableObject {
         return;
       }
       if (this.status === "crop_selection") {
-        if (normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds()).length !== DEFAULT_SELECTED_CROPS.length)
+        if (
+          normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds()).length !==
+          DEFAULT_SELECTED_CROPS.length
+        )
           return;
         player.ready = !player.ready;
         this.maybeStartPrepareCountdown();
@@ -483,7 +486,10 @@ export class MatchRoom implements DurableObject {
           ...p,
           connected: false,
           disconnectedAt: undefined,
-          selectedCrops: normalizeSelectedCrops(p.selectedCrops, effectiveBannedCrops(stored.players)),
+          selectedCrops: normalizeSelectedCrops(
+            p.selectedCrops,
+            effectiveBannedCrops(stored.players),
+          ),
           bannedCrop: isCropId(p.bannedCrop) ? p.bannedCrop : undefined,
           seedChoice: isSelectedCrop(p.seedChoice, p.selectedCrops)
             ? p.seedChoice
@@ -582,13 +588,13 @@ export class MatchRoom implements DurableObject {
         : this.status === "crop_ban"
           ? this.banEndsAt
           : this.status === "crop_selection"
-          ? this.selectionEndsAt
-          : this.status === "playing"
-            ? minDefined(
-                this.endsAt,
-                Number.isFinite(reconnectDeadline) ? reconnectDeadline : undefined,
-              )
-            : undefined;
+            ? this.selectionEndsAt
+            : this.status === "playing"
+              ? minDefined(
+                  this.endsAt,
+                  Number.isFinite(reconnectDeadline) ? reconnectDeadline : undefined,
+                )
+              : undefined;
     if (time) this.ctx.waitUntil(this.ctx.storage.setAlarm(time));
   }
 
@@ -1324,7 +1330,9 @@ function fillSelectedCrops(raw?: readonly CropId[], banned: readonly CropId[] = 
 }
 
 function firstAllowedCrop(banned: readonly CropId[] = []): CropId {
-  return (Object.keys(CROPS) as CropId[]).find((id) => !banned.includes(id)) ?? DEFAULT_SELECTED_CROPS[0];
+  return (
+    (Object.keys(CROPS) as CropId[]).find((id) => !banned.includes(id)) ?? DEFAULT_SELECTED_CROPS[0]
+  );
 }
 
 function isSelectedCrop(id: CropId, selected?: CropId[]): boolean {
