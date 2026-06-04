@@ -70,8 +70,6 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.web-meta.outputs.tags }}
           labels: ${{ steps.web-meta.outputs.labels }}
-          build-args: |
-            VITE_MATCH_WS_URL=${{ vars.VITE_MATCH_WS_URL }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,mode=max,scope=web
 

@@ -26,8 +26,8 @@ bun run dev
 
 Production มี 2 ทาง:
 
-- Cloudflare: deploy `bun run deploy:match` แล้วตั้ง `VITE_MATCH_WS_URL=wss://thai-garden-match.<sub>.workers.dev` ตอน build main app.
-- VPS/Podman: รัน web image + match image แยกกัน ดูหัวข้อ Docker deploy.
+- Cloudflare: deploy `bun run deploy:match` แล้ว route `/room/*` ไป match worker.
+- VPS/Podman: รัน web image + match image แยกกัน แล้ว reverse proxy `/room/*` ไป match container ดูหัวข้อ Docker deploy.
 
 ## Docker deploy บน VPS
 
@@ -36,13 +36,14 @@ GitHub Actions build/push 2 images:
 - `ghcr.io/watchakorn-18k/thai-garden-adventure:latest` — web app, container port `3000`
 - `ghcr.io/watchakorn-18k/thai-garden-match:latest` — match WebSocket worker, container port `8787`
 
-ตั้ง GitHub Actions variable ก่อน build web image:
+WebSocket URL จะอิงจาก domain ที่เปิดเว็บอัตโนมัติ:
 
 ```text
-VITE_MATCH_WS_URL=ws://localhost:8787
+https://garden-game.example.com        -> web app
+wss://garden-game.example.com/room/*   -> match WebSocket
 ```
 
-ถ้าเว็บอยู่หลัง HTTPS ให้ใช้ `wss://...` แทน `ws://...`.
+ไม่ต้องตั้ง `VITE_MATCH_WS_URL` ตอน build image เพื่อให้ image เดียวเอาไปใช้กับ domain อื่นได้.
 
 รันบน VPS:
 
@@ -55,7 +56,7 @@ podman run -d \
   --name thai-garden-match \
   --restart=always \
   --memory=512m \
-  -p 8787:8787 \
+  -p 127.0.0.1:8787:8787 \
   ghcr.io/watchakorn-18k/thai-garden-match:latest
 
 podman rm -f thai-garden-adventure 2>/dev/null
@@ -67,11 +68,37 @@ podman run -d \
   ghcr.io/watchakorn-18k/thai-garden-adventure:latest
 ```
 
+ตั้ง reverse proxy ให้ web กับ match อยู่ domain เดียวกัน:
+
+```nginx
+server {
+  listen 80;
+  server_name garden-game.example.com;
+
+  location /room/ {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_http_version 1.1;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection "upgrade";
+    proxy_set_header Host $host;
+    proxy_read_timeout 3600s;
+    proxy_send_timeout 3600s;
+  }
+
+  location / {
+    proxy_pass http://127.0.0.1:8080;
+    proxy_set_header Host $host;
+  }
+}
+```
+
+ถ้าใช้ HTTPS ให้ขอ cert ด้วย nginx/certbot แล้ว browser จะต่อ `wss://<domain>/room/<code>/ws` อัตโนมัติ.
+
 เปิด firewall:
 
 ```bash
-sudo ufw allow 8080/tcp
-sudo ufw allow 8787/tcp
+sudo ufw allow 80/tcp
+sudo ufw allow 443/tcp
 sudo ufw reload
 ```
 
@@ -80,6 +107,7 @@ sudo ufw reload
 ```bash
 curl http://127.0.0.1:8787/health
 curl http://localhost:8787/health
+curl http://garden-game.example.com/health
 podman logs --tail=100 thai-garden-match
 ```
 

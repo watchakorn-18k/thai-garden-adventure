@@ -279,7 +279,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
       {state.status === "playing" && self && !isSpectator && <Toolbar self={self} send={send} />}
       {state.status === "playing" && self && !isSpectator && (
-        <MobileControls sendMove={sendMove} sendAction={sendAction} />
+        <MobileControls setMovement={setMovement} sendAction={sendAction} />
       )}
       {status !== "open" && (
         <ConnectionBanner text={lastError?.message ?? "กำลังเชื่อมต่อใหม่..."} />
@@ -1038,9 +1038,11 @@ function SelfField({
   events: { id: number; ev: ServerEvent }[];
   actionFlash: number;
   acting: boolean;
-  predictedDir: Direction | null;
+  predictedDir?: Direction | null;
 }) {
-  return <PhaserField player={player} events={events} acting={acting} predictedDir={predictedDir} />;
+  return (
+    <PhaserField player={player} events={events} acting={acting} predictedDir={predictedDir} />
+  );
 }
 
 function SpectatorMatchView({
@@ -1180,23 +1182,15 @@ function Toolbar({
 }
 
 function MobileControls({
-  sendMove,
+  setMovement,
   sendAction,
 }: {
-  sendMove: (dir: Direction) => void;
+  setMovement: (dir: Direction | null) => void;
   sendAction: () => void;
 }) {
-  const repeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stop = () => {
-    if (repeatRef.current) clearInterval(repeatRef.current);
-    repeatRef.current = null;
-  };
-  const startMove = (dir: Direction) => {
-    stop();
-    sendMove(dir);
-    repeatRef.current = setInterval(() => sendMove(dir), MOVE_REPEAT_MS);
-  };
-  useEffect(() => stop, []);
+  const stop = () => setMovement(null);
+  const startMove = (dir: Direction) => setMovement(dir);
+  useEffect(() => () => setMovement(null), [setMovement]);
 
   return (
     <div className="fixed bottom-4 left-0 right-0 z-20 flex items-end justify-between px-4 sm:hidden pointer-events-none">

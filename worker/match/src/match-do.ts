@@ -239,6 +239,7 @@ export class MatchRoom implements DurableObject {
     }
     if (msg.t === "action") {
       if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
+      this.advanceMovement(now);
       player.lastActionAt = now;
       const result = applyAction({
         tiles: player.tiles,

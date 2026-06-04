@@ -301,6 +301,23 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
         }
 
         override update(time: number, delta: number) {
+          const predictedDir = predictedDirRef.current;
+          if (predictedDir) {
+            const step = (delta / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+            const p = playerRef.current;
+            p.dir = predictedDir;
+            if (predictedDir === "up") this.disp.y = Math.max(0, this.disp.y - step);
+            if (predictedDir === "down") this.disp.y = Math.min(ROWS - 1, this.disp.y + step);
+            if (predictedDir === "left") this.disp.x = Math.max(0, this.disp.x - step);
+            if (predictedDir === "right") this.disp.x = Math.min(COLS - 1, this.disp.x + step);
+            this.target = { ...this.disp };
+            this.moving = true;
+            this.walkFrame = Math.floor(time / 110) % 2;
+            this.drawMarker();
+            this.drawFarmer();
+            return;
+          }
+
           const dx = this.target.x - this.disp.x;
           const dy = this.target.y - this.disp.y;
           if (Math.abs(dx) > 0.001 || Math.abs(dy) > 0.001) {
@@ -312,12 +329,14 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
             if (Math.abs(this.target.y - this.disp.y) < 0.03) this.disp.y = this.target.y;
             this.moving = true;
             this.walkFrame = Math.floor(time / 110) % 2;
+            this.drawMarker();
             this.drawFarmer();
           } else if (this.moving) {
             this.disp.x = this.target.x;
             this.disp.y = this.target.y;
             this.moving = false;
             this.walkFrame = 0;
+            this.drawMarker();
             this.drawFarmer();
           }
         }
@@ -347,12 +366,10 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
     sceneRef.current?.applyPlayer();
   }, [player]);
 
-  // Apply local movement immediately for the controlled player.
+  // Apply local movement direction immediately for the controlled player.
   useEffect(() => {
-    if (!predictedMove || predictedMove.seq === lastPredictedSeq.current) return;
-    lastPredictedSeq.current = predictedMove.seq;
-    sceneRef.current?.predictMove(predictedMove.dir);
-  }, [predictedMove]);
+    sceneRef.current?.setPredictedDir(predictedDir ?? null);
+  }, [predictedDir]);
 
   // Redraw the farmer when the action pose toggles (may arrive without a snapshot).
   useEffect(() => {
@@ -389,6 +406,6 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
 interface FieldScene {
   applyPlayer(): void;
   refreshFarmer(): void;
-  predictMove(dir: Direction): void;
+  setPredictedDir(dir: Direction | null): void;
   spawnEvent(ev: ServerEvent): void;
 }

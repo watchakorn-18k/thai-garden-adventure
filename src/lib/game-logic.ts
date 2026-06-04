@@ -27,7 +27,8 @@ export function facingTile(
   pos: { x: number; y: number },
   dir: Direction,
 ): { x: number; y: number } | null {
-  let { x, y } = pos;
+  let x = Math.round(pos.x);
+  let y = Math.round(pos.y);
   if (dir === "up") y -= 1;
   else if (dir === "down") y += 1;
   else if (dir === "left") x -= 1;

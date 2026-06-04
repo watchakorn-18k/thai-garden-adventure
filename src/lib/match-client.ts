@@ -28,11 +28,9 @@ interface UseMatchOpts {
 const RECONNECT_DELAYS = [400, 800, 1600, 3200, 5000];
 
 function wsBaseUrl(): string {
-  const env = import.meta.env.VITE_MATCH_WS_URL as string | undefined;
-  if (env) return env.replace(/\/$/, "");
   if (typeof window === "undefined") return "ws://localhost:8787";
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.hostname}:8787`;
+  return `${proto}//${window.location.host}`;
 }
 
 function sessionKey(code: string): string {
