@@ -17,7 +17,16 @@ export const ROOM_SETTING_LIMITS = {
 
 const directionSchema = z.enum(["up", "down", "left", "right"]);
 const toolSchema = z.enum(["hoe", "watering_can", "seed"]);
-const cropIdSchema = z.enum(["chili", "rice", "morning_glory", "eggplant"]);
+const cropIdSchema = z.enum([
+  "chili",
+  "rice",
+  "morning_glory",
+  "eggplant",
+  "mango",
+  "lemongrass",
+  "papaya",
+  "basil",
+]);
 const matchRoleSchema = z.enum(["player", "spectator"]);
 const roomStageSchema = z.enum(["classic", "water", "festival"]);
 export const roomSettingsSchema = z.object({

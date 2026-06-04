@@ -13,6 +13,10 @@ import {
   RiceIcon,
   MorningGloryIcon,
   EggplantIcon,
+  MangoIcon,
+  LemongrassIcon,
+  PapayaIcon,
+  BasilIcon,
 } from "./PixelIcons";
 import {
   COLS,
@@ -36,6 +40,10 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   rice: RiceIcon,
   morning_glory: MorningGloryIcon,
   eggplant: EggplantIcon,
+  mango: MangoIcon,
+  lemongrass: LemongrassIcon,
+  papaya: PapayaIcon,
+  basil: BasilIcon,
 };
 
 export default function FarmGame() {
@@ -54,6 +62,10 @@ export default function FarmGame() {
     rice: CROPS.rice.sellPrice,
     morning_glory: CROPS.morning_glory.sellPrice,
     eggplant: CROPS.eggplant.sellPrice,
+    mango: CROPS.mango.sellPrice,
+    lemongrass: CROPS.lemongrass.sellPrice,
+    papaya: CROPS.papaya.sellPrice,
+    basil: CROPS.basil.sellPrice,
   }));
   const [comboState, setComboState] = useState<ComboState>({
     combo: 0,
@@ -500,7 +512,7 @@ export default function FarmGame() {
   );
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col items-center justify-center p-6 gap-6 overflow-hidden">
+    <div className="relative min-h-screen w-full flex flex-col items-center justify-start px-6 pb-6 gap-6 overflow-hidden">
       {/* Sky decoration */}
       <div className="sky-stars" />
       {cloudConfig.map((c, i) => (

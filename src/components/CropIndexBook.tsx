@@ -1,6 +1,16 @@
 import { useState } from "react";
 import { CROPS, type Crop, type CropId } from "@/lib/game-types";
-import { ChiliIcon, CoinIcon, EggplantIcon, MorningGloryIcon, RiceIcon } from "./PixelIcons";
+import {
+  ChiliIcon,
+  CoinIcon,
+  EggplantIcon,
+  MorningGloryIcon,
+  RiceIcon,
+  MangoIcon,
+  LemongrassIcon,
+  PapayaIcon,
+  BasilIcon,
+} from "./PixelIcons";
 import { SFX } from "@/lib/sfx";
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
@@ -8,6 +18,10 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   rice: RiceIcon,
   morning_glory: MorningGloryIcon,
   eggplant: EggplantIcon,
+  mango: MangoIcon,
+  lemongrass: LemongrassIcon,
+  papaya: PapayaIcon,
+  basil: BasilIcon,
 };
 
 interface CropIndexBookProps {

@@ -12,6 +12,10 @@ import {
   RiceIcon,
   SeedIcon,
   WaterCanIcon,
+  MangoIcon,
+  LemongrassIcon,
+  PapayaIcon,
+  BasilIcon,
 } from "./PixelIcons";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
@@ -35,6 +39,10 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   rice: RiceIcon,
   morning_glory: MorningGloryIcon,
   eggplant: EggplantIcon,
+  mango: MangoIcon,
+  lemongrass: LemongrassIcon,
+  papaya: PapayaIcon,
+  basil: BasilIcon,
 };
 
 const STAGE_COPY: Record<RoomStage, { label: string; desc: string }> = {
