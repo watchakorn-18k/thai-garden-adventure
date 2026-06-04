@@ -1,4 +1,4 @@
-import { applyAction, movePos, tickGrowth } from "../../../src/lib/game-logic";
+import { applyAction, tickGrowth } from "../../../src/lib/game-logic";
 import {
   COLS,
   CROPS,
@@ -41,7 +41,8 @@ interface PlayerState {
   connected: boolean;
   disconnectedAt?: number;
   stats: PublicPlayerStats;
-  lastMoveAt: number;
+  inputDir?: Direction;
+  lastMovementAt: number;
   lastActionAt: number;
 }
 
@@ -57,12 +58,12 @@ interface StoredRoomState {
   hostId?: string;
   hostSessionId?: string;
   settings?: RoomSettings;
-  players: Omit<PlayerState, "connected" | "lastMoveAt" | "lastActionAt">[];
+  players: Omit<PlayerState, "connected" | "inputDir" | "lastMovementAt" | "lastActionAt">[];
 }
 
-const MOVE_COOLDOWN_MS = 60;
+const MOVE_SPEED_TILES_PER_SECOND = 5.8;
 const ACTION_COOLDOWN_MS = 80;
-const SNAPSHOT_INTERVAL_MS = 100;
+const SNAPSHOT_INTERVAL_MS = 50;
 const GROWTH_INTERVAL_MS = 500;
 const PERSIST_INTERVAL_MS = 1000;
 const RECONNECT_GRACE_MS = 30_000;
@@ -222,10 +223,17 @@ export class MatchRoom implements DurableObject {
       return;
     }
     if (msg.t === "move") {
-      if (now - player.lastMoveAt < MOVE_COOLDOWN_MS) return;
-      player.lastMoveAt = now;
+      this.advanceMovement(now);
+      player.inputDir = msg.dir;
       player.dir = msg.dir;
-      player.pos = movePos(player.pos, msg.dir);
+      player.lastMovementAt = now;
+      this.dirty = true;
+      return;
+    }
+    if (msg.t === "move_stop") {
+      this.advanceMovement(now);
+      player.inputDir = undefined;
+      player.lastMovementAt = now;
       this.dirty = true;
       return;
     }
@@ -344,7 +352,8 @@ export class MatchRoom implements DurableObject {
           connected: false,
           disconnectedAt: undefined,
           stats: p.stats ?? emptyStats(),
-          lastMoveAt: 0,
+          inputDir: undefined,
+          lastMovementAt: Date.now(),
           lastActionAt: 0,
         },
       ]),
@@ -364,7 +373,13 @@ export class MatchRoom implements DurableObject {
 
   private persist(): void {
     const players = [...this.players.values()].map(
-      ({ connected: _connected, lastMoveAt: _lastMoveAt, lastActionAt: _lastActionAt, ...p }) => p,
+      ({
+        connected: _connected,
+        inputDir: _inputDir,
+        lastMovementAt: _lastMovementAt,
+        lastActionAt: _lastActionAt,
+        ...p
+      }) => p,
     );
     this.lastPersistAt = Date.now();
     this.dirty = false;
@@ -390,6 +405,22 @@ export class MatchRoom implements DurableObject {
     if (!this.dirty) return;
     if (now - this.lastPersistAt < PERSIST_INTERVAL_MS) return;
     this.persist();
+  }
+
+  private advanceMovement(now = Date.now()): void {
+    let changed = false;
+    for (const p of this.players.values()) {
+      const elapsed = Math.min(120, Math.max(0, now - p.lastMovementAt));
+      p.lastMovementAt = now;
+      if (!p.inputDir || elapsed === 0) continue;
+      const step = (elapsed / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+      if (p.inputDir === "up") p.pos.y = Math.max(0, p.pos.y - step);
+      if (p.inputDir === "down") p.pos.y = Math.min(ROWS - 1, p.pos.y + step);
+      if (p.inputDir === "left") p.pos.x = Math.max(0, p.pos.x - step);
+      if (p.inputDir === "right") p.pos.x = Math.min(COLS - 1, p.pos.x + step);
+      changed = true;
+    }
+    if (changed) this.dirty = true;
   }
 
   private scheduleAlarm(): void {
@@ -533,7 +564,8 @@ export class MatchRoom implements DurableObject {
       connected: true,
       disconnectedAt: undefined,
       stats: emptyStats(),
-      lastMoveAt: 0,
+      inputDir: undefined,
+      lastMovementAt: Date.now(),
       lastActionAt: 0,
     });
     ws.serializeAttachment({
@@ -670,7 +702,8 @@ export class MatchRoom implements DurableObject {
       existing.disconnectedAt = undefined;
       existing.name = name;
       existing.cosmetics = cosmeticsSchema.parse(cosmetics);
-      existing.lastMoveAt = 0;
+      existing.inputDir = undefined;
+      existing.lastMovementAt = Date.now();
       existing.lastActionAt = 0;
       sessionId = existing.sessionId;
     } else if (this.players.size < this.settings.maxPlayers) {
@@ -694,7 +727,8 @@ export class MatchRoom implements DurableObject {
         connected: true,
         disconnectedAt: undefined,
         stats: emptyStats(),
-        lastMoveAt: 0,
+        inputDir: undefined,
+        lastMovementAt: Date.now(),
         lastActionAt: 0,
       });
     } else {
@@ -754,10 +788,11 @@ export class MatchRoom implements DurableObject {
       p.tool = "hoe";
       p.seedChoice = "chili";
       p.dir = "down";
-      p.pos = { x: p.pos.x, y: 4 };
+      p.pos = { x: Math.round(p.pos.x), y: 4 };
       p.disconnectedAt = undefined;
       p.stats = emptyStats();
-      p.lastMoveAt = 0;
+      p.inputDir = undefined;
+      p.lastMovementAt = now;
       p.lastActionAt = 0;
     }
     this.startTimers();
@@ -778,6 +813,7 @@ export class MatchRoom implements DurableObject {
       this.endByTimeout();
       return;
     }
+    this.advanceMovement(now);
     this.broadcastSnapshot();
     this.persistDirty(now);
     if (this.pendingEvents.length) {

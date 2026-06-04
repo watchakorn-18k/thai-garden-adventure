@@ -27,8 +27,6 @@ import {
   type ServerEvent,
 } from "@/lib/match-protocol";
 
-const MOVE_REPEAT_MS = 70;
-
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
   rice: RiceIcon,
@@ -85,10 +83,9 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   });
 
   const keys = useRef<Set<string>>(new Set());
-  const lastSentDir = useRef<{ dir: Direction; at: number } | null>(null);
   const nextDiagonalAxis = useRef<"vertical" | "horizontal">("vertical");
-  const predictedMoveSeq = useRef(0);
-  const [predictedMove, setPredictedMove] = useState<{ seq: number; dir: Direction }>();
+  const lastInputDir = useRef<Direction | null>(null);
+  const [predictedDir, setPredictedDir] = useState<Direction | null>(null);
   const selfRef = useRef<PublicPlayer | undefined>(undefined);
   const statusRef = useRef<string | undefined>(undefined);
   const [actionFlash, setActionFlash] = useState(0);
@@ -104,13 +101,14 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     statusRef.current = state?.status;
   }, [self, state?.status]);
 
-  const sendMove = useCallback(
-    (dir: Direction) => {
+  const setMovement = useCallback(
+    (dir: Direction | null) => {
       if (isSpectator) return;
       if (!selfRef.current || statusRef.current !== "playing") return;
-      predictedMoveSeq.current += 1;
-      setPredictedMove({ seq: predictedMoveSeq.current, dir });
-      send({ t: "move", dir });
+      if (lastInputDir.current === dir) return;
+      lastInputDir.current = dir;
+      setPredictedDir(dir);
+      send(dir ? { t: "move", dir } : { t: "move_stop" });
     },
     [isSpectator, send],
   );
@@ -132,43 +130,31 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       keys.current.add(k);
       if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) e.preventDefault();
       const dir = keyToDir(k);
-      if (dir && !e.repeat && keys.current.size === 1) {
-        lastSentDir.current = { dir, at: Date.now() };
-        sendMove(dir);
-      }
+      if (dir) setMovement(keysToDir(keys.current, nextDiagonalAxis));
       if ((k === " " || k === "enter") && !e.repeat) sendAction();
       if (k === "r" && statusRef.current === "lobby") send({ t: "ready" });
       if (k === "1") send({ t: "tool", tool: "hoe" });
       if (k === "2") send({ t: "tool", tool: "watering_can" });
       if (k === "3") send({ t: "tool", tool: "seed" });
     };
-    const onUp = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase());
+    const onUp = (e: KeyboardEvent) => {
+      keys.current.delete(e.key.toLowerCase());
+      setMovement(keysToDir(keys.current, nextDiagonalAxis));
+    };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [isSpectator, send, sendAction, sendMove]);
+  }, [isSpectator, send, sendAction, setMovement]);
 
   useEffect(() => {
-    if (isSpectator) return;
-    if (state?.status !== "playing") return;
-    const i = setInterval(() => {
-      const k = keys.current;
-      const dir = keysToDir(k, nextDiagonalAxis);
-      if (!dir) {
-        lastSentDir.current = null;
-        return;
-      }
-      const now = Date.now();
-      const last = lastSentDir.current;
-      if (last && last.dir === dir && now - last.at < MOVE_REPEAT_MS) return;
-      lastSentDir.current = { dir, at: now };
-      sendMove(dir);
-    }, 60);
-    return () => clearInterval(i);
-  }, [isSpectator, state?.status, sendMove]);
+    if (state?.status === "playing") return;
+    keys.current.clear();
+    lastInputDir.current = null;
+    setPredictedDir(null);
+  }, [state?.status]);
 
   useEffect(() => {
     return () => {
@@ -261,7 +247,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
                 events={events.filter((e) => e.ev.playerId === self.id)}
                 actionFlash={actionFlash}
                 acting={acting}
-                predictedMove={predictedMove}
+                predictedDir={predictedDir}
               />
             </div>
           )
@@ -1046,17 +1032,15 @@ function SelfField({
   player,
   events,
   acting,
-  predictedMove,
+  predictedDir,
 }: {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
   actionFlash: number;
   acting: boolean;
-  predictedMove?: { seq: number; dir: Direction };
+  predictedDir: Direction | null;
 }) {
-  return (
-    <PhaserField player={player} events={events} acting={acting} predictedMove={predictedMove} />
-  );
+  return <PhaserField player={player} events={events} acting={acting} predictedDir={predictedDir} />;
 }
 
 function SpectatorMatchView({

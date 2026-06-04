@@ -66,6 +66,7 @@ export const clientMsg = z.discriminatedUnion("t", [
   }),
   z.object({ t: z.literal("ready") }),
   z.object({ t: z.literal("move"), dir: directionSchema }),
+  z.object({ t: z.literal("move_stop") }),
   z.object({ t: z.literal("action") }),
   z.object({ t: z.literal("tool"), tool: toolSchema }),
   z.object({ t: z.literal("seed"), id: cropIdSchema }),

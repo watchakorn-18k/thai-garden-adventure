@@ -8,6 +8,7 @@ const TILE = 56;
 // Time constant for exponential movement smoothing (ms). Lower = snappier and
 // closer to the server position, higher = smoother but more trailing.
 const MOVE_TAU = 45;
+const MOVE_SPEED_TILES_PER_SECOND = 5.8;
 const PIXEL_FONT = '"Press Start 2P", "VT323", monospace';
 
 const TYPE_CODE: Record<"grass" | "tilled" | "watered", number> = {
@@ -21,7 +22,7 @@ interface Props {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
   acting: boolean;
-  predictedMove?: { seq: number; dir: Direction };
+  predictedDir?: Direction | null;
 }
 
 function hexNum(hex: string): number {
@@ -41,17 +42,18 @@ function drawRects(g: Phaser.GameObjects.Graphics, rects: Rect[], ox: number, oy
  * marker, ambience and floating event text) inside a Phaser canvas. The React
  * shell (HUD, lobby, toolbar, …) stays outside in MultiplayerGame.
  */
-export default function PhaserField({ player, events, acting, predictedMove }: Props) {
+export default function PhaserField({ player, events, acting, predictedDir }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<FieldScene | null>(null);
   const seenEvents = useRef<Set<number>>(new Set());
-  const lastPredictedSeq = useRef(0);
 
   // Latest props for the scene to read once it boots.
   const playerRef = useRef(player);
   const actingRef = useRef(acting);
+  const predictedDirRef = useRef<Direction | null>(predictedDir ?? null);
   playerRef.current = player;
   actingRef.current = acting;
+  predictedDirRef.current = predictedDir ?? null;
 
   useEffect(() => {
     let game: Phaser.Game | null = null;
@@ -193,7 +195,8 @@ export default function PhaserField({ player, events, acting, predictedMove }: P
         drawMarker() {
           const p = playerRef.current;
           this.markerG.clear();
-          let { x, y } = p.pos;
+          let x = Math.round(this.disp.x);
+          let y = Math.round(this.disp.y);
           if (p.dir === "up") y -= 1;
           else if (p.dir === "down") y += 1;
           else if (p.dir === "left") x -= 1;
@@ -256,15 +259,9 @@ export default function PhaserField({ player, events, acting, predictedMove }: P
           this.drawFarmer();
         }
 
-        predictMove(dir: Direction) {
-          const next = { ...this.target };
-          if (dir === "up") next.y = Math.max(0, next.y - 1);
-          if (dir === "down") next.y = Math.min(ROWS - 1, next.y + 1);
-          if (dir === "left") next.x = Math.max(0, next.x - 1);
-          if (dir === "right") next.x = Math.min(COLS - 1, next.x + 1);
-          this.target = next;
+        setPredictedDir(dir: Direction | null) {
           const p = playerRef.current;
-          p.dir = dir;
+          if (dir) p.dir = dir;
           this.drawMarker();
           this.drawFarmer();
         }
