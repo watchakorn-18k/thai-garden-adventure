@@ -30,7 +30,9 @@ import loserSoundUrl from "../../loser_sound.mp3";
 import drawSoundUrl from "../../draw_sound.mp3";
 import {
   DEFAULT_ROOM_SETTINGS,
+  DEFAULT_SELECTED_CROPS,
   ROOM_SETTING_LIMITS,
+  SELECTED_CROP_COUNT,
   type MatchRecap,
   type MatchRole,
   type PublicMatchState,
@@ -224,7 +226,12 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   });
 
   useEffect(() => {
-    const shouldPlayLobbyMusic = musicEnabled && state?.status === "lobby";
+    const shouldPlayLobbyMusic =
+      musicEnabled &&
+      (state?.status === "lobby" ||
+        state?.status === "countdown" ||
+        state?.status === "crop_selection" ||
+        state?.status === "prepare_countdown");
     const audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
     lobbyMusicRef.current = audio;
     audio.loop = true;
@@ -433,7 +440,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       const dir = keyToDir(k);
       if (dir) setMovement(keysToDir(keys.current, nextDiagonalAxis));
       if ((k === " " || k === "enter") && !e.repeat) sendAction();
-      if (k === "r" && statusRef.current === "lobby") {
+      if (k === "r" && (statusRef.current === "lobby" || statusRef.current === "crop_selection")) {
         SFX.click();
         send({ t: "ready" });
       }
@@ -561,7 +568,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     if (!state?.status) return;
     if (lastStatus.current !== state.status) {
       lastStatus.current = state.status;
-      if (state.status === "countdown") {
+      if (state.status === "countdown" || state.status === "prepare_countdown") {
         SFX.click();
       } else if (state.status === "playing") {
         SFX.crit();
@@ -621,7 +628,10 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         }
       />
 
-      {state.status === "lobby" && (
+      {(state.status === "lobby" ||
+        state.status === "countdown" ||
+        state.status === "crop_selection" ||
+        state.status === "prepare_countdown") && (
         <button
           onClick={toggleLobbyMusic}
           className="pixel-btn fixed right-4 top-4 z-50 flex h-12 w-12 items-center justify-center p-0"
@@ -640,6 +650,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             state={state}
             isHost={hasHostControls}
             onClaimSlot={() => send({ t: "claim_slot" })}
+            onForceStart={() => send({ t: "start" })}
             onOpenSettings={() => setSettingsOpen(true)}
           />
         ) : (
@@ -649,6 +660,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             state={state}
             isHost={hasHostControls}
             onReady={() => send({ t: "ready" })}
+            onStart={() => send({ t: "start" })}
             onLeaveSlot={() => send({ t: "leave_slot" })}
             onOpenSettings={() => setSettingsOpen(true)}
             onKick={(playerId) => send({ t: "kick", playerId })}
@@ -661,6 +673,21 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           isHost={hasHostControls}
           onCancel={() => send({ t: "cancel_countdown" })}
         />
+      )}
+
+      {(state.status === "crop_selection" || state.status === "prepare_countdown") && (
+        <CropSelectionView
+          state={state}
+          self={self}
+          isSpectator={isSpectator}
+          isLocked={state.status === "prepare_countdown"}
+          onSelectCrops={(ids) => send({ t: "select_crops", ids })}
+          onReady={() => send({ t: "ready" })}
+        />
+      )}
+
+      {state.status === "prepare_countdown" && state.countdownEndsAt && (
+        <CountdownView endsAt={state.countdownEndsAt} isHost={false} onCancel={() => undefined} />
       )}
 
       {(state.status === "playing" || state.status === "ended") &&
@@ -714,18 +741,23 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
       )}
-      <CropIndexBook
-        compact
-        marketPrices={state.marketPrices}
-        selectedCropId={self?.seedChoice}
-        onSelectCrop={
-          !isSpectator && self
-            ? (id) => {
-                send({ t: "seed", id });
-              }
-            : undefined
-        }
-      />
+      {state.status !== "crop_selection" && state.status !== "prepare_countdown" && (
+        <CropIndexBook
+          compact
+          marketPrices={state.marketPrices}
+          selectedCropId={self?.seedChoice}
+          availableCropIds={
+            state.status === "playing" && self ? selectedCropPool(self.selectedCrops) : undefined
+          }
+          onSelectCrop={
+            !isSpectator && self && state.status === "playing"
+              ? (id) => {
+                  send({ t: "seed", id });
+                }
+              : undefined
+          }
+        />
+      )}
       {state.status === "playing" && self && !isSpectator && (
         <MobileControls setMovement={setMovement} sendAction={sendAction} />
       )}
@@ -784,7 +816,7 @@ function MultiplayerControlsGuide() {
           <div className="multi-guide-actions">
             <GuideAction keys="SPACE" label="USE" sub="ลงมือกับช่องตรงหน้า" />
             <GuideAction keys="1 / 2 / 3" label="TOOL" sub="จอบ · น้ำ · เมล็ด" />
-            <GuideAction keys="R" label="READY" sub="เริ่มรอบใหม่ใน lobby" />
+            <GuideAction keys="R" label="READY" sub="พร้อมใน lobby / เลือกผัก" />
           </div>
         </div>
       </div>
@@ -869,7 +901,7 @@ function MatchHUD({
   code: string;
   self?: PublicPlayer;
   opp?: PublicPlayer;
-  state: { status: string; endsAt?: number };
+  state: { status: string; endsAt?: number; countdownEndsAt?: number; selectionEndsAt?: number };
   settings: RoomSettings;
   status: string;
   role: MatchRole;
@@ -885,7 +917,8 @@ function MatchHUD({
   const [copied, setCopied] = useState<"idle" | "ok" | "fail">("idle");
   const [copyToast, setCopyToast] = useState<"ok" | "fail" | null>(null);
   useEffect(() => {
-    if (state.status !== "playing") return;
+    if (!["playing", "countdown", "crop_selection", "prepare_countdown"].includes(state.status))
+      return;
     const i = setInterval(() => setNow(Date.now()), 250);
     return () => clearInterval(i);
   }, [state.status]);
@@ -902,7 +935,13 @@ function MatchHUD({
     setTimeout(() => setCopied("idle"), 1200);
     setTimeout(() => setCopyToast(null), 1800);
   };
-  const remaining = state.endsAt ? Math.max(0, state.endsAt - now) : settings.durationMs;
+  const timerEndsAt =
+    state.status === "playing"
+      ? state.endsAt
+      : state.status === "crop_selection"
+        ? state.selectionEndsAt
+        : state.countdownEndsAt;
+  const remaining = timerEndsAt ? Math.max(0, timerEndsAt - now) : settings.durationMs;
   const mm = Math.floor(remaining / 60000)
     .toString()
     .padStart(2, "0");
@@ -1041,6 +1080,7 @@ function LobbyView({
   state,
   isHost,
   onReady,
+  onStart,
   onLeaveSlot,
   onOpenSettings,
   onKick,
@@ -1050,6 +1090,7 @@ function LobbyView({
   state: PublicMatchState;
   isHost: boolean;
   onReady: () => void;
+  onStart: () => void;
   onLeaveSlot: () => void;
   onOpenSettings: () => void;
   onKick: (playerId: string) => void;
@@ -1126,6 +1167,19 @@ function LobbyView({
             <span className="font-pixel text-[12px]">{self?.ready ? "UNREADY" : "READY UP"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>
           </button>
+          {isHost && opp && (
+            <button
+              onClick={() => {
+                SFX.click();
+                onStart();
+              }}
+              className="pixel-btn lobby-ready-btn"
+              data-accent="true"
+            >
+              <span className="font-pixel text-[12px]">START</span>
+              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+            </button>
+          )}
           <button
             onClick={() => {
               SFX.click();
@@ -1137,6 +1191,173 @@ function LobbyView({
           </button>
         </div>
         <div className="lobby-ruleline" />
+      </div>
+    </section>
+  );
+}
+
+function CropSelectionView({
+  state,
+  self,
+  isSpectator,
+  isLocked,
+  onSelectCrops,
+  onReady,
+}: {
+  state: PublicMatchState;
+  self?: PublicPlayer;
+  isSpectator: boolean;
+  isLocked: boolean;
+  onSelectCrops: (ids: CropId[]) => void;
+  onReady: () => void;
+}) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!state.selectionEndsAt) return;
+    const i = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(i);
+  }, [state.selectionEndsAt]);
+
+  const selected = self?.selectedCrops ?? [];
+  const remaining = state.selectionEndsAt ? Math.max(0, state.selectionEndsAt - now) : 0;
+  const mm = Math.floor(remaining / 60000)
+    .toString()
+    .padStart(2, "0");
+  const ss = Math.floor((remaining % 60000) / 1000)
+    .toString()
+    .padStart(2, "0");
+
+  const toggleCrop = (id: CropId) => {
+    if (isSpectator || isLocked || !self) return;
+    const exists = selected.includes(id);
+    const next = exists ? selected.filter((cropId) => cropId !== id) : [...selected, id];
+    if (next.length > SELECTED_CROP_COUNT) {
+      SFX.bad();
+      return;
+    }
+    SFX.click();
+    onSelectCrops(next);
+  };
+
+  return (
+    <section className="lobby-stage relative z-10 w-full max-w-5xl">
+      <div className="lobby-title-card pixel-panel">
+        <div className="flex flex-wrap items-center justify-center gap-2">
+          <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
+            {isLocked ? "LOCKED CROPS" : "CROP SELECTION"}
+          </span>
+          <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
+            {isLocked ? "เตรียมเริ่มเกม" : `${mm}:${ss}`}
+          </span>
+        </div>
+        <h2 className="font-pixel lobby-title">เลือกผัก 4 อย่าง</h2>
+        <p className="lobby-subtitle">
+          {isLocked
+            ? "ล็อกผักแล้ว · เตรียมตัว 3, 2, 1"
+            : `เลือกของตัวเอง ${selected.length}/${SELECTED_CROP_COUNT} แล้วกด READY`}
+        </p>
+      </div>
+
+      <div className="pixel-panel my-4 flex flex-col gap-3 px-4 py-4">
+        <div>
+          <div className="mb-2 font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">
+            ตะกร้าผักของคุณ · กด X หรือกดผักซ้ำเพื่อเอาออก
+          </div>
+          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+            {Array.from({ length: SELECTED_CROP_COUNT }).map((_, index) => {
+              const cropId = selected[index];
+              const crop = cropId ? CROPS[cropId] : undefined;
+              const Icon = crop ? CROP_ICONS[crop.id] : undefined;
+              return (
+                <div
+                  key={index}
+                  className="pixel-chip flex min-h-[54px] items-center justify-between gap-2 px-3 py-2 font-pixel text-[8px]"
+                  data-gold={crop ? "true" : undefined}
+                >
+                  {crop && Icon ? (
+                    <>
+                      <span className="flex items-center gap-2">
+                        <Icon size={22} />
+                        {crop.name}
+                      </span>
+                      {!isLocked && !isSpectator && (
+                        <button
+                          type="button"
+                          onClick={() => toggleCrop(crop.id)}
+                          className="pixel-btn px-2 py-1"
+                          aria-label={`เอา ${crop.name} ออกจากตะกร้า`}
+                        >
+                          <span className="font-pixel text-[8px]">X</span>
+                        </button>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-[var(--muted-foreground)]">ช่องว่าง {index + 1}</span>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+          {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
+            const Icon = CROP_ICONS[crop.id];
+            const active = selected.includes(crop.id);
+            return (
+              <button
+                key={crop.id}
+                type="button"
+                onClick={() => toggleCrop(crop.id)}
+                disabled={isSpectator || isLocked}
+                className="farm-crop-card pixel-btn text-left"
+                data-active={active ? "true" : undefined}
+                title={`${crop.name} · ซื้อ ${crop.seedCost} · ขาย ${crop.sellPrice}`}
+              >
+                <span className="farm-crop-icon">
+                  <Icon size={26} />
+                </span>
+                <span className="farm-crop-body">
+                  <span className="farm-crop-name">{crop.name}</span>
+                  <span className="farm-crop-prices">
+                    <span>ซื้อ {crop.seedCost}</span>
+                    <span>ขาย {crop.sellPrice}</span>
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="pixel-panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+        <div className="flex flex-wrap gap-2">
+          {state.players.map((player) => (
+            <span
+              key={player.id}
+              className="pixel-chip font-pixel text-[8px]"
+              data-gold={player.ready ? "true" : undefined}
+            >
+              {player.name}: {player.selectedCrops.length}/{SELECTED_CROP_COUNT}{" "}
+              {player.ready ? "READY" : "PICKING"}
+            </span>
+          ))}
+        </div>
+        {!isSpectator && !isLocked && (
+          <button
+            type="button"
+            onClick={() => {
+              SFX.click();
+              onReady();
+            }}
+            className="pixel-btn lobby-ready-btn"
+            data-accent={self?.ready ? undefined : "true"}
+            disabled={selected.length !== SELECTED_CROP_COUNT}
+          >
+            <span className="font-pixel text-[12px]">{self?.ready ? "UNREADY" : "READY"}</span>
+            <span className="font-pixel text-[8px] opacity-70">R</span>
+          </button>
+        )}
       </div>
     </section>
   );
@@ -1424,12 +1645,14 @@ function SpectatorLobbyView({
   state,
   isHost,
   onClaimSlot,
+  onForceStart,
   onOpenSettings,
 }: {
   players: PublicPlayer[];
   state: PublicMatchState;
   isHost: boolean;
   onClaimSlot: () => void;
+  onForceStart: () => void;
   onOpenSettings: () => void;
 }) {
   const slotsFull = players.length >= state.settings.maxPlayers;
@@ -1466,19 +1689,34 @@ function SpectatorLobbyView({
 
       <div className="lobby-ready-row">
         <div className="lobby-ruleline" />
-        <button
-          onClick={() => {
-            SFX.epicSlot();
-            onClaimSlot();
-          }}
-          className="pixel-btn lobby-ready-btn"
-          data-accent={!slotsFull ? "true" : undefined}
-          disabled={slotsFull}
-        >
-          <span className="font-pixel text-[12px]">
-            {slotsFull ? "PLAYER SLOTS FULL" : "ENTER PLAYER SLOT"}
-          </span>
-        </button>
+        <div className="flex flex-wrap items-center justify-center gap-3">
+          <button
+            onClick={() => {
+              SFX.epicSlot();
+              onClaimSlot();
+            }}
+            className="pixel-btn lobby-ready-btn"
+            data-accent={!slotsFull ? "true" : undefined}
+            disabled={slotsFull}
+          >
+            <span className="font-pixel text-[12px]">
+              {slotsFull ? "PLAYER SLOTS FULL" : "ENTER PLAYER SLOT"}
+            </span>
+          </button>
+          {isHost && slotsFull && (
+            <button
+              onClick={() => {
+                SFX.click();
+                onForceStart();
+              }}
+              className="pixel-btn lobby-ready-btn"
+              data-accent="true"
+            >
+              <span className="font-pixel text-[12px]">START</span>
+              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+            </button>
+          )}
+        </div>
         <div className="lobby-ruleline" />
       </div>
     </section>
@@ -1641,6 +1879,8 @@ function Toolbar({
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
   marketPrices?: Record<CropId, number>;
 }) {
+  const cropPool = selectedCropPool(self.selectedCrops);
+
   return (
     <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
       <div className="farm-toolbar-section farm-toolbar-tools">
@@ -1678,42 +1918,57 @@ function Toolbar({
       <div className="farm-toolbar-section farm-toolbar-crops">
         <span className="farm-toolbar-label">CROPS</span>
         <div className="farm-crop-grid">
-          {Object.values(CROPS).map((c) => {
-            const Icon = CROP_ICONS[c.id];
-            const active = self.seedChoice === c.id && self.tool === "seed";
-            const currentSell = marketPrices ? Math.round(marketPrices[c.id]) : c.sellPrice;
-            return (
-              <button
-                key={c.id}
-                onClick={() => {
-                  SFX.click();
-                  send({ t: "seed", id: c.id });
-                }}
-                className="farm-crop-card pixel-btn"
-                data-active={active}
-                title={`ราคาซื้อ: ${c.seedCost} | ราคาขายตลาดปัจจุบัน: ${currentSell}`}
-              >
-                <span className="farm-crop-icon">
-                  <Icon size={24} />
-                </span>
-                <span className="farm-crop-body">
-                  <span className="farm-crop-name">{c.name}</span>
-                  <span className="farm-crop-prices">
-                    <span>
-                      ซื้อ <CoinIcon size={10} /> <b>{c.seedCost}</b>
-                    </span>
-                    <span>
-                      ขาย <b>{currentSell}</b>
+          {cropPool
+            .map((id) => CROPS[id])
+            .map((c) => {
+              const Icon = CROP_ICONS[c.id];
+              const active = self.seedChoice === c.id && self.tool === "seed";
+              const currentSell = marketPrices ? Math.round(marketPrices[c.id]) : c.sellPrice;
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => {
+                    SFX.click();
+                    send({ t: "seed", id: c.id });
+                  }}
+                  className="farm-crop-card pixel-btn"
+                  data-active={active}
+                  title={`ราคาซื้อ: ${c.seedCost} | ราคาขายตลาดปัจจุบัน: ${currentSell}`}
+                >
+                  <span className="farm-crop-icon">
+                    <Icon size={24} />
+                  </span>
+                  <span className="farm-crop-body">
+                    <span className="farm-crop-name">{c.name}</span>
+                    <span className="farm-crop-prices">
+                      <span>
+                        ซื้อ <CoinIcon size={10} /> <b>{c.seedCost}</b>
+                      </span>
+                      <span>
+                        ขาย <b>{currentSell}</b>
+                      </span>
                     </span>
                   </span>
-                </span>
-              </button>
-            );
-          })}
+                </button>
+              );
+            })}
         </div>
       </div>
     </div>
   );
+}
+
+function selectedCropPool(ids?: CropId[]): CropId[] {
+  const selected: CropId[] = [];
+  for (const id of ids ?? []) {
+    if (CROPS[id] && !selected.includes(id)) selected.push(id);
+    if (selected.length === SELECTED_CROP_COUNT) return selected;
+  }
+  for (const id of DEFAULT_SELECTED_CROPS) {
+    if (!selected.includes(id)) selected.push(id);
+    if (selected.length === SELECTED_CROP_COUNT) return selected;
+  }
+  return selected;
 }
 
 function MobileControls({

@@ -28,6 +28,7 @@ interface CropIndexBookProps {
   marketPrices?: Record<CropId, number>;
   selectedCropId?: CropId;
   onSelectCrop?: (id: CropId) => void;
+  availableCropIds?: CropId[];
   compact?: boolean;
   iconOnly?: boolean;
 }
@@ -36,11 +37,14 @@ export default function CropIndexBook({
   marketPrices,
   selectedCropId,
   onSelectCrop,
+  availableCropIds,
   compact = false,
   iconOnly = false,
 }: CropIndexBookProps) {
   const [open, setOpen] = useState(false);
-  const crops = Object.values(CROPS) as Crop[];
+  const crops = availableCropIds?.length
+    ? availableCropIds.map((id) => CROPS[id]).filter(Boolean)
+    : (Object.values(CROPS) as Crop[]);
 
   return (
     <div className={iconOnly ? "relative" : "relative z-10 w-full max-w-5xl"}>

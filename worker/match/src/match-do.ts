@@ -12,7 +12,9 @@ import {
 import {
   clientMsg,
   COUNTDOWN_MS,
+  CROP_SELECTION_MS,
   DEFAULT_ROOM_SETTINGS,
+  DEFAULT_SELECTED_CROPS,
   roomSettingsSchema,
   cosmeticsSchema,
   type PublicMatchState,
@@ -36,6 +38,7 @@ interface PlayerState {
   dir: Direction;
   tool: Tool;
   seedChoice: CropId;
+  selectedCrops: CropId[];
   tiles: Tile[][];
   ready: boolean;
   connected: boolean;
@@ -53,6 +56,7 @@ interface StoredRoomState {
   code: string;
   status: PublicMatchState["status"];
   countdownEndsAt?: number;
+  selectionEndsAt?: number;
   startedAt?: number;
   endsAt?: number;
   winnerId?: string;
@@ -85,6 +89,7 @@ export class MatchRoom implements DurableObject {
   private code = "";
   private status: PublicMatchState["status"] = "lobby";
   private countdownEndsAt?: number;
+  private selectionEndsAt?: number;
   private startedAt?: number;
   private endsAt?: number;
   private winnerId?: string;
@@ -94,12 +99,7 @@ export class MatchRoom implements DurableObject {
   private hostSessionId?: string;
   private settings: RoomSettings = DEFAULT_ROOM_SETTINGS;
   private players = new Map<string, PlayerState>();
-  private marketPrices: Record<CropId, number> = {
-    chili: CROPS.chili.sellPrice,
-    rice: CROPS.rice.sellPrice,
-    morning_glory: CROPS.morning_glory.sellPrice,
-    eggplant: CROPS.eggplant.sellPrice,
-  };
+  private marketPrices: Record<CropId, number> = makeMarketPrices();
   private initialized?: Promise<void>;
   private wsToPlayer = new WeakMap<WebSocket, string>();
   private wsToRole = new WeakMap<WebSocket, MatchRole>();
@@ -175,6 +175,16 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
+    if (msg.t === "start") {
+      if (!this.isHostSocket(ws) || this.status !== "lobby") return;
+      if (this.players.size !== this.settings.maxPlayers) return;
+      for (const p of this.players.values()) p.ready = true;
+      this.maybeStartCountdown();
+      this.persist();
+      this.broadcastSnapshot();
+      return;
+    }
+
     if (this.wsToRole.get(ws) !== "player") return;
     const playerId = this.wsToPlayer.get(ws);
     if (!playerId) return;
@@ -204,11 +214,26 @@ export class MatchRoom implements DurableObject {
     }
 
     if (msg.t === "ready") {
-      if (this.status !== "lobby") return;
-      player.ready = !player.ready;
-      this.maybeStartCountdown();
-      this.persist();
-      this.broadcastSnapshot();
+      if (this.status === "lobby") {
+        if (this.isHostSocket(ws) && this.players.size === this.settings.maxPlayers) {
+          for (const p of this.players.values()) p.ready = true;
+        } else {
+          player.ready = !player.ready;
+        }
+        this.maybeStartCountdown();
+        this.persist();
+        this.broadcastSnapshot();
+        return;
+      }
+      if (this.status === "crop_selection") {
+        if (normalizeSelectedCrops(player.selectedCrops).length !== DEFAULT_SELECTED_CROPS.length)
+          return;
+        player.ready = !player.ready;
+        this.maybeStartPrepareCountdown();
+        this.persist();
+        this.broadcastSnapshot();
+        return;
+      }
       return;
     }
 
@@ -222,6 +247,18 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
+    if (msg.t === "select_crops") {
+      if (this.status !== "crop_selection") return;
+      const selected = normalizeSelectedCrops(msg.ids);
+      if (selected.length > DEFAULT_SELECTED_CROPS.length) return;
+      player.selectedCrops = selected;
+      player.seedChoice = selected[0] ?? DEFAULT_SELECTED_CROPS[0];
+      player.ready = false;
+      this.persist();
+      this.broadcastSnapshot();
+      return;
+    }
+
     if (this.status !== "playing") return;
 
     if (msg.t === "tool") {
@@ -229,6 +266,7 @@ export class MatchRoom implements DurableObject {
       return;
     }
     if (msg.t === "seed") {
+      if (!isSelectedCrop(msg.id, player.selectedCrops)) return;
       player.seedChoice = msg.id;
       player.tool = "seed";
       return;
@@ -256,6 +294,9 @@ export class MatchRoom implements DurableObject {
       if (msg.pos) player.pos = clampPos(msg.pos);
       if (msg.dir) player.dir = msg.dir;
       player.lastActionAt = now;
+      if (player.tool === "seed" && !isSelectedCrop(player.seedChoice, player.selectedCrops)) {
+        player.seedChoice = normalizeSelectedCrops(player.selectedCrops)[0];
+      }
       const result = applyAction({
         tiles: player.tiles,
         coins: player.coins,
@@ -350,9 +391,10 @@ export class MatchRoom implements DurableObject {
       this.broadcastSnapshot();
       return;
     }
-    if (this.status === "countdown") {
+    if (isPreGamePhase(this.status)) {
       this.status = "lobby";
       this.countdownEndsAt = undefined;
+      this.selectionEndsAt = undefined;
       for (const player of this.players.values()) player.ready = false;
     }
     this.dropDisconnectedWaitingPlayers();
@@ -368,6 +410,18 @@ export class MatchRoom implements DurableObject {
     await this.ensureInitialized();
     const now = Date.now();
     if (this.status === "countdown" && this.countdownEndsAt && now >= this.countdownEndsAt) {
+      this.startCropSelection();
+      return;
+    }
+    if (this.status === "crop_selection" && this.selectionEndsAt && now >= this.selectionEndsAt) {
+      this.startPrepareCountdown();
+      return;
+    }
+    if (
+      this.status === "prepare_countdown" &&
+      this.countdownEndsAt &&
+      now >= this.countdownEndsAt
+    ) {
       this.startPlaying();
       return;
     }
@@ -392,6 +446,7 @@ export class MatchRoom implements DurableObject {
     this.code = stored.code;
     this.status = stored.status;
     this.countdownEndsAt = stored.countdownEndsAt;
+    this.selectionEndsAt = stored.selectionEndsAt;
     this.startedAt = stored.startedAt;
     this.endsAt = stored.endsAt;
     this.winnerId = stored.winnerId;
@@ -407,7 +462,11 @@ export class MatchRoom implements DurableObject {
           ...p,
           connected: false,
           disconnectedAt: undefined,
-          stats: p.stats ?? emptyStats(),
+          selectedCrops: normalizeSelectedCrops(p.selectedCrops),
+          seedChoice: isSelectedCrop(p.seedChoice, p.selectedCrops)
+            ? p.seedChoice
+            : normalizeSelectedCrops(p.selectedCrops)[0],
+          stats: normalizeStats(p.stats),
           inputDir: undefined,
           lastMovementAt: Date.now(),
           lastActionAt: 0,
@@ -417,12 +476,7 @@ export class MatchRoom implements DurableObject {
         },
       ]),
     );
-    this.marketPrices = stored.marketPrices ?? {
-      chili: CROPS.chili.sellPrice,
-      rice: CROPS.rice.sellPrice,
-      morning_glory: CROPS.morning_glory.sellPrice,
-      eggplant: CROPS.eggplant.sellPrice,
-    };
+    this.marketPrices = normalizeMarketPrices(stored.marketPrices);
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
       this.wsToRole.set(ws, att?.role ?? "player");
@@ -453,6 +507,7 @@ export class MatchRoom implements DurableObject {
         code: this.code,
         status: this.status,
         countdownEndsAt: this.countdownEndsAt,
+        selectionEndsAt: this.selectionEndsAt,
         startedAt: this.startedAt,
         endsAt: this.endsAt,
         winnerId: this.winnerId,
@@ -499,14 +554,16 @@ export class MatchRoom implements DurableObject {
           )
         : undefined;
     const time =
-      this.status === "countdown"
+      this.status === "countdown" || this.status === "prepare_countdown"
         ? this.countdownEndsAt
-        : this.status === "playing"
-          ? minDefined(
-              this.endsAt,
-              Number.isFinite(reconnectDeadline) ? reconnectDeadline : undefined,
-            )
-          : undefined;
+        : this.status === "crop_selection"
+          ? this.selectionEndsAt
+          : this.status === "playing"
+            ? minDefined(
+                this.endsAt,
+                Number.isFinite(reconnectDeadline) ? reconnectDeadline : undefined,
+              )
+            : undefined;
     if (time) this.ctx.waitUntil(this.ctx.storage.setAlarm(time));
   }
 
@@ -591,7 +648,7 @@ export class MatchRoom implements DurableObject {
       this.sendTo(ws, { t: "error", code: "already_player", message: "คุณอยู่ในช่องผู้เล่นแล้ว" });
       return;
     }
-    if (this.status === "countdown" || this.status === "playing") {
+    if (isMatchActiveOrStarting(this.status)) {
       this.sendTo(ws, {
         t: "error",
         code: "match_active",
@@ -624,7 +681,8 @@ export class MatchRoom implements DurableObject {
       pos: { x: startX, y: 4 },
       dir: "down",
       tool: "hoe",
-      seedChoice: "chili",
+      seedChoice: DEFAULT_SELECTED_CROPS[0],
+      selectedCrops: fillSelectedCrops(),
       tiles: makeEmptyField(),
       ready: false,
       connected: true,
@@ -659,7 +717,7 @@ export class MatchRoom implements DurableObject {
   }
 
   private leavePlayerSlot(ws: WebSocket): void {
-    if (this.status === "countdown" || this.status === "playing") {
+    if (isMatchActiveOrStarting(this.status)) {
       this.sendTo(ws, {
         t: "error",
         code: "match_active",
@@ -790,7 +848,8 @@ export class MatchRoom implements DurableObject {
         pos: { x: startX, y: 4 },
         dir: "down",
         tool: "hoe",
-        seedChoice: "chili",
+        seedChoice: DEFAULT_SELECTED_CROPS[0],
+        selectedCrops: fillSelectedCrops(),
         tiles: makeEmptyField(),
         ready: false,
         connected: true,
@@ -829,9 +888,10 @@ export class MatchRoom implements DurableObject {
   }
 
   private cancelCountdown(ws: WebSocket): void {
-    if (!this.isHostSocket(ws) || this.status !== "countdown") return;
+    if (!this.isHostSocket(ws) || !isPreGamePhase(this.status)) return;
     this.status = "lobby";
     this.countdownEndsAt = undefined;
+    this.selectionEndsAt = undefined;
     for (const player of this.players.values()) player.ready = false;
     this.persist();
     this.broadcastSnapshot();
@@ -844,28 +904,69 @@ export class MatchRoom implements DurableObject {
     this.status = "countdown";
     this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
     this.scheduleAlarm();
+    setTimeout(() => this.startCropSelection(), COUNTDOWN_MS);
+  }
+
+  private startCropSelection(): void {
+    if (this.status !== "countdown") return;
+    this.status = "crop_selection";
+    this.countdownEndsAt = undefined;
+    this.selectionEndsAt = Date.now() + CROP_SELECTION_MS;
+    for (const p of this.players.values()) {
+      p.ready = false;
+      p.selectedCrops = [];
+      p.seedChoice = DEFAULT_SELECTED_CROPS[0];
+    }
+    this.scheduleAlarm();
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private maybeStartPrepareCountdown(): void {
+    if (this.status !== "crop_selection") return;
+    if (this.players.size !== this.settings.maxPlayers) return;
+    if (
+      ![...this.players.values()].every(
+        (p) =>
+          p.ready &&
+          normalizeSelectedCrops(p.selectedCrops).length === DEFAULT_SELECTED_CROPS.length,
+      )
+    )
+      return;
+    this.startPrepareCountdown();
+  }
+
+  private startPrepareCountdown(): void {
+    if (this.status !== "crop_selection") return;
+    this.status = "prepare_countdown";
+    this.selectionEndsAt = undefined;
+    this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
+    for (const p of this.players.values()) {
+      p.selectedCrops = fillSelectedCrops(p.selectedCrops);
+      p.ready = false;
+    }
+    this.scheduleAlarm();
+    this.persist();
+    this.broadcastSnapshot();
     setTimeout(() => this.startPlaying(), COUNTDOWN_MS);
   }
 
   private startPlaying(): void {
-    if (this.status !== "countdown") return;
+    if (this.status !== "prepare_countdown") return;
     const now = Date.now();
     this.status = "playing";
     this.startedAt = now;
     this.endsAt = now + this.settings.durationMs;
     this.countdownEndsAt = undefined;
-    this.marketPrices = {
-      chili: CROPS.chili.sellPrice,
-      rice: CROPS.rice.sellPrice,
-      morning_glory: CROPS.morning_glory.sellPrice,
-      eggplant: CROPS.eggplant.sellPrice,
-    };
+    this.selectionEndsAt = undefined;
+    this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = now;
     for (const p of this.players.values()) {
       p.coins = 50;
       p.tiles = makeEmptyField();
       p.tool = "hoe";
-      p.seedChoice = "chili";
+      p.selectedCrops = fillSelectedCrops(p.selectedCrops);
+      p.seedChoice = p.selectedCrops[0];
       p.dir = "down";
       p.pos = { x: Math.round(p.pos.x), y: 4 };
       p.disconnectedAt = undefined;
@@ -1001,12 +1102,9 @@ export class MatchRoom implements DurableObject {
     this.recap = undefined;
     this.startedAt = undefined;
     this.endsAt = undefined;
-    this.marketPrices = {
-      chili: CROPS.chili.sellPrice,
-      rice: CROPS.rice.sellPrice,
-      morning_glory: CROPS.morning_glory.sellPrice,
-      eggplant: CROPS.eggplant.sellPrice,
-    };
+    this.countdownEndsAt = undefined;
+    this.selectionEndsAt = undefined;
+    this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = 0;
     for (const p of this.players.values()) {
       p.ready = false;
@@ -1015,6 +1113,8 @@ export class MatchRoom implements DurableObject {
       p.combo = 0;
       p.lastHarvestAt = 0;
       p.comboCrops = [];
+      p.selectedCrops = fillSelectedCrops();
+      p.seedChoice = p.selectedCrops[0];
     }
     this.persist();
     this.maybeStartCountdown();
@@ -1029,6 +1129,7 @@ export class MatchRoom implements DurableObject {
       dir: p.dir,
       tool: p.tool,
       seedChoice: p.seedChoice,
+      selectedCrops: p.selectedCrops,
       tiles: p.tiles,
       ready: p.ready,
       connected: p.connected,
@@ -1042,6 +1143,7 @@ export class MatchRoom implements DurableObject {
       hostId: this.hostId,
       settings: this.settings,
       countdownEndsAt: this.countdownEndsAt,
+      selectionEndsAt: this.selectionEndsAt,
       startedAt: this.startedAt,
       endsAt: this.endsAt,
       winnerId: this.winnerId,
@@ -1080,12 +1182,9 @@ function emptyStats(): PublicPlayerStats {
   return {
     harvests: 0,
     coinsEarned: 0,
-    cropHarvests: {
-      chili: 0,
-      rice: 0,
-      morning_glory: 0,
-      eggplant: 0,
-    },
+    cropHarvests: Object.fromEntries(
+      (Object.keys(CROPS) as CropId[]).map((id) => [id, 0]),
+    ) as Record<CropId, number>,
   };
 }
 
@@ -1095,6 +1194,77 @@ function topCrop(crops: Record<CropId, number>): CropId | undefined {
     if (!best || crops[id] > crops[best]) best = id;
   }
   return best && crops[best] > 0 ? best : undefined;
+}
+
+function normalizeStats(raw?: Partial<PublicPlayerStats>): PublicPlayerStats {
+  const stats = emptyStats();
+  if (!raw) return stats;
+  if (typeof raw.harvests === "number" && Number.isFinite(raw.harvests)) {
+    stats.harvests = raw.harvests;
+  }
+  if (typeof raw.coinsEarned === "number" && Number.isFinite(raw.coinsEarned)) {
+    stats.coinsEarned = raw.coinsEarned;
+  }
+  for (const id of Object.keys(stats.cropHarvests) as CropId[]) {
+    const count = raw.cropHarvests?.[id];
+    if (typeof count === "number" && Number.isFinite(count)) stats.cropHarvests[id] = count;
+  }
+  return stats;
+}
+
+function makeMarketPrices(): Record<CropId, number> {
+  return Object.fromEntries(
+    (Object.keys(CROPS) as CropId[]).map((id) => [id, CROPS[id].sellPrice]),
+  ) as Record<CropId, number>;
+}
+
+function normalizeMarketPrices(raw?: Partial<Record<CropId, number>>): Record<CropId, number> {
+  const fallback = makeMarketPrices();
+  if (!raw) return fallback;
+  for (const id of Object.keys(fallback) as CropId[]) {
+    const price = raw[id];
+    if (typeof price === "number" && Number.isFinite(price)) fallback[id] = price;
+  }
+  return fallback;
+}
+
+function normalizeSelectedCrops(raw?: readonly CropId[]): CropId[] {
+  const selected: CropId[] = [];
+  for (const id of raw ?? []) {
+    if (id in CROPS && !selected.includes(id)) selected.push(id);
+    if (selected.length === DEFAULT_SELECTED_CROPS.length) break;
+  }
+  return selected;
+}
+
+function fillSelectedCrops(raw?: readonly CropId[]): CropId[] {
+  const selected = normalizeSelectedCrops(raw);
+  for (const id of DEFAULT_SELECTED_CROPS) {
+    if (!selected.includes(id)) selected.push(id);
+    if (selected.length === DEFAULT_SELECTED_CROPS.length) return selected;
+  }
+  for (const id of Object.keys(CROPS) as CropId[]) {
+    if (!selected.includes(id)) selected.push(id);
+    if (selected.length === DEFAULT_SELECTED_CROPS.length) return selected;
+  }
+  return selected;
+}
+
+function isSelectedCrop(id: CropId, selected?: CropId[]): boolean {
+  return normalizeSelectedCrops(selected).includes(id);
+}
+
+function isPreGamePhase(status: PublicMatchState["status"]): boolean {
+  return status === "countdown" || status === "crop_selection" || status === "prepare_countdown";
+}
+
+function isMatchActiveOrStarting(status: PublicMatchState["status"]): boolean {
+  return (
+    status === "countdown" ||
+    status === "crop_selection" ||
+    status === "prepare_countdown" ||
+    status === "playing"
+  );
 }
 
 function minDefined(a?: number, b?: number): number | undefined {
