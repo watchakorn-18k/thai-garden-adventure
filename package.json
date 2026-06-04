@@ -4,7 +4,8 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "dev": "vite dev",
+    "dev": "sh scripts/dev.sh",
+    "dev:web": "vite dev",
     "dev:match": "wrangler dev --config worker/match/wrangler.toml",
     "build": "vite build",
     "build:dev": "vite build --mode development",

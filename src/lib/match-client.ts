@@ -28,9 +28,12 @@ interface UseMatchOpts {
 const RECONNECT_DELAYS = [400, 800, 1600, 3200, 5000];
 
 function wsBaseUrl(): string {
-  if (typeof window === "undefined") return "ws://localhost:8787";
+  const env = import.meta.env.VITE_MATCH_WS_URL as string | undefined;
+  if (env) return env.replace(/\/$/, "");
+  if (typeof window === "undefined") return "ws://127.0.0.1:8787";
   const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${proto}//${window.location.host}`;
+  const host = window.location.hostname === "localhost" ? "127.0.0.1" : window.location.hostname;
+  return `${proto}//${host}:8787`;
 }
 
 function sessionKey(code: string): string {

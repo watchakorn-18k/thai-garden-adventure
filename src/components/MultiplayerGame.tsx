@@ -157,6 +157,16 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   }, [state?.status]);
 
   useEffect(() => {
+    if (isSpectator) return;
+    if (state?.status !== "playing") return;
+    const i = setInterval(() => {
+      const dir = lastInputDir.current;
+      if (dir) send({ t: "move", dir });
+    }, 50);
+    return () => clearInterval(i);
+  }, [isSpectator, send, state?.status]);
+
+  useEffect(() => {
     return () => {
       if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
     };
