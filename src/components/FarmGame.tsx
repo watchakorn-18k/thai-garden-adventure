@@ -214,21 +214,27 @@ export default function FarmGame() {
       let nextCoins = result.coins;
       for (const ev of result.events) {
         if (ev.kind === "harvest") {
-          const isCrit = Math.random() < 0.18;
-          const comboBonus = combo >= 2 ? Math.floor(ev.reward * 0.25 * Math.min(combo, 6)) : 0;
-          const critBonus = isCrit ? ev.reward : 0;
-          const total = ev.reward + comboBonus + critBonus;
-          nextCoins += total - ev.reward; // applyAction already added ev.reward
-          addPopup(ev.x, ev.y, isCrit ? `CRIT +${total}` : `+${total}`, "good");
-          burstParticles(ev.x, ev.y, "sparkle");
-          spawnFlyCoins(ev.x, ev.y, Math.min(8, Math.max(3, Math.floor(total / 10))));
-          bumpCombo(ev.x, ev.y);
-          if (isCrit) {
-            spawnCrit(ev.x, ev.y);
-            triggerScreenShake(1);
-            SFX.crit();
+          if (ev.reward === 0) {
+            addPopup(ev.x, ev.y, "เหี่ยว", "bad");
+            burstParticles(ev.x, ev.y, "dirt");
+            SFX.till();
           } else {
-            SFX.harvest();
+            const isCrit = Math.random() < 0.18;
+            const comboBonus = combo >= 2 ? Math.floor(ev.reward * 0.25 * Math.min(combo, 6)) : 0;
+            const critBonus = isCrit ? ev.reward : 0;
+            const total = ev.reward + comboBonus + critBonus;
+            nextCoins += total - ev.reward; // applyAction already added ev.reward
+            addPopup(ev.x, ev.y, isCrit ? `CRIT +${total}` : `+${total}`, "good");
+            burstParticles(ev.x, ev.y, "sparkle");
+            spawnFlyCoins(ev.x, ev.y, Math.min(8, Math.max(3, Math.floor(total / 10))));
+            bumpCombo(ev.x, ev.y);
+            if (isCrit) {
+              spawnCrit(ev.x, ev.y);
+              triggerScreenShake(1);
+              SFX.crit();
+            } else {
+              SFX.harvest();
+            }
           }
         } else if (ev.kind === "till") {
           addPopup(ev.x, ev.y, "ขุด", "info");
@@ -600,19 +606,23 @@ export default function FarmGame() {
                 )}
                 {c.crop && (
                   <div
-                    className={`absolute inset-1 ${c.crop.stage >= 2 ? "ripe-glow" : "crop-sway"}`}
+                    className={`absolute inset-1 ${
+                      c.crop.stage === 2 ? "ripe-glow" : c.crop.stage === 3 ? "" : "crop-sway"
+                    }`}
                     style={
-                      c.crop.stage >= 2
+                      c.crop.stage === 2
                         ? undefined
-                        : {
-                            animation: `grow 0.4s ease-out, crop-sway 2.4s ease-in-out 0.4s infinite`,
-                          }
+                        : c.crop.stage === 3
+                          ? { animation: "none" }
+                          : {
+                              animation: `grow 0.4s ease-out, crop-sway 2.4s ease-in-out 0.4s infinite`,
+                            }
                     }
                   >
                     <PixelCrop id={c.crop.id} stage={c.crop.stage} />
                   </div>
                 )}
-                {c.crop && c.crop.stage >= 2 && !isFacing && (
+                {c.crop && c.crop.stage === 2 && !isFacing && (
                   <div
                     className="absolute pointer-events-none"
                     style={{

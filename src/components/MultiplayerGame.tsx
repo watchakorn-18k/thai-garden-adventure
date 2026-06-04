@@ -1040,7 +1040,9 @@ function SelfField({
   acting: boolean;
   predictedDir: Direction | null;
 }) {
-  return <PhaserField player={player} events={events} acting={acting} predictedDir={predictedDir} />;
+  return (
+    <PhaserField player={player} events={events} acting={acting} predictedDir={predictedDir} />
+  );
 }
 
 function SpectatorMatchView({

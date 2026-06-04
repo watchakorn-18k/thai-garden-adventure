@@ -13,7 +13,7 @@ export interface Crop {
 
 export interface Tile {
   type: TileType;
-  crop?: { id: CropId; plantedAt: number; stage: number };
+  crop?: { id: CropId; plantedAt: number; stage: number }; // stage: 0 sprout, 1 mid, 2 ripe, 3 withered
 }
 
 export const COLS = 12;

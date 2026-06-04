@@ -268,9 +268,12 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
 
         spawnEvent(ev: ServerEvent) {
           if (ev.kind === "insufficient_funds") return;
+          const isWithered = ev.kind === "harvest" && ev.reward === 0;
           const text =
             ev.kind === "harvest"
-              ? `+${ev.reward}`
+              ? isWithered
+                ? "เหี่ยว"
+                : `+${ev.reward}`
               : ev.kind === "till"
                 ? "ขุด"
                 : ev.kind === "water"
@@ -279,7 +282,7 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
                     ? CROPS[ev.cropId].name
                     : "";
           if (!text) return;
-          const color = ev.kind === "harvest" ? "#ffd24a" : "#f4e4c1";
+          const color = isWithered ? "#ff6b6b" : ev.kind === "harvest" ? "#ffd24a" : "#f4e4c1";
           const label = this.add
             .text(ev.x * TILE + TILE / 2, ev.y * TILE, text, {
               fontFamily: PIXEL_FONT,

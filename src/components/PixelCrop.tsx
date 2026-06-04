@@ -2,10 +2,26 @@ type CropId = "chili" | "rice" | "morning_glory" | "eggplant";
 
 interface Props {
   id: CropId;
-  stage: number; // 0 sprout, 1 mid, 2 ripe
+  stage: number; // 0 sprout, 1 mid, 2 ripe, 3 withered
 }
 
 const SOIL = "#3a2010";
+
+function Withered() {
+  return (
+    <>
+      <rect x="5" y="14" width="6" height="1" fill={SOIL} />
+      {/* dead stem */}
+      <rect x="7" y="11" width="2" height="3" fill="#5c4033" />
+      <rect x="6" y="12" width="1" height="2" fill="#5c4033" />
+      <rect x="9" y="12" width="1" height="2" fill="#5c4033" />
+      {/* drooping brown leaves */}
+      <rect x="4" y="13" width="2" height="1" fill="#4a3525" />
+      <rect x="10" y="13" width="2" height="1" fill="#4a3525" />
+      <rect x="6" y="10" width="4" height="1" fill="#4a3525" />
+    </>
+  );
+}
 
 function Sprout() {
   return (
@@ -149,11 +165,13 @@ export default function PixelCrop({ id, stage }: Props) {
             ? "#6ab04c"
             : "#5fa148";
     body = <Mid color={color} />;
-  } else {
+  } else if (stage === 2) {
     if (id === "chili") body = <Chili />;
     else if (id === "rice") body = <Rice />;
     else if (id === "morning_glory") body = <MorningGlory />;
     else body = <Eggplant />;
+  } else {
+    body = <Withered />;
   }
 
   return (
