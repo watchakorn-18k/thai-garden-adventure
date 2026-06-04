@@ -12,6 +12,7 @@ import {
 import {
   clientMsg,
   COUNTDOWN_MS,
+  CROP_BAN_MS,
   CROP_SELECTION_MS,
   DEFAULT_ROOM_SETTINGS,
   DEFAULT_SELECTED_CROPS,
@@ -39,6 +40,7 @@ interface PlayerState {
   tool: Tool;
   seedChoice: CropId;
   selectedCrops: CropId[];
+  bannedCrop?: CropId;
   tiles: Tile[][];
   ready: boolean;
   connected: boolean;
@@ -56,6 +58,7 @@ interface StoredRoomState {
   code: string;
   status: PublicMatchState["status"];
   countdownEndsAt?: number;
+  banEndsAt?: number;
   selectionEndsAt?: number;
   startedAt?: number;
   endsAt?: number;
@@ -89,6 +92,7 @@ export class MatchRoom implements DurableObject {
   private code = "";
   private status: PublicMatchState["status"] = "lobby";
   private countdownEndsAt?: number;
+  private banEndsAt?: number;
   private selectionEndsAt?: number;
   private startedAt?: number;
   private endsAt?: number;
@@ -226,7 +230,7 @@ export class MatchRoom implements DurableObject {
         return;
       }
       if (this.status === "crop_selection") {
-        if (normalizeSelectedCrops(player.selectedCrops).length !== DEFAULT_SELECTED_CROPS.length)
+        if (normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds()).length !== DEFAULT_SELECTED_CROPS.length)
           return;
         player.ready = !player.ready;
         this.maybeStartPrepareCountdown();
@@ -247,12 +251,20 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
+    if (msg.t === "ban_crop") {
+      if (this.status !== "crop_ban") return;
+      player.bannedCrop = msg.id;
+      this.persist();
+      this.broadcastSnapshot();
+      return;
+    }
+
     if (msg.t === "select_crops") {
       if (this.status !== "crop_selection") return;
-      const selected = normalizeSelectedCrops(msg.ids);
+      const selected = normalizeSelectedCrops(msg.ids, this.bannedCropIds());
       if (selected.length > DEFAULT_SELECTED_CROPS.length) return;
       player.selectedCrops = selected;
-      player.seedChoice = selected[0] ?? DEFAULT_SELECTED_CROPS[0];
+      player.seedChoice = selected[0] ?? firstAllowedCrop(this.bannedCropIds());
       player.ready = false;
       this.persist();
       this.broadcastSnapshot();
@@ -295,7 +307,7 @@ export class MatchRoom implements DurableObject {
       if (msg.dir) player.dir = msg.dir;
       player.lastActionAt = now;
       if (player.tool === "seed" && !isSelectedCrop(player.seedChoice, player.selectedCrops)) {
-        player.seedChoice = normalizeSelectedCrops(player.selectedCrops)[0];
+        player.seedChoice = normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds())[0];
       }
       const result = applyAction({
         tiles: player.tiles,
@@ -394,8 +406,12 @@ export class MatchRoom implements DurableObject {
     if (isPreGamePhase(this.status)) {
       this.status = "lobby";
       this.countdownEndsAt = undefined;
+      this.banEndsAt = undefined;
       this.selectionEndsAt = undefined;
-      for (const player of this.players.values()) player.ready = false;
+      for (const player of this.players.values()) {
+        player.ready = false;
+        player.bannedCrop = undefined;
+      }
     }
     this.dropDisconnectedWaitingPlayers();
     this.persist();
@@ -410,6 +426,10 @@ export class MatchRoom implements DurableObject {
     await this.ensureInitialized();
     const now = Date.now();
     if (this.status === "countdown" && this.countdownEndsAt && now >= this.countdownEndsAt) {
+      this.startCropBan();
+      return;
+    }
+    if (this.status === "crop_ban" && this.banEndsAt && now >= this.banEndsAt) {
       this.startCropSelection();
       return;
     }
@@ -446,6 +466,7 @@ export class MatchRoom implements DurableObject {
     this.code = stored.code;
     this.status = stored.status;
     this.countdownEndsAt = stored.countdownEndsAt;
+    this.banEndsAt = stored.banEndsAt;
     this.selectionEndsAt = stored.selectionEndsAt;
     this.startedAt = stored.startedAt;
     this.endsAt = stored.endsAt;
@@ -462,10 +483,11 @@ export class MatchRoom implements DurableObject {
           ...p,
           connected: false,
           disconnectedAt: undefined,
-          selectedCrops: normalizeSelectedCrops(p.selectedCrops),
+          selectedCrops: normalizeSelectedCrops(p.selectedCrops, effectiveBannedCrops(stored.players)),
+          bannedCrop: isCropId(p.bannedCrop) ? p.bannedCrop : undefined,
           seedChoice: isSelectedCrop(p.seedChoice, p.selectedCrops)
             ? p.seedChoice
-            : normalizeSelectedCrops(p.selectedCrops)[0],
+            : normalizeSelectedCrops(p.selectedCrops, effectiveBannedCrops(stored.players))[0],
           stats: normalizeStats(p.stats),
           inputDir: undefined,
           lastMovementAt: Date.now(),
@@ -507,6 +529,7 @@ export class MatchRoom implements DurableObject {
         code: this.code,
         status: this.status,
         countdownEndsAt: this.countdownEndsAt,
+        banEndsAt: this.banEndsAt,
         selectionEndsAt: this.selectionEndsAt,
         startedAt: this.startedAt,
         endsAt: this.endsAt,
@@ -556,7 +579,9 @@ export class MatchRoom implements DurableObject {
     const time =
       this.status === "countdown" || this.status === "prepare_countdown"
         ? this.countdownEndsAt
-        : this.status === "crop_selection"
+        : this.status === "crop_ban"
+          ? this.banEndsAt
+          : this.status === "crop_selection"
           ? this.selectionEndsAt
           : this.status === "playing"
             ? minDefined(
@@ -683,6 +708,7 @@ export class MatchRoom implements DurableObject {
       tool: "hoe",
       seedChoice: DEFAULT_SELECTED_CROPS[0],
       selectedCrops: fillSelectedCrops(),
+      bannedCrop: undefined,
       tiles: makeEmptyField(),
       ready: false,
       connected: true,
@@ -850,6 +876,7 @@ export class MatchRoom implements DurableObject {
         tool: "hoe",
         seedChoice: DEFAULT_SELECTED_CROPS[0],
         selectedCrops: fillSelectedCrops(),
+        bannedCrop: undefined,
         tiles: makeEmptyField(),
         ready: false,
         connected: true,
@@ -891,8 +918,12 @@ export class MatchRoom implements DurableObject {
     if (!this.isHostSocket(ws) || !isPreGamePhase(this.status)) return;
     this.status = "lobby";
     this.countdownEndsAt = undefined;
+    this.banEndsAt = undefined;
     this.selectionEndsAt = undefined;
-    for (const player of this.players.values()) player.ready = false;
+    for (const player of this.players.values()) {
+      player.ready = false;
+      player.bannedCrop = undefined;
+    }
     this.persist();
     this.broadcastSnapshot();
   }
@@ -904,18 +935,36 @@ export class MatchRoom implements DurableObject {
     this.status = "countdown";
     this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
     this.scheduleAlarm();
-    setTimeout(() => this.startCropSelection(), COUNTDOWN_MS);
+    setTimeout(() => this.startCropBan(), COUNTDOWN_MS);
+  }
+
+  private startCropBan(): void {
+    if (this.status !== "countdown") return;
+    this.status = "crop_ban";
+    this.countdownEndsAt = undefined;
+    this.banEndsAt = Date.now() + CROP_BAN_MS;
+    for (const p of this.players.values()) {
+      p.ready = false;
+      p.bannedCrop = undefined;
+      p.selectedCrops = [];
+      p.seedChoice = DEFAULT_SELECTED_CROPS[0];
+    }
+    this.scheduleAlarm();
+    this.persist();
+    this.broadcastSnapshot();
+    setTimeout(() => this.startCropSelection(), CROP_BAN_MS);
   }
 
   private startCropSelection(): void {
-    if (this.status !== "countdown") return;
+    if (this.status !== "crop_ban") return;
     this.status = "crop_selection";
-    this.countdownEndsAt = undefined;
+    this.banEndsAt = undefined;
     this.selectionEndsAt = Date.now() + CROP_SELECTION_MS;
+    const banned = this.bannedCropIds();
     for (const p of this.players.values()) {
       p.ready = false;
       p.selectedCrops = [];
-      p.seedChoice = DEFAULT_SELECTED_CROPS[0];
+      p.seedChoice = firstAllowedCrop(banned);
     }
     this.scheduleAlarm();
     this.persist();
@@ -942,7 +991,7 @@ export class MatchRoom implements DurableObject {
     this.selectionEndsAt = undefined;
     this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
     for (const p of this.players.values()) {
-      p.selectedCrops = fillSelectedCrops(p.selectedCrops);
+      p.selectedCrops = fillSelectedCrops(p.selectedCrops, this.bannedCropIds());
       p.ready = false;
     }
     this.scheduleAlarm();
@@ -958,6 +1007,7 @@ export class MatchRoom implements DurableObject {
     this.startedAt = now;
     this.endsAt = now + this.settings.durationMs;
     this.countdownEndsAt = undefined;
+    this.banEndsAt = undefined;
     this.selectionEndsAt = undefined;
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = now;
@@ -965,7 +1015,7 @@ export class MatchRoom implements DurableObject {
       p.coins = 50;
       p.tiles = makeEmptyField();
       p.tool = "hoe";
-      p.selectedCrops = fillSelectedCrops(p.selectedCrops);
+      p.selectedCrops = fillSelectedCrops(p.selectedCrops, this.bannedCropIds());
       p.seedChoice = p.selectedCrops[0];
       p.dir = "down";
       p.pos = { x: Math.round(p.pos.x), y: 4 };
@@ -1103,6 +1153,7 @@ export class MatchRoom implements DurableObject {
     this.startedAt = undefined;
     this.endsAt = undefined;
     this.countdownEndsAt = undefined;
+    this.banEndsAt = undefined;
     this.selectionEndsAt = undefined;
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = 0;
@@ -1113,11 +1164,16 @@ export class MatchRoom implements DurableObject {
       p.combo = 0;
       p.lastHarvestAt = 0;
       p.comboCrops = [];
+      p.bannedCrop = undefined;
       p.selectedCrops = fillSelectedCrops();
       p.seedChoice = p.selectedCrops[0];
     }
     this.persist();
     this.maybeStartCountdown();
+  }
+
+  private bannedCropIds(): CropId[] {
+    return effectiveBannedCrops([...this.players.values()]);
   }
 
   private publicState(): PublicMatchState {
@@ -1130,6 +1186,7 @@ export class MatchRoom implements DurableObject {
       tool: p.tool,
       seedChoice: p.seedChoice,
       selectedCrops: p.selectedCrops,
+      bannedCrop: p.bannedCrop,
       tiles: p.tiles,
       ready: p.ready,
       connected: p.connected,
@@ -1143,6 +1200,7 @@ export class MatchRoom implements DurableObject {
       hostId: this.hostId,
       settings: this.settings,
       countdownEndsAt: this.countdownEndsAt,
+      banEndsAt: this.banEndsAt,
       selectionEndsAt: this.selectionEndsAt,
       startedAt: this.startedAt,
       endsAt: this.endsAt,
@@ -1228,26 +1286,45 @@ function normalizeMarketPrices(raw?: Partial<Record<CropId, number>>): Record<Cr
   return fallback;
 }
 
-function normalizeSelectedCrops(raw?: readonly CropId[]): CropId[] {
+function isCropId(id: unknown): id is CropId {
+  return typeof id === "string" && id in CROPS;
+}
+
+function effectiveBannedCrops(players: Array<{ bannedCrop?: CropId }>): CropId[] {
+  const banned: CropId[] = [];
+  for (const player of players) {
+    if (isCropId(player.bannedCrop) && !banned.includes(player.bannedCrop)) {
+      banned.push(player.bannedCrop);
+    }
+  }
+  return banned;
+}
+
+function normalizeSelectedCrops(raw?: readonly CropId[], banned: readonly CropId[] = []): CropId[] {
   const selected: CropId[] = [];
   for (const id of raw ?? []) {
-    if (id in CROPS && !selected.includes(id)) selected.push(id);
+    if (id in CROPS && !banned.includes(id) && !selected.includes(id)) selected.push(id);
     if (selected.length === DEFAULT_SELECTED_CROPS.length) break;
   }
   return selected;
 }
 
-function fillSelectedCrops(raw?: readonly CropId[]): CropId[] {
-  const selected = normalizeSelectedCrops(raw);
-  for (const id of DEFAULT_SELECTED_CROPS) {
-    if (!selected.includes(id)) selected.push(id);
-    if (selected.length === DEFAULT_SELECTED_CROPS.length) return selected;
-  }
-  for (const id of Object.keys(CROPS) as CropId[]) {
+function fillSelectedCrops(raw?: readonly CropId[], banned: readonly CropId[] = []): CropId[] {
+  const selected = normalizeSelectedCrops(raw, banned);
+  const allowed = (Object.keys(CROPS) as CropId[]).filter((id) => !banned.includes(id));
+  const shuffled = allowed
+    .map((id) => ({ id, rank: crypto.getRandomValues(new Uint32Array(1))[0] }))
+    .sort((a, b) => a.rank - b.rank)
+    .map((entry) => entry.id);
+  for (const id of shuffled) {
     if (!selected.includes(id)) selected.push(id);
     if (selected.length === DEFAULT_SELECTED_CROPS.length) return selected;
   }
   return selected;
+}
+
+function firstAllowedCrop(banned: readonly CropId[] = []): CropId {
+  return (Object.keys(CROPS) as CropId[]).find((id) => !banned.includes(id)) ?? DEFAULT_SELECTED_CROPS[0];
 }
 
 function isSelectedCrop(id: CropId, selected?: CropId[]): boolean {
@@ -1255,16 +1332,16 @@ function isSelectedCrop(id: CropId, selected?: CropId[]): boolean {
 }
 
 function isPreGamePhase(status: PublicMatchState["status"]): boolean {
-  return status === "countdown" || status === "crop_selection" || status === "prepare_countdown";
+  return (
+    status === "countdown" ||
+    status === "crop_ban" ||
+    status === "crop_selection" ||
+    status === "prepare_countdown"
+  );
 }
 
 function isMatchActiveOrStarting(status: PublicMatchState["status"]): boolean {
-  return (
-    status === "countdown" ||
-    status === "crop_selection" ||
-    status === "prepare_countdown" ||
-    status === "playing"
-  );
+  return isPreGamePhase(status) || status === "playing";
 }
 
 function minDefined(a?: number, b?: number): number | undefined {

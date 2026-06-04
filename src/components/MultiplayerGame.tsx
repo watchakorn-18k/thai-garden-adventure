@@ -842,9 +842,6 @@ function GuideAction({ keys, label, sub }: { keys: string; label: string; sub: s
 }
 
 function normalizedKeyboardKey(e: KeyboardEvent): string {
-  const code = e.code.toLowerCase();
-  if (code && code !== "unidentified") return code;
-
   const key = e.key.toLowerCase();
   const thaiFallback: Record<string, string> = {
     ไ: "keyw",
@@ -862,7 +859,11 @@ function normalizedKeyboardKey(e: KeyboardEvent): string {
     "2": "digit2",
     "3": "digit3",
   };
-  return thaiFallback[key] ?? key;
+  if (thaiFallback[key]) return thaiFallback[key];
+
+  const code = e.code.toLowerCase();
+  if (code && code !== "unidentified") return code;
+  return key;
 }
 
 function keyToDir(k: string): Direction | null {

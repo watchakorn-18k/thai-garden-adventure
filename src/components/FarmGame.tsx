@@ -348,22 +348,24 @@ export default function FarmGame() {
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
-      const k = e.key.toLowerCase();
+      const k = normalizedKeyboardKey(e);
       keys.current.add(k);
-      if ([" ", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) e.preventDefault();
-      if (k === " " || k === "enter") {
+      if (["space", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
+        e.preventDefault();
+      }
+      if (k === "space" || k === "enter") {
         if (!e.repeat) doAction();
       }
-      if (k === "1") setTool("hoe");
-      if (k === "2") setTool("watering_can");
-      if (k === "3") setTool("seed");
-      if (k === "m") {
+      if (k === "digit1") setTool("hoe");
+      if (k === "digit2") setTool("watering_can");
+      if (k === "digit3") setTool("seed");
+      if (k === "keym") {
         const v = !isMuted();
         setMuted(v);
         setMutedState(v);
       }
     };
-    const onUp = (e: KeyboardEvent) => keys.current.delete(e.key.toLowerCase());
+    const onUp = (e: KeyboardEvent) => keys.current.delete(normalizedKeyboardKey(e));
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
     return () => {
@@ -385,10 +387,10 @@ export default function FarmGame() {
 
       let dx = 0,
         dy = 0;
-      if (k.has("w") || k.has("arrowup")) dy -= 1;
-      if (k.has("s") || k.has("arrowdown")) dy += 1;
-      if (k.has("a") || k.has("arrowleft")) dx -= 1;
-      if (k.has("d") || k.has("arrowright")) dx += 1;
+      if (k.has("keyw") || k.has("arrowup")) dy -= 1;
+      if (k.has("keys") || k.has("arrowdown")) dy += 1;
+      if (k.has("keya") || k.has("arrowleft")) dx -= 1;
+      if (k.has("keyd") || k.has("arrowright")) dx += 1;
 
       const moving = dx !== 0 || dy !== 0;
       if (moving) {
@@ -1075,6 +1077,31 @@ export default function FarmGame() {
       </div>
     </div>
   );
+}
+
+function normalizedKeyboardKey(e: KeyboardEvent): string {
+  const key = e.key.toLowerCase();
+  const thaiFallback: Record<string, string> = {
+    ไ: "keyw",
+    ฟ: "keya",
+    ห: "keys",
+    ก: "keyd",
+    ท: "keym",
+    " ": "space",
+    enter: "enter",
+    arrowup: "arrowup",
+    arrowdown: "arrowdown",
+    arrowleft: "arrowleft",
+    arrowright: "arrowright",
+    "1": "digit1",
+    "2": "digit2",
+    "3": "digit3",
+  };
+  if (thaiFallback[key]) return thaiFallback[key];
+
+  const code = e.code.toLowerCase();
+  if (code && code !== "unidentified") return code;
+  return key;
 }
 
 function HeaderOutfitMenu({

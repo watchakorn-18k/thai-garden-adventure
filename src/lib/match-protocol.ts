@@ -8,6 +8,7 @@ export const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
 export const TARGET_COINS = 500;
 export const MATCH_DURATION_MS = 5 * 60 * 1000;
 export const COUNTDOWN_MS = 3000;
+export const CROP_BAN_MS = 30 * 1000;
 export const CROP_SELECTION_MS = 90 * 1000;
 export const SELECTED_CROP_COUNT = 4;
 export const DEFAULT_SELECTED_CROPS = [
@@ -18,7 +19,7 @@ export const DEFAULT_SELECTED_CROPS = [
 ] as const satisfies readonly CropId[];
 
 export const ROOM_SETTING_LIMITS = {
-  targetCoins: { min: 200, max: 1500 },
+  targetCoins: { min: 200, max: 10000 },
   durationMs: { min: 2 * 60 * 1000, max: 10 * 60 * 1000 },
   maxPlayers: { min: 2, max: 2 },
 } as const;
@@ -95,6 +96,7 @@ export const clientMsg = z.discriminatedUnion("t", [
   }),
   z.object({ t: z.literal("tool"), tool: toolSchema }),
   z.object({ t: z.literal("seed"), id: cropIdSchema }),
+  z.object({ t: z.literal("ban_crop"), id: cropIdSchema }),
   z.object({
     t: z.literal("select_crops"),
     ids: z.array(cropIdSchema).max(SELECTED_CROP_COUNT),
@@ -113,6 +115,7 @@ export type ClientMsg = z.infer<typeof clientMsg>;
 export type MatchStatus =
   | "lobby"
   | "countdown"
+  | "crop_ban"
   | "crop_selection"
   | "prepare_countdown"
   | "playing"
@@ -133,6 +136,7 @@ export interface PublicPlayer {
   tool: Tool;
   seedChoice: CropId;
   selectedCrops: CropId[];
+  bannedCrop?: CropId;
   tiles: Tile[][];
   ready: boolean;
   connected: boolean;
@@ -161,6 +165,7 @@ export interface PublicMatchState {
   hostId?: string;
   settings: RoomSettings;
   countdownEndsAt?: number;
+  banEndsAt?: number;
   selectionEndsAt?: number;
   startedAt?: number;
   endsAt?: number;
