@@ -8,7 +8,6 @@ const TILE = 56;
 // Time constant for exponential movement smoothing (ms). Lower = snappier and
 // closer to the server position, higher = smoother but more trailing.
 const MOVE_TAU = 45;
-const MOVE_SPEED_TILES_PER_SECOND = 5.8;
 const PIXEL_FONT = '"Press Start 2P", "VT323", monospace';
 
 const TYPE_CODE: Record<"grass" | "tilled" | "watered", number> = {
@@ -305,21 +304,7 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
 
         override update(time: number, delta: number) {
           const predictedDir = predictedDirRef.current;
-          if (predictedDir) {
-            const step = (delta / 1000) * MOVE_SPEED_TILES_PER_SECOND;
-            const p = playerRef.current;
-            p.dir = predictedDir;
-            if (predictedDir === "up") this.disp.y = Math.max(0, this.disp.y - step);
-            if (predictedDir === "down") this.disp.y = Math.min(ROWS - 1, this.disp.y + step);
-            if (predictedDir === "left") this.disp.x = Math.max(0, this.disp.x - step);
-            if (predictedDir === "right") this.disp.x = Math.min(COLS - 1, this.disp.x + step);
-            this.target = { ...this.disp };
-            this.moving = true;
-            this.walkFrame = Math.floor(time / 110) % 2;
-            this.drawMarker();
-            this.drawFarmer();
-            return;
-          }
+          if (predictedDir) playerRef.current.dir = predictedDir;
 
           const dx = this.target.x - this.disp.x;
           const dy = this.target.y - this.disp.y;

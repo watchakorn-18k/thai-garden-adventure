@@ -12,7 +12,7 @@ import {
   SeedIcon,
   WaterCanIcon,
 } from "./PixelIcons";
-import { CROPS, type CropId, type Direction, type Tool } from "@/lib/game-types";
+import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
 import {
@@ -94,11 +94,35 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
   const isSpectator = matchRole === "spectator";
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
+  const localPlayerRef = useRef<PublicPlayer | undefined>(undefined);
+  const [localPlayer, setLocalPlayer] = useState<PublicPlayer | undefined>(undefined);
+  const renderedSelf = localPlayer ?? self;
   const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
   const opp = state?.players.find((p) => p.id !== selfId);
   useEffect(() => {
     selfRef.current = self;
     statusRef.current = state?.status;
+  }, [self, state?.status]);
+
+  useEffect(() => {
+    if (!self) {
+      localPlayerRef.current = undefined;
+      setLocalPlayer(undefined);
+      return;
+    }
+    const current = localPlayerRef.current;
+    if (!current || current.id !== self.id || state?.status !== "playing") {
+      localPlayerRef.current = self;
+      setLocalPlayer(self);
+      return;
+    }
+    const next = {
+      ...self,
+      pos: current.pos,
+      dir: current.dir,
+    };
+    localPlayerRef.current = next;
+    setLocalPlayer(next);
   }, [self, state?.status]);
 
   const setMovement = useCallback(
@@ -108,7 +132,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       if (lastInputDir.current === dir) return;
       lastInputDir.current = dir;
       setPredictedDir(dir);
-      send(dir ? { t: "move", dir } : { t: "move_stop" });
+      send(dir ? { t: "move", dir, pos: localPlayerRef.current?.pos } : { t: "move_stop" });
     },
     [isSpectator, send],
   );
@@ -120,7 +144,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     setActing(true);
     if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
     actionTimerRef.current = setTimeout(() => setActing(false), 320);
-    send({ t: "action" });
+    const local = localPlayerRef.current;
+    send({ t: "action", pos: local?.pos, dir: local?.dir });
   }, [isSpectator, send]);
 
   useEffect(() => {
@@ -137,15 +162,26 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       if (k === "2") send({ t: "tool", tool: "watering_can" });
       if (k === "3") send({ t: "tool", tool: "seed" });
     };
+    const stopAll = () => {
+      keys.current.clear();
+      setMovement(null);
+    };
     const onUp = (e: KeyboardEvent) => {
       keys.current.delete(e.key.toLowerCase());
       setMovement(keysToDir(keys.current, nextDiagonalAxis));
     };
+    const onVisibilityChange = () => {
+      if (document.hidden) stopAll();
+    };
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
+    window.addEventListener("blur", stopAll);
+    document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
+      window.removeEventListener("blur", stopAll);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, [isSpectator, send, sendAction, setMovement]);
 
@@ -159,9 +195,60 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   useEffect(() => {
     if (isSpectator) return;
     if (state?.status !== "playing") return;
+    const speed = 5.2;
+    let last = performance.now();
+    let raf = 0;
+    const tick = (now: number) => {
+      const dt = Math.min(0.05, (now - last) / 1000);
+      last = now;
+      const k = keys.current;
+      let dx = 0;
+      let dy = 0;
+      if (k.has("w") || k.has("arrowup")) dy -= 1;
+      if (k.has("s") || k.has("arrowdown")) dy += 1;
+      if (k.has("a") || k.has("arrowleft")) dx -= 1;
+      if (k.has("d") || k.has("arrowright")) dx += 1;
+      if (dx || dy) {
+        const len = Math.hypot(dx, dy) || 1;
+        dx /= len;
+        dy /= len;
+        const current = localPlayerRef.current;
+        if (current) {
+          const dir: Direction =
+            Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+          const next: PublicPlayer = {
+            ...current,
+            dir,
+            pos: {
+              x: Math.max(0, Math.min(COLS - 1, current.pos.x + dx * speed * dt)),
+              y: Math.max(0, Math.min(ROWS - 1, current.pos.y + dy * speed * dt)),
+            },
+          };
+          localPlayerRef.current = next;
+          setLocalPlayer(next);
+          setPredictedDir(dir);
+        }
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [isSpectator, state?.status]);
+
+  useEffect(() => {
+    if (isSpectator) return;
+    if (state?.status !== "playing") return;
     const i = setInterval(() => {
-      const dir = lastInputDir.current;
-      if (dir) send({ t: "move", dir });
+      const dir = keysToDir(keys.current, nextDiagonalAxis);
+      if (dir) {
+        lastInputDir.current = dir;
+        setPredictedDir(dir);
+        send({ t: "move", dir, pos: localPlayerRef.current?.pos });
+      } else if (lastInputDir.current) {
+        lastInputDir.current = null;
+        setPredictedDir(null);
+        send({ t: "move_stop" });
+      }
     }, 50);
     return () => clearInterval(i);
   }, [isSpectator, send, state?.status]);
@@ -253,7 +340,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
                   <OpponentField player={opp} />
                 ))}
               <SelfField
-                player={self}
+                player={renderedSelf ?? self}
                 events={events.filter((e) => e.ev.playerId === self.id)}
                 actionFlash={actionFlash}
                 acting={acting}

@@ -226,20 +226,24 @@ export class MatchRoom implements DurableObject {
       this.advanceMovement(now);
       player.inputDir = msg.dir;
       player.dir = msg.dir;
+      if (msg.pos) player.pos = clampPos(msg.pos);
       player.lastMovementAt = now;
       this.dirty = true;
+      this.broadcastSnapshot();
       return;
     }
     if (msg.t === "move_stop") {
-      this.advanceMovement(now);
       player.inputDir = undefined;
       player.lastMovementAt = now;
       this.dirty = true;
+      this.broadcastSnapshot();
       return;
     }
     if (msg.t === "action") {
       if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
       this.advanceMovement(now);
+      if (msg.pos) player.pos = clampPos(msg.pos);
+      if (msg.dir) player.dir = msg.dir;
       player.lastActionAt = now;
       const result = applyAction({
         tiles: player.tiles,
@@ -989,6 +993,15 @@ function minDefined(a?: number, b?: number): number | undefined {
   if (a === undefined) return b;
   if (b === undefined) return a;
   return Math.min(a, b);
+}
+
+function clampPos(pos: { x: number; y: number }): { x: number; y: number } {
+  const x = Number.isFinite(pos.x) ? pos.x : 0;
+  const y = Number.isFinite(pos.y) ? pos.y : 0;
+  return {
+    x: Math.max(0, Math.min(COLS - 1, x)),
+    y: Math.max(0, Math.min(ROWS - 1, y)),
+  };
 }
 
 // keep static field constants alive for tree-shake protection
