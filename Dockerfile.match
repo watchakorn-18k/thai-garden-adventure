@@ -1,0 +1,12 @@
+FROM oven/bun:1-alpine
+
+WORKDIR /app
+
+COPY package.json bun.lock bunfig.toml ./
+RUN bun install --frozen-lockfile
+
+COPY worker ./worker
+
+EXPOSE 8787
+
+CMD ["bun", "run", "dev:match", "--", "--ip", "0.0.0.0", "--port", "8787"]

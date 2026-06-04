@@ -7,6 +7,8 @@ COPY package.json bun.lock bunfig.toml ./
 RUN bun install --frozen-lockfile
 
 COPY . .
+ARG VITE_MATCH_WS_URL
+ENV VITE_MATCH_WS_URL=$VITE_MATCH_WS_URL
 RUN bun run build
 
 # Runtime stage

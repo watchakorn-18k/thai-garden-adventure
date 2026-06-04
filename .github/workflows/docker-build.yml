@@ -1,4 +1,4 @@
-name: Build & Push Docker image
+name: Build & Push Docker images
 
 on:
   push:
@@ -10,7 +10,8 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  WEB_IMAGE_NAME: ${{ github.repository }}
+  MATCH_IMAGE_NAME: ${{ github.repository_owner }}/thai-garden-match
 
 jobs:
   build:
@@ -35,11 +36,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract metadata
-        id: meta
+      - name: Extract web metadata
+        id: web-meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          images: ${{ env.REGISTRY }}/${{ env.WEB_IMAGE_NAME }}
           tags: |
             type=ref,event=branch
             type=ref,event=pr
@@ -48,12 +49,39 @@ jobs:
             type=sha,format=short
             type=raw,value=latest,enable={{is_default_branch}}
 
-      - name: Build and push
+      - name: Extract match metadata
+        id: match-meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.MATCH_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push web image
         uses: docker/build-push-action@v6
         with:
           context: .
+          file: ./Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          tags: ${{ steps.web-meta.outputs.tags }}
+          labels: ${{ steps.web-meta.outputs.labels }}
+          build-args: |
+            VITE_MATCH_WS_URL=${{ vars.VITE_MATCH_WS_URL }}
+          cache-from: type=gha,scope=web
+          cache-to: type=gha,mode=max,scope=web
+
+      - name: Build and push match image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.match
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.match-meta.outputs.tags }}
+          labels: ${{ steps.match-meta.outputs.labels }}
+          cache-from: type=gha,scope=match
+          cache-to: type=gha,mode=max,scope=match
