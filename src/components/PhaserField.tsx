@@ -330,13 +330,14 @@ export default function PhaserField({ player, events, acting, predictedDir }: Pr
             const pivotY = 11;
             const s = TILE / ART_GRID;
 
-            const relativeRects: Rect[] = toolRects.map(([rx, ry, rw, rh, color]) => [
-              rx - pivotX,
-              ry - pivotY,
-              rw,
-              rh,
-              color,
-            ]);
+            const relativeRects: Rect[] = toolRects.map(([rx, ry, rw, rh, color]) => {
+              const rx_rel = rx - pivotX;
+              const ry_rel = ry - pivotY;
+              if (flip) {
+                return [-rx_rel - rw, ry_rel, rw, rh, color];
+              }
+              return [rx_rel, ry_rel, rw, rh, color];
+            });
 
             drawRects(this.toolG, relativeRects, 0, 0);
 

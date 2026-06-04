@@ -4,6 +4,12 @@ let ctx: AudioContext | null = null;
 let master: GainNode | null = null;
 let muted = false;
 let noiseBuffer: AudioBuffer | null = null;
+const HOE_SOUNDS = [
+  "/hoe_sound/hoe_1.flac",
+  "/hoe_sound/hoe_2.flac",
+  "/hoe_sound/hoe_3.flac",
+  "/hoe_sound/hoe_4.flac",
+];
 
 function ensure() {
   if (typeof window === "undefined") return null;
@@ -111,10 +117,21 @@ function pop() {
   o.stop(now + 0.11);
 }
 
+function playOverlap(urls: string[], volume = 1) {
+  if (typeof window === "undefined" || muted) return;
+  const url = urls[Math.floor(Math.random() * urls.length)];
+  const audio = new Audio(url);
+  audio.volume = volume;
+  void audio.play().catch(() => undefined);
+}
+
 export const SFX = {
   till() {
     noiseBurst(0.18, 0.35);
     play([{ freq: 110, dur: 0.12, type: "square", vol: 0.3 }]);
+  },
+  hoe() {
+    playOverlap(HOE_SOUNDS, 0.3);
   },
   water() {
     noiseBurst(0.35, 0.18);

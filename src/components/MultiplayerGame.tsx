@@ -21,6 +21,7 @@ import lobbyMusicUrl from "../../lobby_music.wav";
 import gamePlayMusicUrl from "../../game_play.wav";
 import winnerSoundUrl from "../../winner_sound.mp3";
 import loserSoundUrl from "../../loser_sound.mp3";
+import drawSoundUrl from "../../draw_sound.mp3";
 import {
   DEFAULT_ROOM_SETTINGS,
   ROOM_SETTING_LIMITS,
@@ -69,6 +70,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const lobbyMusicRef = useRef<HTMLAudioElement | null>(null);
   const gamePlayMusicRef = useRef<HTMLAudioElement | null>(null);
   const winnerSoundRef = useRef<HTMLAudioElement | null>(null);
+  const loserSoundRef = useRef<HTMLAudioElement | null>(null);
+  const drawSoundRef = useRef<HTMLAudioElement | null>(null);
   const {
     state,
     selfId,
@@ -92,14 +95,14 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
           // Play SFX on match events
           if (ev.kind === "till") {
-            SFX.till();
+            if (ev.playerId !== selfId || matchRole === "spectator") SFX.hoe();
           } else if (ev.kind === "water") {
             SFX.water();
           } else if (ev.kind === "plant") {
             SFX.plant();
           } else if (ev.kind === "harvest") {
             if (ev.reward === 0) {
-              SFX.till();
+              if (ev.playerId !== selfId || matchRole === "spectator") SFX.hoe();
             } else {
               SFX.harvest();
               if (ev.playerId === selfId || matchRole === "spectator") {
@@ -184,16 +187,41 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   }, [musicEnabled, state?.status]);
 
   useEffect(() => {
-    const shouldPlayWinnerSound = musicEnabled && state?.status === "ended";
-    const audio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
-    winnerSoundRef.current = audio;
-    audio.loop = true;
-    audio.volume = 0.22; // low volume as requested
+    const winnerAudio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
+    const loserAudio = loserSoundRef.current ?? new Audio(loserSoundUrl);
+    const drawAudio = drawSoundRef.current ?? new Audio(drawSoundUrl);
+    winnerSoundRef.current = winnerAudio;
+    loserSoundRef.current = loserAudio;
+    drawSoundRef.current = drawAudio;
+    winnerAudio.loop = true;
+    loserAudio.loop = true;
+    drawAudio.loop = true;
+    winnerAudio.volume = 0.22;
+    loserAudio.volume = 0.22;
+    drawAudio.volume = 0.22;
 
-    if (!shouldPlayWinnerSound) {
-      audio.pause();
-      audio.currentTime = 0;
+    const endSounds = [winnerAudio, loserAudio, drawAudio];
+    const stopEndSounds = () => {
+      for (const sound of endSounds) {
+        sound.pause();
+        sound.currentTime = 0;
+      }
+    };
+
+    if (!musicEnabled || state?.status !== "ended") {
+      stopEndSounds();
       return;
+    }
+
+    const audio = !state.winnerId
+      ? drawAudio
+      : selfId && state.winnerId !== selfId
+        ? loserAudio
+        : winnerAudio;
+    for (const sound of endSounds) {
+      if (sound === audio) continue;
+      sound.pause();
+      sound.currentTime = 0;
     }
 
     const play = () => {
@@ -208,7 +236,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       window.removeEventListener("keydown", play);
       audio.pause();
     };
-  }, [musicEnabled, state?.status]);
+  }, [musicEnabled, selfId, state?.status, state?.winnerId]);
 
   const toggleLobbyMusic = useCallback(() => {
     SFX.click();
@@ -285,6 +313,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
     actionTimerRef.current = setTimeout(() => setActing(false), 320);
     const local = localPlayerRef.current;
+    if (local?.tool === "hoe") SFX.hoe();
     send({ t: "action", pos: local?.pos, dir: local?.dir });
   }, [isSpectator, send]);
 
