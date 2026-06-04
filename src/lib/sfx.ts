@@ -10,6 +10,17 @@ const HOE_SOUNDS = [
   "/hoe_sound/hoe_3.flac",
   "/hoe_sound/hoe_4.flac",
 ];
+const WATERING_SOUNDS = [
+  "/watering_sound/watering_1.flac",
+  "/watering_sound/watering_2.flac",
+  "/watering_sound/watering_3.flac",
+];
+const HARVESTING_SOUNDS = [
+  "/harvesting_sound/harvesting_1.flac",
+  "/harvesting_sound/harvesting_2.flac",
+  "/harvesting_sound/harvesting_3.flac",
+  "/harvesting_sound/harvesting_4.flac",
+];
 
 function ensure() {
   if (typeof window === "undefined") return null;
@@ -134,11 +145,7 @@ export const SFX = {
     playOverlap(HOE_SOUNDS, 0.3);
   },
   water() {
-    noiseBurst(0.35, 0.18);
-    play([
-      { freq: 600, dur: 0.2, type: "sine", vol: 0.18 },
-      { freq: 800, dur: 0.15, type: "sine", vol: 0.15, delay: 0.05 },
-    ]);
+    playOverlap(WATERING_SOUNDS, 0.3);
   },
   plant() {
     play([
@@ -147,11 +154,7 @@ export const SFX = {
     ]);
   },
   harvest() {
-    play([
-      { freq: 523, dur: 0.08, type: "square", vol: 0.4 },
-      { freq: 659, dur: 0.08, type: "square", vol: 0.4, delay: 0.07 },
-      { freq: 784, dur: 0.12, type: "square", vol: 0.4, delay: 0.14 },
-    ]);
+    playOverlap(HARVESTING_SOUNDS, 0.3);
   },
   crit() {
     play([

@@ -297,7 +297,7 @@ export default function FarmGame() {
           addPopup(ev.x, ev.y, "ขุด", "info");
           burstParticles(ev.x, ev.y, "dirt");
           shake(ev.x, ev.y);
-          SFX.till();
+          SFX.hoe();
         } else if (ev.kind === "water") {
           addPopup(ev.x, ev.y, "รดน้ำ", "info");
           burstParticles(ev.x, ev.y, "water");
