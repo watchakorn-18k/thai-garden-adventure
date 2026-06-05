@@ -70,6 +70,7 @@ interface StoredRoomState {
   settings?: RoomSettings;
   players: Omit<PlayerState, "connected" | "inputDir" | "lastMovementAt" | "lastActionAt">[];
   marketPrices?: Record<CropId, number>;
+  banTurnPlayerId?: string;
 }
 
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -104,6 +105,7 @@ export class MatchRoom implements DurableObject {
   private settings: RoomSettings = DEFAULT_ROOM_SETTINGS;
   private players = new Map<string, PlayerState>();
   private marketPrices: Record<CropId, number> = makeMarketPrices();
+  private banTurnPlayerId?: string;
   private initialized?: Promise<void>;
   private wsToPlayer = new WeakMap<WebSocket, string>();
   private wsToRole = new WeakMap<WebSocket, MatchRole>();
@@ -231,6 +233,7 @@ export class MatchRoom implements DurableObject {
         return;
       }
       if (this.status === "crop_ban") {
+        if (player.id !== this.banTurnPlayerId) return;
         if (!player.bannedCrop) return;
         if (player.ready) return;
 
@@ -254,7 +257,17 @@ export class MatchRoom implements DurableObject {
           }
         }
 
-        this.maybeFastForwardCropBan();
+        const nextPlayer = [...this.players.values()].find((p) => p.id !== player.id);
+        if (nextPlayer && !nextPlayer.ready) {
+          this.banTurnPlayerId = nextPlayer.id;
+          this.banEndsAt = Date.now() + CROP_BAN_MS;
+          this.scheduleAlarm();
+          if (this.phaseTimer) clearTimeout(this.phaseTimer);
+          this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
+        } else {
+          this.maybeFastForwardCropBan();
+        }
+
         this.persist();
         this.broadcastSnapshot();
         return;
@@ -286,6 +299,7 @@ export class MatchRoom implements DurableObject {
 
     if (msg.t === "ban_crop") {
       if (this.status !== "crop_ban") return;
+      if (player.id !== this.banTurnPlayerId) return;
       if (player.ready) return;
 
       const alreadyBanned = [...this.players.values()].some(
@@ -487,7 +501,7 @@ export class MatchRoom implements DurableObject {
       return;
     }
     if (this.status === "crop_ban" && this.banEndsAt && now >= this.banEndsAt) {
-      this.startCropSelection();
+      this.handleBanTimerExpiry();
       return;
     }
     if (this.status === "crop_selection" && this.selectionEndsAt && now >= this.selectionEndsAt) {
@@ -533,6 +547,7 @@ export class MatchRoom implements DurableObject {
     this.hostId = stored.hostId;
     this.hostSessionId = stored.hostSessionId;
     this.settings = roomSettingsSchema.catch(DEFAULT_ROOM_SETTINGS).parse(stored.settings);
+    this.banTurnPlayerId = stored.banTurnPlayerId;
     this.players = new Map(
       stored.players.map((p) => [
         p.id,
@@ -601,6 +616,7 @@ export class MatchRoom implements DurableObject {
         settings: this.settings,
         players,
         marketPrices: this.marketPrices,
+        banTurnPlayerId: this.banTurnPlayerId,
       } satisfies StoredRoomState),
     );
   }
@@ -1010,11 +1026,20 @@ export class MatchRoom implements DurableObject {
       p.selectedCrops = [];
       p.seedChoice = DEFAULT_SELECTED_CROPS[0];
     }
+
+    const pList = [...this.players.values()];
+    if (pList.length > 0) {
+      const randIdx = Math.floor(Math.random() * pList.length);
+      this.banTurnPlayerId = pList[randIdx].id;
+    } else {
+      this.banTurnPlayerId = undefined;
+    }
+
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
     if (this.phaseTimer) clearTimeout(this.phaseTimer);
-    this.phaseTimer = setTimeout(() => this.startCropSelection(), CROP_BAN_MS);
+    this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
   }
 
   private maybeFastForwardCropBan(): void {
@@ -1029,6 +1054,41 @@ export class MatchRoom implements DurableObject {
       if (this.phaseTimer) clearTimeout(this.phaseTimer);
       this.phaseTimer = setTimeout(() => this.startCropSelection(), 5000);
     }
+  }
+
+  private handleBanTimerExpiry(): void {
+    if (this.status !== "crop_ban") return;
+    const activePlayer = this.banTurnPlayerId ? this.players.get(this.banTurnPlayerId) : undefined;
+    if (activePlayer && !activePlayer.ready) {
+      if (!activePlayer.bannedCrop) {
+        const bannedAlready = [...this.players.values()]
+          .filter((p) => p.ready && p.bannedCrop)
+          .map((p) => p.bannedCrop!);
+        const allowed = (Object.keys(CROPS) as CropId[]).filter((id) => !bannedAlready.includes(id));
+        const randIdx = Math.floor(Math.random() * allowed.length);
+        activePlayer.bannedCrop = allowed[randIdx];
+      }
+      activePlayer.ready = true;
+
+      for (const p of this.players.values()) {
+        if (p.id !== activePlayer.id && !p.ready && p.bannedCrop === activePlayer.bannedCrop) {
+          p.bannedCrop = undefined;
+        }
+      }
+
+      const nextPlayer = [...this.players.values()].find((p) => p.id !== activePlayer.id);
+      if (nextPlayer && !nextPlayer.ready) {
+        this.banTurnPlayerId = nextPlayer.id;
+        this.banEndsAt = Date.now() + CROP_BAN_MS;
+        this.scheduleAlarm();
+        if (this.phaseTimer) clearTimeout(this.phaseTimer);
+        this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
+        this.persist();
+        this.broadcastSnapshot();
+        return;
+      }
+    }
+    this.startCropSelection();
   }
 
   private startCropSelection(): void {
@@ -1236,6 +1296,7 @@ export class MatchRoom implements DurableObject {
     this.countdownEndsAt = undefined;
     this.banEndsAt = undefined;
     this.selectionEndsAt = undefined;
+    this.banTurnPlayerId = undefined;
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = 0;
     for (const p of this.players.values()) {
@@ -1290,6 +1351,7 @@ export class MatchRoom implements DurableObject {
       recap: this.recap,
       players,
       marketPrices: this.marketPrices,
+      banTurnPlayerId: this.banTurnPlayerId,
     };
   }
 
@@ -1302,7 +1364,9 @@ export class MatchRoom implements DurableObject {
       if (p.id === playerId) return p;
       const opponent = { ...p };
       if (state.status === "crop_ban") {
-        opponent.bannedCrop = undefined;
+        if (!opponent.ready) {
+          opponent.bannedCrop = undefined;
+        }
       } else if (state.status === "crop_selection") {
         opponent.selectedCrops = [];
         opponent.seedChoice = undefined as any;

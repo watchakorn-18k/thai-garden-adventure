@@ -1278,6 +1278,9 @@ function CropBanView({
     .toString()
     .padStart(2, "0");
 
+  const activePlayer = state.players.find((p) => p.id === state.banTurnPlayerId);
+  const isMyTurn = !isSpectator && self?.id === state.banTurnPlayerId;
+
   return (
     <section className="lobby-stage relative z-10 w-full max-w-5xl">
       <div className="lobby-title-card pixel-panel">
@@ -1290,7 +1293,15 @@ function CropBanView({
           </span>
         </div>
         <h2 className="font-pixel lobby-title">แบนผัก 1 อย่าง</h2>
-        <p className="lobby-subtitle">แบนซ้ำกันไม่ได้ · กดยืนยันการแบนเพื่อล็อกตัวเลือก</p>
+        <p className="lobby-subtitle">
+          {isSpectator ? (
+            `รอ ${activePlayer?.name ?? "Rival"} แบนพืช...`
+          ) : isMyTurn ? (
+            <span className="text-[#86efac] font-bold">ตาของคุณในการแบน</span>
+          ) : (
+            <span className="text-[var(--muted-foreground)]">รออีกฝ่ายแบนพืช...</span>
+          )}
+        </p>
       </div>
 
       {isSpectator && (
@@ -1342,23 +1353,26 @@ function CropBanView({
           const isBannedByOther = state.players.some(
             (p) => p.id !== self?.id && p.ready && p.bannedCrop === crop.id,
           );
+          const disabled = isSpectator || self?.ready || isBannedByOther || !isMyTurn;
           return (
             <button
               key={crop.id}
               type="button"
               onClick={() => {
-                if (isSpectator || self?.ready || isBannedByOther) return;
+                if (disabled) return;
                 SFX.click();
                 onBanCrop(crop.id);
               }}
-              disabled={isSpectator || self?.ready || isBannedByOther}
+              disabled={disabled}
               className="farm-crop-card pixel-btn text-left"
               data-active={active ? "true" : undefined}
               title={`แบน ${crop.name}`}
               style={
                 isBannedByOther
                   ? { opacity: 0.4, filter: "grayscale(100%)", cursor: "not-allowed" }
-                  : undefined
+                  : !isMyTurn
+                    ? { opacity: 0.5, filter: "grayscale(50%)", cursor: "not-allowed" }
+                    : undefined
               }
             >
               <span className="farm-crop-icon">
@@ -1384,15 +1398,20 @@ function CropBanView({
           <button
             type="button"
             onClick={() => {
+              if (self.ready || !isMyTurn) return;
               SFX.click();
               onReady();
             }}
-            disabled={self.ready}
+            disabled={self.ready || !isMyTurn}
             className="pixel-btn lobby-ready-btn w-full max-w-xs"
-            data-accent={self.ready ? undefined : "true"}
+            data-accent={self.ready || !isMyTurn ? undefined : "true"}
           >
             <span className="font-pixel text-[12px]">
-              {self.ready ? "READY (ยืนยันแล้ว)" : "ยืนยันการแบน (Confirm Ban)"}
+              {!isMyTurn
+                ? "รออีกฝ่ายแบนพืช..."
+                : self.ready
+                  ? "READY (ยืนยันแล้ว)"
+                  : "ยืนยันการแบน (Confirm Ban)"}
             </span>
           </button>
         </div>
@@ -1400,20 +1419,24 @@ function CropBanView({
 
       <div className="pixel-panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex flex-wrap gap-2">
-          {state.players.map((player) => (
-            <span
-              key={player.id}
-              className="pixel-chip font-pixel text-[8px]"
-              data-gold={player.ready ? "true" : undefined}
-            >
-              {player.name}:{" "}
-              {player.bannedCrop ? `แบน ${CROPS[player.bannedCrop].name}` : "ยังไม่เลือก"}
-              {player.ready ? " [READY]" : " [เลือกอยู่]"}
-            </span>
-          ))}
+          {state.players.map((player) => {
+            const isPlayerTurn = state.banTurnPlayerId === player.id;
+            return (
+              <span
+                key={player.id}
+                className="pixel-chip font-pixel text-[8px]"
+                data-gold={player.ready ? "true" : undefined}
+                style={isPlayerTurn && !player.ready ? { border: "1px solid var(--gold)" } : undefined}
+              >
+                {player.name}:{" "}
+                {player.bannedCrop ? `แบน ${CROPS[player.bannedCrop].name}` : "ยังไม่เลือก"}
+                {player.ready ? " [READY]" : isPlayerTurn ? " [กำลังแบน]" : " [รอแบน]"}
+              </span>
+            );
+          })}
         </div>
         <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          เมื่อกดยืนยันครบทั้งสองฝั่ง เวลาจะลดเหลือ 5 วินาที
+          แบนพืชทีละเทิร์น สลับกันแบนเพื่อความสมดุล
         </span>
       </div>
     </section>
