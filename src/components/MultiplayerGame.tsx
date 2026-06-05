@@ -1293,6 +1293,48 @@ function CropBanView({
         <p className="lobby-subtitle">แบนซ้ำกันไม่ได้ · กดยืนยันการแบนเพื่อล็อกตัวเลือก</p>
       </div>
 
+      {isSpectator && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-2">
+          {state.players.map((player, idx) => {
+            const crop = player.bannedCrop ? CROPS[player.bannedCrop] : null;
+            const Icon = crop ? CROP_ICONS[crop.id] : null;
+            return (
+              <div
+                key={player.id}
+                className="pixel-panel p-4 flex flex-col items-center justify-center gap-2"
+                data-ready={player.ready ? "true" : undefined}
+                style={{ background: player.ready ? "rgba(255, 210, 74, 0.08)" : undefined }}
+              >
+                <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">
+                  PLAYER {idx + 1}: <span className="text-white">{player.name}</span>
+                </div>
+                <div className="flex items-center gap-3 mt-1 min-h-[44px]">
+                  {crop && Icon ? (
+                    <>
+                      <Icon size={24} />
+                      <div className="font-pixel text-[14px] text-[var(--gold)]">
+                        แบน {crop.name}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="font-pixel text-[11px] text-[var(--muted-foreground)] animate-pulse">
+                      กำลังเลือก...
+                    </div>
+                  )}
+                </div>
+                <div className="font-pixel text-[8px] mt-1">
+                  {player.ready ? (
+                    <span className="text-[#86efac]">ยืนยันแล้ว [LOCKED]</span>
+                  ) : (
+                    <span className="text-[var(--muted-foreground)]">กำลังเลือก</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
       <div className="pixel-panel my-4 grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
         {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
           const Icon = CROP_ICONS[crop.id];
@@ -1447,46 +1489,94 @@ function CropSelectionView({
       </div>
 
       <div className="pixel-panel my-4 flex flex-col gap-3 px-4 py-4">
-        <div>
-          <div className="mb-2 font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">
-            ตะกร้าผักของคุณ · กด X หรือกดผักซ้ำเพื่อเอาออก
-          </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {Array.from({ length: SELECTED_CROP_COUNT }).map((_, index) => {
-              const cropId = selected[index];
-              const crop = cropId ? CROPS[cropId] : undefined;
-              const Icon = crop ? CROP_ICONS[crop.id] : undefined;
+        {isSpectator ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {state.players.map((player, idx) => {
+              const pSelected = player.selectedCrops.filter((id) => !bannedCrops.includes(id));
               return (
                 <div
-                  key={index}
-                  className="pixel-chip flex min-h-[54px] items-center justify-between gap-2 px-3 py-2 font-pixel text-[8px]"
-                  data-gold={crop ? "true" : undefined}
+                  key={player.id}
+                  className="pixel-panel p-4 flex flex-col gap-2"
+                  data-ready={player.ready ? "true" : undefined}
+                  style={{ background: player.ready ? "rgba(255, 210, 74, 0.08)" : undefined }}
                 >
-                  {crop && Icon ? (
-                    <>
-                      <span className="flex items-center gap-2">
-                        <Icon size={22} />
-                        {crop.name}
-                      </span>
-                      {!isLocked && !isSpectator && (
-                        <button
-                          type="button"
-                          onClick={() => toggleCrop(crop.id)}
-                          className="pixel-btn px-2 py-1"
-                          aria-label={`เอา ${crop.name} ออกจากตะกร้า`}
+                  <div className="flex items-center justify-between">
+                    <span className="font-pixel text-[10px] text-[var(--gold)]">
+                      PLAYER {idx + 1}: {player.name}
+                    </span>
+                    <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+                      {player.ready ? "READY (LOCKED)" : "PICKING"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {Array.from({ length: SELECTED_CROP_COUNT }).map((_, index) => {
+                      const cropId = pSelected[index];
+                      const crop = cropId ? CROPS[cropId] : undefined;
+                      const Icon = crop ? CROP_ICONS[crop.id] : undefined;
+                      return (
+                        <div
+                          key={index}
+                          className="pixel-chip flex min-h-[50px] flex-col items-center justify-center gap-1 p-2 font-pixel text-[7px]"
+                          data-gold={crop ? "true" : undefined}
                         >
-                          <span className="font-pixel text-[8px]">X</span>
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-[var(--muted-foreground)]">ช่องว่าง {index + 1}</span>
-                  )}
+                          {crop && Icon ? (
+                            <>
+                              <Icon size={18} />
+                              <span className="text-center truncate w-full">{crop.name}</span>
+                            </>
+                          ) : (
+                            <span className="text-[var(--muted-foreground)]">ว่าง</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
           </div>
-        </div>
+        ) : (
+          <div>
+            <div className="mb-2 font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">
+              ตะกร้าผักของคุณ · กด X หรือกดผักซ้ำเพื่อเอาออก
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              {Array.from({ length: SELECTED_CROP_COUNT }).map((_, index) => {
+                const cropId = selected[index];
+                const crop = cropId ? CROPS[cropId] : undefined;
+                const Icon = crop ? CROP_ICONS[crop.id] : undefined;
+                return (
+                  <div
+                    key={index}
+                    className="pixel-chip flex min-h-[54px] items-center justify-between gap-2 px-3 py-2 font-pixel text-[8px]"
+                    data-gold={crop ? "true" : undefined}
+                  >
+                    {crop && Icon ? (
+                      <>
+                        <span className="flex items-center gap-2">
+                          <Icon size={22} />
+                          {crop.name}
+                        </span>
+                        {!isLocked && !isSpectator && (
+                          <button
+                            type="button"
+                            onClick={() => toggleCrop(crop.id)}
+                            className="pixel-btn px-2 py-1"
+                            aria-label={`เอา ${crop.name} ออกจากตะกร้า`}
+                          >
+                            <span className="font-pixel text-[8px]">X</span>
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-[var(--muted-foreground)]">ช่องว่าง {index + 1}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {

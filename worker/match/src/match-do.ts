@@ -796,7 +796,7 @@ export class MatchRoom implements DurableObject {
       sessionId,
       role: "player",
       host: this.hostSessionId === sessionId,
-      state: this.publicState(),
+      state: this.getFilteredState("player", playerId),
     });
     this.persist();
     this.broadcastSnapshot();
@@ -841,7 +841,7 @@ export class MatchRoom implements DurableObject {
       sessionId: spectatorSessionId,
       role: "spectator",
       host: this.hostSessionId === spectatorSessionId,
-      state: this.publicState(),
+      state: this.getFilteredState("spectator", spectatorId),
     });
     this.persist();
     this.broadcastSnapshot();
@@ -891,7 +891,7 @@ export class MatchRoom implements DurableObject {
         sessionId: spectatorSessionId,
         role,
         host: this.hostSessionId === spectatorSessionId,
-        state: this.publicState(),
+        state: this.getFilteredState(role, spectatorId),
       });
       this.broadcastSnapshot();
       return;
@@ -968,7 +968,7 @@ export class MatchRoom implements DurableObject {
       sessionId,
       role,
       host: this.hostSessionId === sessionId,
-      state: this.publicState(),
+      state: this.getFilteredState(role, playerId),
     });
     this.persist();
     this.broadcastSnapshot();
@@ -1293,8 +1293,32 @@ export class MatchRoom implements DurableObject {
     };
   }
 
+  private getFilteredState(role: MatchRole, playerId?: string): PublicMatchState {
+    const state = this.publicState();
+    if (role === "spectator") {
+      return state;
+    }
+    state.players = state.players.map((p) => {
+      if (p.id === playerId) return p;
+      const opponent = { ...p };
+      if (state.status === "crop_ban") {
+        opponent.bannedCrop = undefined;
+      } else if (state.status === "crop_selection") {
+        opponent.selectedCrops = [];
+        opponent.seedChoice = undefined as any;
+      }
+      return opponent;
+    });
+    return state;
+  }
+
   private broadcastSnapshot(): void {
-    this.broadcast({ t: "snapshot", state: this.publicState() });
+    for (const ws of this.ctx.getWebSockets()) {
+      const role = this.wsToRole.get(ws) ?? "player";
+      const playerId = this.wsToPlayer.get(ws);
+      const filteredState = this.getFilteredState(role, playerId);
+      this.sendTo(ws, { t: "snapshot", state: filteredState });
+    }
   }
 
   private broadcast(msg: ServerMsg): void {
