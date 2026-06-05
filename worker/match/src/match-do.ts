@@ -348,16 +348,26 @@ export class MatchRoom implements DurableObject {
 
             // Update dynamic market prices
             const basePrice = CROPS[ev.cropId].sellPrice;
+            const currentPrice = this.marketPrices[ev.cropId];
+            const safeCurrentPrice =
+              typeof currentPrice === "number" && Number.isFinite(currentPrice)
+                ? currentPrice
+                : basePrice;
             this.marketPrices[ev.cropId] = Math.max(
               basePrice * 0.5,
-              this.marketPrices[ev.cropId] - basePrice * 0.1,
+              safeCurrentPrice - basePrice * 0.1,
             );
             for (const cId of Object.keys(this.marketPrices) as CropId[]) {
               if (cId !== ev.cropId) {
                 const otherBase = CROPS[cId].sellPrice;
+                const otherCurrent = this.marketPrices[cId];
+                const safeOtherCurrent =
+                  typeof otherCurrent === "number" && Number.isFinite(otherCurrent)
+                    ? otherCurrent
+                    : otherBase;
                 this.marketPrices[cId] = Math.min(
                   otherBase * 1.2,
-                  this.marketPrices[cId] + otherBase * 0.03,
+                  safeOtherCurrent + otherBase * 0.03,
                 );
               }
             }
@@ -1080,7 +1090,11 @@ export class MatchRoom implements DurableObject {
       for (const cId of Object.keys(this.marketPrices) as CropId[]) {
         const base = CROPS[cId].sellPrice;
         const current = this.marketPrices[cId];
-        if (current < base) {
+        if (!Number.isFinite(current)) {
+          // Heal corrupted NaN/Infinity price back to base
+          this.marketPrices[cId] = base;
+          pricesChanged = true;
+        } else if (current < base) {
           this.marketPrices[cId] = Math.min(base, current + base * 0.005);
           pricesChanged = true;
         } else if (current > base) {

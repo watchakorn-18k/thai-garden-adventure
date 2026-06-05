@@ -100,9 +100,9 @@ export function applyAction(input: ActionInput): ActionResult {
 
   if (tile.crop && tile.crop.stage >= 2) {
     const crop = CROPS[tile.crop.id];
-    const baseReward = input.marketPrices
-      ? (input.marketPrices[tile.crop.id] ?? crop.sellPrice)
-      : crop.sellPrice;
+    const rawPrice = input.marketPrices ? input.marketPrices[tile.crop.id] : undefined;
+    const baseReward =
+      typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : crop.sellPrice;
     const reward = tile.crop.stage === 3 ? 0 : Math.round(baseReward);
     coins += reward;
     events.push({
