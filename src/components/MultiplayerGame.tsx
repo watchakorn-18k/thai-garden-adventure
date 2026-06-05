@@ -358,6 +358,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSpectator = matchRole === "spectator";
+  const currentRole = matchRole === "spectator" ? "SPECTATOR" : "PLAYER";
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
   const renderedSelf = localPlayer ?? self;
   const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
@@ -759,7 +760,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
       )}
-      {state.status !== "crop_ban" &&
+      {currentRole === "SPECTATOR" &&
+        state.status !== "crop_ban" &&
         state.status !== "crop_selection" &&
         state.status !== "prepare_countdown" && (
           <CropIndexBook
@@ -769,13 +771,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             availableCropIds={
               state.status === "playing" && self ? selectedCropPool(self.selectedCrops) : undefined
             }
-            onSelectCrop={
-              !isSpectator && self && state.status === "playing"
-                ? (id) => {
-                    send({ t: "seed", id });
-                  }
-                : undefined
-            }
+            onSelectCrop={undefined}
           />
         )}
       {state.status === "playing" && self && !isSpectator && (
