@@ -108,6 +108,8 @@ export const clientMsg = z.discriminatedUnion("t", [
   z.object({ t: z.literal("start") }),
   z.object({ t: z.literal("settings"), settings: roomSettingsSchema }),
   z.object({ t: z.literal("kick"), playerId: z.string().min(1) }),
+  z.object({ t: z.literal("add_bot") }),
+  z.object({ t: z.literal("remove_bot"), playerId: z.string().min(1) }),
   z.object({ t: z.literal("rematch") }),
 ]);
 export type ClientMsg = z.infer<typeof clientMsg>;
@@ -140,6 +142,7 @@ export interface PublicPlayer {
   tiles: Tile[][];
   ready: boolean;
   connected: boolean;
+  isBot?: boolean;
   cosmetics: PlayerCosmetics;
   stats: PublicPlayerStats;
   inputDir?: Direction;

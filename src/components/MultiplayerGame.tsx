@@ -233,7 +233,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         state?.status === "crop_ban" ||
         state?.status === "crop_selection" ||
         state?.status === "prepare_countdown");
-    
+
     let audio: HTMLAudioElement | null = null;
     try {
       audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
@@ -302,16 +302,16 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     let winnerAudio: HTMLAudioElement | null = null;
     let loserAudio: HTMLAudioElement | null = null;
     let drawAudio: HTMLAudioElement | null = null;
-    
+
     try {
       winnerAudio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
       loserAudio = loserSoundRef.current ?? new Audio(loserSoundUrl);
       drawAudio = drawSoundRef.current ?? new Audio(drawSoundUrl);
-      
+
       winnerSoundRef.current = winnerAudio;
       loserSoundRef.current = loserAudio;
       drawSoundRef.current = drawAudio;
-      
+
       winnerAudio.loop = true;
       loserAudio.loop = true;
       drawAudio.loop = true;
@@ -343,7 +343,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       : selfId && state.winnerId !== selfId
         ? loserAudio
         : winnerAudio;
-        
+
     for (const sound of endSounds) {
       if (sound === audio) continue;
       if (sound) {
@@ -723,6 +723,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             onClaimSlot={() => send({ t: "claim_slot" })}
             onForceStart={() => send({ t: "start" })}
             onOpenSettings={() => setSettingsOpen(true)}
+            onAddBot={() => send({ t: "add_bot" })}
+            onRemoveBot={(playerId) => send({ t: "remove_bot", playerId })}
           />
         ) : (
           <LobbyView
@@ -735,6 +737,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             onLeaveSlot={() => send({ t: "leave_slot" })}
             onOpenSettings={() => setSettingsOpen(true)}
             onKick={(playerId) => send({ t: "kick", playerId })}
+            onAddBot={() => send({ t: "add_bot" })}
+            onRemoveBot={(playerId) => send({ t: "remove_bot", playerId })}
           />
         ))}
 
@@ -1200,6 +1204,8 @@ function LobbyView({
   onLeaveSlot,
   onOpenSettings,
   onKick,
+  onAddBot,
+  onRemoveBot,
 }: {
   self?: PublicPlayer;
   opp?: PublicPlayer;
@@ -1210,8 +1216,12 @@ function LobbyView({
   onLeaveSlot: () => void;
   onOpenSettings: () => void;
   onKick: (playerId: string) => void;
+  onAddBot: () => void;
+  onRemoveBot: (playerId: string) => void;
 }) {
   const waitingForOpponent = !opp;
+  const canAddBot = isHost && state.status === "lobby" && !opp;
+  const oppBotId = opp?.isBot ? opp.id : undefined;
   const readyCount = [self, opp].filter((p) => p?.ready).length;
   const settings = state.settings ?? DEFAULT_ROOM_SETTINGS;
   return (
@@ -1265,7 +1275,8 @@ function LobbyView({
           side="right"
           hostId={state.hostId}
           canKick={isHost && Boolean(opp)}
-          onKick={onKick}
+          onKick={(id) => (oppBotId ? onRemoveBot(id) : onKick(id))}
+          kickLabel={oppBotId ? "REMOVE BOT" : "KICK"}
         />
       </div>
 
@@ -1283,6 +1294,18 @@ function LobbyView({
             <span className="font-pixel text-[12px]">{self?.ready ? "UNREADY" : "READY UP"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>
           </button>
+          {canAddBot && (
+            <button
+              onClick={() => {
+                SFX.click();
+                onAddBot();
+              }}
+              className="pixel-btn lobby-ready-btn"
+            >
+              <span className="font-pixel text-[12px]">ADD BOT</span>
+              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+            </button>
+          )}
           {isHost && opp && (
             <button
               onClick={() => {
@@ -1782,6 +1805,7 @@ function PlayerCard({
   hostId,
   canKick = false,
   onKick,
+  kickLabel = "KICK",
 }: {
   player?: PublicPlayer;
   label: string;
@@ -1789,6 +1813,7 @@ function PlayerCard({
   hostId?: string;
   canKick?: boolean;
   onKick?: (playerId: string) => void;
+  kickLabel?: string;
 }) {
   const ready = Boolean(player?.ready);
   return (
@@ -1801,6 +1826,9 @@ function PlayerCard({
       <div className="lobby-player-topline">
         <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</span>
         <div className="flex items-center gap-2">
+          {player?.isBot && (
+            <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">BOT</span>
+          )}
           {player?.id === hostId && (
             <span className="font-pixel text-[7px] text-[var(--gold)]">HOST</span>
           )}
@@ -1839,7 +1867,7 @@ function PlayerCard({
           className="pixel-btn mt-3 px-3 py-2"
           data-accent="true"
         >
-          <span className="font-pixel text-[8px]">KICK</span>
+          <span className="font-pixel text-[8px]">{kickLabel}</span>
         </button>
       )}
     </article>
@@ -2019,6 +2047,8 @@ function SpectatorLobbyView({
   onClaimSlot,
   onForceStart,
   onOpenSettings,
+  onAddBot,
+  onRemoveBot,
 }: {
   players: PublicPlayer[];
   state: PublicMatchState;
@@ -2026,8 +2056,11 @@ function SpectatorLobbyView({
   onClaimSlot: () => void;
   onForceStart: () => void;
   onOpenSettings: () => void;
+  onAddBot: () => void;
+  onRemoveBot: (playerId: string) => void;
 }) {
   const slotsFull = players.length >= state.settings.maxPlayers;
+  const canAddBot = isHost && state.status === "lobby" && !slotsFull;
   return (
     <section className="lobby-stage relative z-10 w-full max-w-5xl">
       <div className="lobby-title-card pixel-panel">
@@ -2052,11 +2085,27 @@ function SpectatorLobbyView({
       />
 
       <div className="lobby-versus-grid">
-        <PlayerCard player={players[0]} label="PLAYER 1" side="left" hostId={state.hostId} />
+        <PlayerCard
+          player={players[0]}
+          label="PLAYER 1"
+          side="left"
+          hostId={state.hostId}
+          canKick={isHost && state.status === "lobby" && Boolean(players[0]?.isBot)}
+          onKick={onRemoveBot}
+          kickLabel="REMOVE BOT"
+        />
         <div className="lobby-vs-core" aria-hidden>
           <span>VS</span>
         </div>
-        <PlayerCard player={players[1]} label="PLAYER 2" side="right" hostId={state.hostId} />
+        <PlayerCard
+          player={players[1]}
+          label="PLAYER 2"
+          side="right"
+          hostId={state.hostId}
+          canKick={isHost && state.status === "lobby" && Boolean(players[1]?.isBot)}
+          onKick={onRemoveBot}
+          kickLabel="REMOVE BOT"
+        />
       </div>
 
       <div className="lobby-ready-row">
@@ -2075,6 +2124,18 @@ function SpectatorLobbyView({
               {slotsFull ? "PLAYER SLOTS FULL" : "ENTER PLAYER SLOT"}
             </span>
           </button>
+          {canAddBot && (
+            <button
+              onClick={() => {
+                SFX.click();
+                onAddBot();
+              }}
+              className="pixel-btn lobby-ready-btn"
+            >
+              <span className="font-pixel text-[12px]">ADD BOT</span>
+              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+            </button>
+          )}
           {isHost && slotsFull && (
             <button
               onClick={() => {

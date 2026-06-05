@@ -52,6 +52,9 @@ interface PlayerState {
   combo: number;
   lastHarvestAt: number;
   comboCrops: CropId[];
+  isBot?: boolean;
+  botSeedRotation?: number;
+  botNextActAt?: number;
 }
 
 interface StoredRoomState {
@@ -68,7 +71,10 @@ interface StoredRoomState {
   hostId?: string;
   hostSessionId?: string;
   settings?: RoomSettings;
-  players: Omit<PlayerState, "connected" | "inputDir" | "lastMovementAt" | "lastActionAt">[];
+  players: Omit<
+    PlayerState,
+    "connected" | "inputDir" | "lastMovementAt" | "lastActionAt" | "botNextActAt"
+  >[];
   marketPrices?: Record<CropId, number>;
   banTurnPlayerId?: string;
 }
@@ -80,6 +86,9 @@ const GROWTH_INTERVAL_MS = 500;
 const PERSIST_INTERVAL_MS = 1000;
 const RECONNECT_GRACE_MS = 30_000;
 const MAX_SPECTATORS = 5;
+const BOT_TICK_MS = 150;
+const BOT_NAMES = ["บอทมะลิ", "บอทข้าวหอม", "บอทตะวัน", "บอทใบเตย", "บอทมะนาว"];
+const BOT_COSMETICS: PlayerCosmetics = { hat: "#8bc967", shirt: "#4cc2ee", pants: "#4a2f5c" };
 
 interface SocketAttachment {
   playerId?: string;
@@ -116,6 +125,8 @@ export class MatchRoom implements DurableObject {
   private snapshotTimer?: ReturnType<typeof setInterval>;
   private growthTimer?: ReturnType<typeof setInterval>;
   private phaseTimer?: ReturnType<typeof setTimeout>;
+  private botTimer?: ReturnType<typeof setInterval>;
+  private botPlans = new Map<string, BotPlan>();
 
   constructor(
     private ctx: DurableObjectState,
@@ -192,6 +203,16 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
+    if (msg.t === "add_bot") {
+      this.addBot(ws);
+      return;
+    }
+
+    if (msg.t === "remove_bot") {
+      this.removeBot(ws, msg.playerId);
+      return;
+    }
+
     if (this.wsToRole.get(ws) !== "player") return;
     const playerId = this.wsToPlayer.get(ws);
     if (!playerId) return;
@@ -249,24 +270,7 @@ export class MatchRoom implements DurableObject {
           return;
         }
 
-        player.ready = true;
-
-        for (const p of this.players.values()) {
-          if (p.id !== player.id && !p.ready && p.bannedCrop === player.bannedCrop) {
-            p.bannedCrop = undefined;
-          }
-        }
-
-        const nextPlayer = [...this.players.values()].find((p) => p.id !== player.id);
-        if (nextPlayer && !nextPlayer.ready) {
-          this.banTurnPlayerId = nextPlayer.id;
-          this.banEndsAt = Date.now() + CROP_BAN_MS;
-          this.scheduleAlarm();
-          if (this.phaseTimer) clearTimeout(this.phaseTimer);
-          this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
-        } else {
-          this.maybeFastForwardCropBan();
-        }
+        this.commitBanTurnReady(player);
 
         this.persist();
         this.broadcastSnapshot();
@@ -290,6 +294,7 @@ export class MatchRoom implements DurableObject {
     if (msg.t === "rematch") {
       if (this.status !== "ended") return;
       player.ready = true;
+      this.markBotsReady();
       const allReady = [...this.players.values()].every((p) => p.ready);
       if (this.players.size === this.settings.maxPlayers && allReady) this.resetForRematch();
       this.persist();
@@ -366,89 +371,94 @@ export class MatchRoom implements DurableObject {
       this.advanceMovement(now);
       if (msg.pos) player.pos = clampPos(msg.pos);
       if (msg.dir) player.dir = msg.dir;
-      player.lastActionAt = now;
-      if (player.tool === "seed" && !isSelectedCrop(player.seedChoice, player.selectedCrops)) {
-        player.seedChoice = normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds())[0];
-      }
-      const result = applyAction({
-        tiles: player.tiles,
-        coins: player.coins,
-        pos: player.pos,
-        dir: player.dir,
-        tool: player.tool,
-        seedChoice: player.seedChoice,
-        marketPrices: this.marketPrices,
-        now,
-      });
-      player.tiles = result.tiles;
-      player.coins = result.coins;
-      let coinsBonus = 0;
-      for (const ev of result.events) {
-        if (ev.kind === "harvest") {
-          player.stats.harvests += 1;
-          player.stats.cropHarvests[ev.cropId] += 1;
-          if (ev.reward > 0) {
-            const { bonus, nextState } = updateComboAndGetBonus(
-              {
-                combo: player.combo,
-                lastHarvestAt: player.lastHarvestAt,
-                crops: player.comboCrops,
-              },
-              ev.cropId,
-              ev.reward,
-              now,
-            );
-            player.combo = nextState.combo;
-            player.lastHarvestAt = nextState.lastHarvestAt;
-            player.comboCrops = nextState.crops;
-            coinsBonus += bonus;
-            ev.reward += bonus;
-
-            // Update dynamic market prices
-            const basePrice = CROPS[ev.cropId].sellPrice;
-            const currentPrice = this.marketPrices[ev.cropId];
-            const safeCurrentPrice =
-              typeof currentPrice === "number" && Number.isFinite(currentPrice)
-                ? currentPrice
-                : basePrice;
-            this.marketPrices[ev.cropId] = Math.max(
-              basePrice * 0.5,
-              safeCurrentPrice - basePrice * 0.1,
-            );
-            for (const cId of Object.keys(this.marketPrices) as CropId[]) {
-              if (cId !== ev.cropId) {
-                const otherBase = CROPS[cId].sellPrice;
-                const otherCurrent = this.marketPrices[cId];
-                const safeOtherCurrent =
-                  typeof otherCurrent === "number" && Number.isFinite(otherCurrent)
-                    ? otherCurrent
-                    : otherBase;
-                this.marketPrices[cId] = Math.min(
-                  otherBase * 1.2,
-                  safeOtherCurrent + otherBase * 0.03,
-                );
-              }
-            }
-          } else {
-            player.combo = 0;
-            player.lastHarvestAt = now;
-            player.comboCrops = [];
-          }
-          player.stats.coinsEarned += ev.reward;
-        }
-        this.pendingEvents.push({ ...ev, playerId });
-      }
-      player.coins += coinsBonus;
-      if (player.coins >= this.settings.targetCoins) this.endMatch(playerId, "race");
-      else {
-        this.persist();
-        this.broadcastSnapshot();
-      }
-      if (this.pendingEvents.length) {
-        this.broadcast({ t: "events", events: this.pendingEvents });
-        this.pendingEvents = [];
-      }
+      this.resolvePlayerAction(player, now);
       return;
+    }
+  }
+
+  private resolvePlayerAction(player: PlayerState, now: number): void {
+    const playerId = player.id;
+    player.lastActionAt = now;
+    if (player.tool === "seed" && !isSelectedCrop(player.seedChoice, player.selectedCrops)) {
+      player.seedChoice = normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds())[0];
+    }
+    const result = applyAction({
+      tiles: player.tiles,
+      coins: player.coins,
+      pos: player.pos,
+      dir: player.dir,
+      tool: player.tool,
+      seedChoice: player.seedChoice,
+      marketPrices: this.marketPrices,
+      now,
+    });
+    player.tiles = result.tiles;
+    player.coins = result.coins;
+    let coinsBonus = 0;
+    for (const ev of result.events) {
+      if (ev.kind === "harvest") {
+        player.stats.harvests += 1;
+        player.stats.cropHarvests[ev.cropId] += 1;
+        if (ev.reward > 0) {
+          const { bonus, nextState } = updateComboAndGetBonus(
+            {
+              combo: player.combo,
+              lastHarvestAt: player.lastHarvestAt,
+              crops: player.comboCrops,
+            },
+            ev.cropId,
+            ev.reward,
+            now,
+          );
+          player.combo = nextState.combo;
+          player.lastHarvestAt = nextState.lastHarvestAt;
+          player.comboCrops = nextState.crops;
+          coinsBonus += bonus;
+          ev.reward += bonus;
+
+          // Update dynamic market prices
+          const basePrice = CROPS[ev.cropId].sellPrice;
+          const currentPrice = this.marketPrices[ev.cropId];
+          const safeCurrentPrice =
+            typeof currentPrice === "number" && Number.isFinite(currentPrice)
+              ? currentPrice
+              : basePrice;
+          this.marketPrices[ev.cropId] = Math.max(
+            basePrice * 0.5,
+            safeCurrentPrice - basePrice * 0.1,
+          );
+          for (const cId of Object.keys(this.marketPrices) as CropId[]) {
+            if (cId !== ev.cropId) {
+              const otherBase = CROPS[cId].sellPrice;
+              const otherCurrent = this.marketPrices[cId];
+              const safeOtherCurrent =
+                typeof otherCurrent === "number" && Number.isFinite(otherCurrent)
+                  ? otherCurrent
+                  : otherBase;
+              this.marketPrices[cId] = Math.min(
+                otherBase * 1.2,
+                safeOtherCurrent + otherBase * 0.03,
+              );
+            }
+          }
+        } else {
+          player.combo = 0;
+          player.lastHarvestAt = now;
+          player.comboCrops = [];
+        }
+        player.stats.coinsEarned += ev.reward;
+      }
+      this.pendingEvents.push({ ...ev, playerId });
+    }
+    player.coins += coinsBonus;
+    if (player.coins >= this.settings.targetCoins) this.endMatch(playerId, "race");
+    else {
+      this.persist();
+      this.broadcastSnapshot();
+    }
+    if (this.pendingEvents.length) {
+      this.broadcast({ t: "events", events: this.pendingEvents });
+      this.pendingEvents = [];
     }
   }
 
@@ -479,9 +489,11 @@ export class MatchRoom implements DurableObject {
       this.countdownEndsAt = undefined;
       this.banEndsAt = undefined;
       this.selectionEndsAt = undefined;
+      this.clearBotTimer();
       for (const player of this.players.values()) {
         player.ready = false;
         player.bannedCrop = undefined;
+        player.botNextActAt = undefined;
       }
     }
     this.dropDisconnectedWaitingPlayers();
@@ -553,7 +565,7 @@ export class MatchRoom implements DurableObject {
         p.id,
         {
           ...p,
-          connected: false,
+          connected: Boolean(p.isBot),
           disconnectedAt: undefined,
           selectedCrops: normalizeSelectedCrops(
             p.selectedCrops,
@@ -570,6 +582,7 @@ export class MatchRoom implements DurableObject {
           combo: p.combo ?? 0,
           lastHarvestAt: p.lastHarvestAt ?? 0,
           comboCrops: p.comboCrops ?? [],
+          botNextActAt: undefined,
         },
       ]),
     );
@@ -584,6 +597,13 @@ export class MatchRoom implements DurableObject {
       }
     }
     if (this.status === "playing") this.startTimers();
+    if (
+      this.status === "crop_ban" ||
+      this.status === "crop_selection" ||
+      this.status === "playing"
+    ) {
+      this.ensureBotTimer();
+    }
     this.scheduleAlarm();
   }
 
@@ -594,6 +614,7 @@ export class MatchRoom implements DurableObject {
         inputDir: _inputDir,
         lastMovementAt: _lastMovementAt,
         lastActionAt: _lastActionAt,
+        botNextActAt: _botNextActAt,
         ...p
       }) => p,
     );
@@ -715,6 +736,71 @@ export class MatchRoom implements DurableObject {
     }
     this.ensureHost();
     for (const player of this.players.values()) player.ready = false;
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private addBot(ws: WebSocket): void {
+    if (!this.canEditRoom(ws) || this.status !== "lobby") {
+      this.sendTo(ws, { t: "error", code: "host_only", message: "HOST เท่านั้นที่เพิ่มบอทได้" });
+      return;
+    }
+    if (this.players.size >= this.settings.maxPlayers) {
+      this.sendTo(ws, { t: "error", code: "room_full", message: "ช่องผู้เล่นเต็มแล้ว" });
+      return;
+    }
+    if ([...this.players.values()].some((p) => p.ready)) {
+      this.sendTo(ws, { t: "error", code: "ready_locked", message: "มีผู้เล่นกด READY แล้ว" });
+      return;
+    }
+    const playerId = crypto.randomUUID();
+    const sessionId = `bot:${crypto.randomUUID()}`;
+    const startX = this.players.size === 0 ? 3 : 8;
+    const used = new Set([...this.players.values()].filter((p) => p.isBot).map((p) => p.name));
+    const name = BOT_NAMES.find((n) => !used.has(n)) ?? "บอท";
+    this.players.set(playerId, {
+      id: playerId,
+      sessionId,
+      name,
+      cosmetics: BOT_COSMETICS,
+      coins: 50,
+      pos: { x: startX, y: 4 },
+      dir: "down",
+      tool: "hoe",
+      seedChoice: DEFAULT_SELECTED_CROPS[0],
+      selectedCrops: fillSelectedCrops(),
+      bannedCrop: undefined,
+      tiles: makeEmptyField(),
+      ready: false,
+      connected: true,
+      disconnectedAt: undefined,
+      stats: emptyStats(),
+      inputDir: undefined,
+      lastMovementAt: Date.now(),
+      lastActionAt: 0,
+      combo: 0,
+      lastHarvestAt: 0,
+      comboCrops: [],
+      isBot: true,
+      botSeedRotation: 0,
+    });
+    for (const p of this.players.values()) p.ready = false;
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private removeBot(ws: WebSocket, targetId: string): void {
+    if (!this.canEditRoom(ws) || this.status !== "lobby") {
+      this.sendTo(ws, { t: "error", code: "host_only", message: "HOST เท่านั้นที่ลบบอทได้" });
+      return;
+    }
+    const target = this.players.get(targetId);
+    if (!target || !target.isBot) {
+      this.sendTo(ws, { t: "error", code: "missing_bot", message: "ไม่พบบอทนี้" });
+      return;
+    }
+    this.players.delete(targetId);
+    for (const p of this.players.values()) p.ready = false;
     this.persist();
     this.broadcastSnapshot();
   }
@@ -890,7 +976,11 @@ export class MatchRoom implements DurableObject {
       }
       const spectatorId = crypto.randomUUID();
       const spectatorSessionId = sessionId ?? crypto.randomUUID();
-      if (!this.hostSessionId) this.hostSessionId = spectatorSessionId;
+      let claimedHost = false;
+      if (!this.hostSessionId) {
+        this.hostSessionId = spectatorSessionId;
+        claimedHost = true;
+      }
       const spectatorCosmetics = cosmeticsSchema.parse(cosmetics);
       ws.serializeAttachment({
         playerId: spectatorId,
@@ -909,6 +999,8 @@ export class MatchRoom implements DurableObject {
         host: this.hostSessionId === spectatorSessionId,
         state: this.getFilteredState(role, spectatorId),
       });
+      // Persist so a spectator-host's claim survives DO hibernation/reload.
+      if (claimedHost) this.persist();
       this.broadcastSnapshot();
       return;
     }
@@ -996,16 +1088,23 @@ export class MatchRoom implements DurableObject {
     this.countdownEndsAt = undefined;
     this.banEndsAt = undefined;
     this.selectionEndsAt = undefined;
+    this.clearBotTimer();
     for (const player of this.players.values()) {
       player.ready = false;
       player.bannedCrop = undefined;
+      player.botNextActAt = undefined;
     }
     this.persist();
     this.broadcastSnapshot();
   }
 
+  private markBotsReady(): void {
+    for (const p of this.players.values()) if (p.isBot) p.ready = true;
+  }
+
   private maybeStartCountdown(): void {
     if (this.status !== "lobby") return;
+    this.markBotsReady();
     if (this.players.size !== this.settings.maxPlayers) return;
     if (![...this.players.values()].every((p) => p.ready)) return;
     this.status = "countdown";
@@ -1035,11 +1134,33 @@ export class MatchRoom implements DurableObject {
       this.banTurnPlayerId = undefined;
     }
 
+    for (const p of this.players.values()) p.botNextActAt = undefined;
+    this.botPlans.clear();
+    this.ensureBotTimer();
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
     if (this.phaseTimer) clearTimeout(this.phaseTimer);
     this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
+  }
+
+  private commitBanTurnReady(player: PlayerState): void {
+    player.ready = true;
+    for (const p of this.players.values()) {
+      if (p.id !== player.id && !p.ready && p.bannedCrop === player.bannedCrop) {
+        p.bannedCrop = undefined;
+      }
+    }
+    const nextPlayer = [...this.players.values()].find((p) => p.id !== player.id);
+    if (nextPlayer && !nextPlayer.ready) {
+      this.banTurnPlayerId = nextPlayer.id;
+      this.banEndsAt = Date.now() + CROP_BAN_MS;
+      this.scheduleAlarm();
+      if (this.phaseTimer) clearTimeout(this.phaseTimer);
+      this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
+    } else {
+      this.maybeFastForwardCropBan();
+    }
   }
 
   private maybeFastForwardCropBan(): void {
@@ -1103,7 +1224,9 @@ export class MatchRoom implements DurableObject {
       p.ready = false;
       p.selectedCrops = [];
       p.seedChoice = firstAllowedCrop(banned);
+      p.botNextActAt = undefined;
     }
+    this.ensureBotTimer();
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
@@ -1166,8 +1289,12 @@ export class MatchRoom implements DurableObject {
       p.combo = 0;
       p.lastHarvestAt = 0;
       p.comboCrops = [];
+      p.botSeedRotation = 0;
+      p.botNextActAt = undefined;
     }
+    this.botPlans.clear();
     this.startTimers();
+    this.ensureBotTimer();
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
@@ -1176,6 +1303,117 @@ export class MatchRoom implements DurableObject {
   private startTimers(): void {
     this.snapshotTimer ??= setInterval(() => this.tickSnapshot(), SNAPSHOT_INTERVAL_MS);
     this.growthTimer ??= setInterval(() => this.tickGrowthAll(), GROWTH_INTERVAL_MS);
+  }
+
+  private hasBots(): boolean {
+    return [...this.players.values()].some((p) => p.isBot);
+  }
+
+  private ensureBotTimer(): void {
+    if (!this.hasBots()) return;
+    this.botTimer ??= setInterval(() => this.botTick(), BOT_TICK_MS);
+  }
+
+  private clearBotTimer(): void {
+    if (this.botTimer) {
+      clearInterval(this.botTimer);
+      this.botTimer = undefined;
+    }
+    this.botPlans.clear();
+  }
+
+  // ---- Bot AI ------------------------------------------------------------
+
+  private botTick(): void {
+    if (!this.hasBots()) {
+      this.clearBotTimer();
+      return;
+    }
+    const now = Date.now();
+    if (this.status === "crop_ban") this.botBanTick(now);
+    else if (this.status === "crop_selection") this.botSelectionTick(now);
+    else if (this.status === "playing") this.botFarmTick(now);
+  }
+
+  private botBanTick(now: number): void {
+    const bot = this.banTurnPlayerId ? this.players.get(this.banTurnPlayerId) : undefined;
+    if (!bot || !bot.isBot || bot.ready) return;
+    if (bot.botNextActAt === undefined) {
+      bot.botNextActAt = now + randInt(800, 1800);
+      return;
+    }
+    if (now < bot.botNextActAt) return;
+    bot.botNextActAt = undefined;
+    const taken = [...this.players.values()]
+      .filter((p) => p.id !== bot.id && p.ready && p.bannedCrop)
+      .map((p) => p.bannedCrop!);
+    const allowed = (Object.keys(CROPS) as CropId[]).filter((id) => !taken.includes(id));
+    // Medium: ban a strong crop to deny the rival (top by sell price).
+    const pick = [...allowed].sort((a, b) => CROPS[b].sellPrice - CROPS[a].sellPrice);
+    bot.bannedCrop = pick[randInt(0, Math.min(2, pick.length - 1))] ?? allowed[0];
+    this.commitBanTurnReady(bot);
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private botSelectionTick(now: number): void {
+    let changed = false;
+    for (const bot of this.players.values()) {
+      if (!bot.isBot || bot.ready) continue;
+      if (bot.botNextActAt === undefined) {
+        bot.botNextActAt = now + randInt(1200, 2600);
+        continue;
+      }
+      if (now < bot.botNextActAt) continue;
+      bot.botNextActAt = undefined;
+      bot.selectedCrops = pickBotCrops(this.bannedCropIds());
+      bot.seedChoice = bot.selectedCrops[0];
+      bot.ready = true;
+      changed = true;
+    }
+    if (changed) {
+      this.maybeStartPrepareCountdown();
+      this.persist();
+      this.broadcastSnapshot();
+    }
+  }
+
+  private botFarmTick(now: number): void {
+    let moved = false;
+    for (const bot of this.players.values()) {
+      if (!bot.isBot) continue;
+      let plan = this.botPlans.get(bot.id);
+      if (!plan || !isPlanValid(bot, plan)) {
+        const next = chooseBotPlan(bot);
+        if (!next) {
+          this.botPlans.delete(bot.id);
+          continue;
+        }
+        plan = next;
+        this.botPlans.set(bot.id, plan);
+      }
+      const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+      const dx = plan.sx - bot.pos.x;
+      const dy = plan.sy - bot.pos.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 0.18) {
+        bot.pos.x += Math.max(-step, Math.min(step, dx));
+        bot.pos.y += Math.max(-step, Math.min(step, dy));
+        bot.dir =
+          Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+        moved = true;
+        continue;
+      }
+      // Arrived: snap, face target, perform the planned action.
+      bot.pos = { x: plan.sx, y: plan.sy };
+      bot.dir = plan.dir;
+      bot.tool = plan.tool;
+      if (plan.tool === "seed") bot.seedChoice = plan.seed;
+      this.botPlans.delete(bot.id);
+      bot.botSeedRotation = (bot.botSeedRotation ?? 0) + (plan.tool === "seed" ? 1 : 0);
+      this.resolvePlayerAction(bot, now);
+    }
+    if (moved) this.dirty = true;
   }
 
   private tickSnapshot(): void {
@@ -1282,6 +1520,7 @@ export class MatchRoom implements DurableObject {
       clearInterval(this.growthTimer);
       this.growthTimer = undefined;
     }
+    this.clearBotTimer();
     for (const p of this.players.values()) p.ready = false;
     this.persist();
     this.broadcast({ t: "end", winnerId, reason });
@@ -1334,6 +1573,7 @@ export class MatchRoom implements DurableObject {
       tiles: p.tiles,
       ready: p.ready,
       connected: p.connected,
+      isBot: p.isBot,
       cosmetics: cosmeticsSchema.parse(p.cosmetics ?? DEFAULT_COSMETICS),
       stats: p.stats,
       inputDir: p.inputDir,
@@ -1405,6 +1645,135 @@ export class MatchRoom implements DurableObject {
       /* noop */
     }
   }
+}
+
+interface BotPlan {
+  tx: number;
+  ty: number;
+  sx: number;
+  sy: number;
+  dir: Direction;
+  tool: Tool;
+  seed: CropId;
+}
+
+function randInt(min: number, max: number): number {
+  return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function pickBotCrops(banned: readonly CropId[]): CropId[] {
+  const allowed = (Object.keys(CROPS) as CropId[]).filter((id) => !banned.includes(id));
+  // Medium skill: favour crops with the best coins-per-second efficiency.
+  allowed.sort(
+    (a, b) => CROPS[b].sellPrice / CROPS[b].growTime - CROPS[a].sellPrice / CROPS[a].growTime,
+  );
+  return allowed.slice(0, DEFAULT_SELECTED_CROPS.length);
+}
+
+function chooseBotSeed(selected: CropId[], coins: number, rotation: number): CropId | undefined {
+  const n = selected.length;
+  if (n === 0) return undefined;
+  for (let i = 0; i < n; i++) {
+    const c = selected[(rotation + i) % n];
+    if (coins >= CROPS[c].seedCost) return c;
+  }
+  return undefined;
+}
+
+// What single action advances this tile, or null if it should be left alone.
+function tileNeeds(
+  tile: Tile,
+  selected: CropId[],
+  coins: number,
+  rotation: number,
+): { tool: Tool; seed?: CropId } | null {
+  if (tile.crop) {
+    if (tile.crop.stage >= 2) return { tool: "hoe" }; // harvest (tool ignored when ripe/withered)
+    if (tile.type !== "watered") return { tool: "watering_can" }; // water growing crop
+    return null; // growing on watered soil — wait
+  }
+  if (tile.type === "grass") return { tool: "hoe" }; // till
+  const seed = chooseBotSeed(selected, coins, rotation); // tilled/watered empty → plant
+  if (!seed) return null;
+  return { tool: "seed", seed };
+}
+
+function tilePriority(tile: Tile, tool: Tool): number {
+  if (tile.crop) {
+    if (tile.crop.stage === 2) return 0; // ripe harvest = income now
+    if (tile.crop.stage === 3) return 4; // withered = clear later
+    return 1; // water growing crop
+  }
+  return tool === "hoe" ? 3 : 2; // till vs plant
+}
+
+function neighborStand(
+  tx: number,
+  ty: number,
+  bot: { pos: { x: number; y: number } },
+): { sx: number; sy: number; dir: Direction } {
+  const cands = (
+    [
+      { sx: tx, sy: ty + 1, dir: "up" },
+      { sx: tx, sy: ty - 1, dir: "down" },
+      { sx: tx + 1, sy: ty, dir: "left" },
+      { sx: tx - 1, sy: ty, dir: "right" },
+    ] as { sx: number; sy: number; dir: Direction }[]
+  ).filter((c) => c.sx >= 0 && c.sx < COLS && c.sy >= 0 && c.sy < ROWS);
+  cands.sort(
+    (a, b) =>
+      Math.hypot(a.sx - bot.pos.x, a.sy - bot.pos.y) -
+      Math.hypot(b.sx - bot.pos.x, b.sy - bot.pos.y),
+  );
+  return cands[0];
+}
+
+function chooseBotPlan(bot: {
+  pos: { x: number; y: number };
+  coins: number;
+  selectedCrops: CropId[];
+  botSeedRotation?: number;
+  tiles: Tile[][];
+}): BotPlan | null {
+  const rotation = bot.botSeedRotation ?? 0;
+  let best: { x: number; y: number; tool: Tool; seed?: CropId } | null = null;
+  let bestPri = 99;
+  let bestDist = Infinity;
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      const tile = bot.tiles[y][x];
+      const needs = tileNeeds(tile, bot.selectedCrops, bot.coins, rotation);
+      if (!needs) continue;
+      const pri = tilePriority(tile, needs.tool);
+      const d = Math.hypot(x - bot.pos.x, y - bot.pos.y);
+      if (pri < bestPri || (pri === bestPri && d < bestDist)) {
+        best = { x, y, tool: needs.tool, seed: needs.seed };
+        bestPri = pri;
+        bestDist = d;
+      }
+    }
+  }
+  if (!best) return null;
+  const stand = neighborStand(best.x, best.y, bot);
+  return {
+    tx: best.x,
+    ty: best.y,
+    sx: stand.sx,
+    sy: stand.sy,
+    dir: stand.dir,
+    tool: best.tool,
+    seed: best.seed ?? bot.selectedCrops[0],
+  };
+}
+
+function isPlanValid(
+  bot: { coins: number; selectedCrops: CropId[]; botSeedRotation?: number; tiles: Tile[][] },
+  plan: BotPlan,
+): boolean {
+  const tile = bot.tiles[plan.ty]?.[plan.tx];
+  if (!tile) return false;
+  const needs = tileNeeds(tile, bot.selectedCrops, bot.coins, bot.botSeedRotation ?? 0);
+  return Boolean(needs) && needs!.tool === plan.tool;
 }
 
 function emptyStats(): PublicPlayerStats {
