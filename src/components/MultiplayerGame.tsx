@@ -22,7 +22,7 @@ import { applyAction, facingTile } from "@/lib/game-logic";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
-import { SFX } from "@/lib/sfx";
+import { SFX, setMuted } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
 import gamePlayMusicUrl from "../../game_play.wav";
 import winnerSoundUrl from "../../winner_sound.mp3";
@@ -233,10 +233,17 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         state?.status === "crop_ban" ||
         state?.status === "crop_selection" ||
         state?.status === "prepare_countdown");
-    const audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
-    lobbyMusicRef.current = audio;
-    audio.loop = true;
-    audio.volume = 0.35;
+    
+    let audio: HTMLAudioElement | null = null;
+    try {
+      audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
+      lobbyMusicRef.current = audio;
+      audio.loop = true;
+      audio.volume = 0.35;
+    } catch (e) {
+      console.warn("Failed to initialize lobby music:", e);
+      return;
+    }
 
     if (!shouldPlayLobbyMusic) {
       audio.pause();
@@ -245,7 +252,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     }
 
     const play = () => {
-      void audio.play().catch(() => undefined);
+      if (audio) void audio.play().catch(() => undefined);
     };
     play();
     window.addEventListener("pointerdown", play, { once: true });
@@ -254,16 +261,22 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     return () => {
       window.removeEventListener("pointerdown", play);
       window.removeEventListener("keydown", play);
-      audio.pause();
+      if (audio) audio.pause();
     };
   }, [musicEnabled, state?.status]);
 
   useEffect(() => {
     const shouldPlayGameMusic = musicEnabled && state?.status === "playing";
-    const audio = gamePlayMusicRef.current ?? new Audio(gamePlayMusicUrl);
-    gamePlayMusicRef.current = audio;
-    audio.loop = true;
-    audio.volume = 0.3;
+    let audio: HTMLAudioElement | null = null;
+    try {
+      audio = gamePlayMusicRef.current ?? new Audio(gamePlayMusicUrl);
+      gamePlayMusicRef.current = audio;
+      audio.loop = true;
+      audio.volume = 0.3;
+    } catch (e) {
+      console.warn("Failed to initialize gameplay music:", e);
+      return;
+    }
 
     if (!shouldPlayGameMusic) {
       audio.pause();
@@ -272,7 +285,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     }
 
     const play = () => {
-      void audio.play().catch(() => undefined);
+      if (audio) void audio.play().catch(() => undefined);
     };
     play();
     window.addEventListener("pointerdown", play, { once: true });
@@ -281,29 +294,42 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     return () => {
       window.removeEventListener("pointerdown", play);
       window.removeEventListener("keydown", play);
-      audio.pause();
+      if (audio) audio.pause();
     };
   }, [musicEnabled, state?.status]);
 
   useEffect(() => {
-    const winnerAudio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
-    const loserAudio = loserSoundRef.current ?? new Audio(loserSoundUrl);
-    const drawAudio = drawSoundRef.current ?? new Audio(drawSoundUrl);
-    winnerSoundRef.current = winnerAudio;
-    loserSoundRef.current = loserAudio;
-    drawSoundRef.current = drawAudio;
-    winnerAudio.loop = true;
-    loserAudio.loop = true;
-    drawAudio.loop = true;
-    winnerAudio.volume = 0.22;
-    loserAudio.volume = 0.22;
-    drawAudio.volume = 0.22;
+    let winnerAudio: HTMLAudioElement | null = null;
+    let loserAudio: HTMLAudioElement | null = null;
+    let drawAudio: HTMLAudioElement | null = null;
+    
+    try {
+      winnerAudio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
+      loserAudio = loserSoundRef.current ?? new Audio(loserSoundUrl);
+      drawAudio = drawSoundRef.current ?? new Audio(drawSoundUrl);
+      
+      winnerSoundRef.current = winnerAudio;
+      loserSoundRef.current = loserAudio;
+      drawSoundRef.current = drawAudio;
+      
+      winnerAudio.loop = true;
+      loserAudio.loop = true;
+      drawAudio.loop = true;
+      winnerAudio.volume = 0.22;
+      loserAudio.volume = 0.22;
+      drawAudio.volume = 0.22;
+    } catch (e) {
+      console.warn("Failed to initialize match outcome music:", e);
+      return;
+    }
 
     const endSounds = [winnerAudio, loserAudio, drawAudio];
     const stopEndSounds = () => {
       for (const sound of endSounds) {
-        sound.pause();
-        sound.currentTime = 0;
+        if (sound) {
+          sound.pause();
+          sound.currentTime = 0;
+        }
       }
     };
 
@@ -317,14 +343,17 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       : selfId && state.winnerId !== selfId
         ? loserAudio
         : winnerAudio;
+        
     for (const sound of endSounds) {
       if (sound === audio) continue;
-      sound.pause();
-      sound.currentTime = 0;
+      if (sound) {
+        sound.pause();
+        sound.currentTime = 0;
+      }
     }
 
     const play = () => {
-      void audio.play().catch(() => undefined);
+      if (audio) void audio.play().catch(() => undefined);
     };
     play();
     window.addEventListener("pointerdown", play, { once: true });
@@ -333,9 +362,43 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     return () => {
       window.removeEventListener("pointerdown", play);
       window.removeEventListener("keydown", play);
-      audio.pause();
+      if (audio) audio.pause();
     };
   }, [musicEnabled, selfId, state?.status, state?.winnerId]);
+
+  // Synchronize music/audio mute state with sfx setting
+  useEffect(() => {
+    setMuted(!musicEnabled);
+  }, [musicEnabled]);
+
+  // Clean up and release all audio elements on component unmount
+  useEffect(() => {
+    return () => {
+      const audios = [
+        lobbyMusicRef.current,
+        gamePlayMusicRef.current,
+        winnerSoundRef.current,
+        loserSoundRef.current,
+        drawSoundRef.current,
+      ];
+      for (const audio of audios) {
+        if (audio) {
+          try {
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+          } catch (e) {
+            console.error("Error cleaning up audio resource:", e);
+          }
+        }
+      }
+      lobbyMusicRef.current = null;
+      gamePlayMusicRef.current = null;
+      winnerSoundRef.current = null;
+      loserSoundRef.current = null;
+      drawSoundRef.current = null;
+    };
+  }, []);
 
   const toggleLobbyMusic = useCallback(() => {
     SFX.click();
