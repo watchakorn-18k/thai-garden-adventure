@@ -1064,7 +1064,9 @@ export class MatchRoom implements DurableObject {
         const bannedAlready = [...this.players.values()]
           .filter((p) => p.ready && p.bannedCrop)
           .map((p) => p.bannedCrop!);
-        const allowed = (Object.keys(CROPS) as CropId[]).filter((id) => !bannedAlready.includes(id));
+        const allowed = (Object.keys(CROPS) as CropId[]).filter(
+          (id) => !bannedAlready.includes(id),
+        );
         const randIdx = Math.floor(Math.random() * allowed.length);
         activePlayer.bannedCrop = allowed[randIdx];
       }

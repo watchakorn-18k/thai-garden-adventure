@@ -1426,7 +1426,9 @@ function CropBanView({
                 key={player.id}
                 className="pixel-chip font-pixel text-[8px]"
                 data-gold={player.ready ? "true" : undefined}
-                style={isPlayerTurn && !player.ready ? { border: "1px solid var(--gold)" } : undefined}
+                style={
+                  isPlayerTurn && !player.ready ? { border: "1px solid var(--gold)" } : undefined
+                }
               >
                 {player.name}:{" "}
                 {player.bannedCrop ? `แบน ${CROPS[player.bannedCrop].name}` : "ยังไม่เลือก"}
