@@ -35,6 +35,7 @@ export function updateComboAndGetBonus(
   cropId: CropId,
   baseReward: number,
   now: number,
+  comboMultiplier = 0.25,
 ): { bonus: number; nextState: ComboState } {
   if (baseReward === 0) {
     return {
@@ -54,8 +55,8 @@ export function updateComboAndGetBonus(
     nextCrops.push(cropId);
   }
 
-  // 1. Combo bonus: 25% * baseReward * min(combo, 6)
-  const comboBonus = nextCombo >= 2 ? Math.floor(baseReward * 0.25 * Math.min(nextCombo, 6)) : 0;
+  // 1. Combo bonus: multiplier * baseReward * min(combo, 6)
+  const comboBonus = nextCombo >= 2 ? Math.floor(baseReward * comboMultiplier * Math.min(nextCombo, 6)) : 0;
 
   // 2. Crop Rotation (variety) bonus: 15% * baseReward * (variety - 1)
   const variety = nextCrops.length;

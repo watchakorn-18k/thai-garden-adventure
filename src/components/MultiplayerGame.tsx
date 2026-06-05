@@ -55,9 +55,9 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
 };
 
 const STAGE_COPY: Record<RoomStage, { label: string; desc: string }> = {
-  classic: { label: "CLASSIC FIELD", desc: "สวนมาตรฐาน แข่งทำเหรียญไว" },
-  water: { label: "CANAL FIELD", desc: "คลองชลประทานล้อมสวน" },
-  festival: { label: "FESTIVAL NIGHT", desc: "บรรยากาศงานวัด โทนทอง" },
+  classic: { label: "สวนมาตรฐาน", desc: "สวนมาตรฐาน แข่งทำเหรียญไว" },
+  water: { label: "สวนริมคลอง", desc: "คลองชลประทานล้อมสวน" },
+  festival: { label: "ค่ำคืนงานวัด", desc: "บรรยากาศงานวัด โทนทอง" },
 };
 
 interface Props {
@@ -68,7 +68,7 @@ interface Props {
 export default function MultiplayerGame({ code, role = "player" }: Props) {
   const name = useMemo(() => {
     if (typeof window === "undefined") return "Player";
-    return localStorage.getItem("tg.name")?.trim() || "Player";
+    return localStorage.getItem("tg.name")?.trim() || "ผู้เล่น";
   }, []);
 
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
@@ -424,7 +424,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSpectator = matchRole === "spectator";
-  const currentRole = matchRole === "spectator" ? "SPECTATOR" : "PLAYER";
+  const currentRole = matchRole === "spectator" ? "ผู้ชม" : "ผู้เล่น";
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
   const renderedSelf = localPlayer ?? self;
   const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
@@ -660,7 +660,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     return (
       <CenterMsg
         main={lastError?.message ?? "กำลังเชื่อมต่อ..."}
-        sub={lastError ? `ROOM ${code}` : `ROOM ${code}`}
+        sub={lastError ? `ห้อง ${code}` : `ห้อง ${code}`}
       />
     );
   }
@@ -677,6 +677,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         settings={state.settings}
         status={status}
         role={matchRole}
+        combo={combo}
         outfit={
           !isSpectator && state.status !== "playing"
             ? {
@@ -710,8 +711,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           onClick={toggleLobbyMusic}
           className="pixel-btn fixed right-4 top-4 z-50 flex h-12 w-12 items-center justify-center p-0"
           data-active={musicEnabled ? "true" : undefined}
-          aria-label={musicEnabled ? "Mute lobby music" : "Play lobby music"}
-          title={musicEnabled ? "Mute lobby music" : "Play lobby music"}
+          aria-label={musicEnabled ? "ปิดเพลงล็อบบี้" : "เปิดเพลงล็อบบี้"}
+          title={musicEnabled ? "ปิดเพลงล็อบบี้" : "เปิดเพลงล็อบบี้"}
         >
           {musicEnabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
         </button>
@@ -835,7 +836,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
       )}
-      {currentRole === "SPECTATOR" &&
+      {isSpectator &&
         state.status !== "crop_ban" &&
         state.status !== "crop_selection" &&
         state.status !== "prepare_countdown" && (
@@ -872,7 +873,7 @@ function MultiplayerControlsGuide() {
       <div className="multi-guide pixel-panel px-5 py-4">
         <div className="multi-guide-head">
           <span className="font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">
-            DUEL GUIDE
+            คู่มือการแข่ง
           </span>
           <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
             แข่งทำคะแนน · เก็บเกี่ยวให้ไวกว่าอีกฝั่ง
@@ -890,7 +891,7 @@ function MultiplayerControlsGuide() {
               <kbd className="pixel-key pixel-key-sm">D</kbd>
             </div>
             <div>
-              <div className="font-pixel text-[9px] tracking-wider">MOVE</div>
+              <div className="font-pixel text-[9px] tracking-wider">เดิน</div>
               <div className="font-pixel text-[7px] text-[var(--muted-foreground)]">
                 ลูกศรก็ใช้ได้
               </div>
@@ -900,9 +901,9 @@ function MultiplayerControlsGuide() {
           <span className="multi-guide-rule" />
 
           <div className="multi-guide-actions">
-            <GuideAction keys="SPACE" label="USE" sub="ลงมือกับช่องตรงหน้า" />
-            <GuideAction keys="1 / 2 / 3" label="TOOL" sub="จอบ · น้ำ · เมล็ด" />
-            <GuideAction keys="R" label="READY" sub="พร้อมใน lobby / เลือกผัก" />
+            <GuideAction keys="SPACE" label="ใช้" sub="ลงมือกับช่องตรงหน้า" />
+            <GuideAction keys="1 / 2 / 3" label="เครื่องมือ" sub="จอบ · น้ำ · เมล็ด" />
+            <GuideAction keys="R" label="พร้อม" sub="พร้อมใน lobby / เลือกผัก" />
           </div>
         </div>
       </div>
@@ -1007,6 +1008,7 @@ function MatchHUD({
   settings,
   status,
   role,
+  combo,
   outfit,
 }: {
   code: string;
@@ -1023,6 +1025,7 @@ function MatchHUD({
   settings: RoomSettings;
   status: string;
   role: MatchRole;
+  combo: number;
   outfit?: {
     open: boolean;
     cosmetics: PlayerCosmetics;
@@ -1089,12 +1092,16 @@ function MatchHUD({
           <button
             onClick={copyRoom}
             className="flex items-center gap-3 text-left transition-transform active:translate-y-[1px]"
-            title="Copy room code"
+            title="คัดลอกรหัสห้อง"
           >
-            <span className="font-pixel text-[10px] text-[var(--muted-foreground)]">ROOM</span>
+            <span className="font-pixel text-[10px] text-[var(--muted-foreground)]">ห้อง</span>
             <span className="font-pixel text-[18px] text-[var(--gold)] tracking-[4px]">{code}</span>
             <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-              {copied === "ok" ? "COPIED" : copied === "fail" ? "COPY FAIL" : "COPY CODE"}
+              {copied === "ok"
+                ? "คัดลอกแล้ว"
+                : copied === "fail"
+                  ? "คัดลอกไม่สำเร็จ"
+                  : "คัดลอกรหัส"}
             </span>
           </button>
 
@@ -1105,6 +1112,38 @@ function MatchHUD({
           </div>
 
           <div className="flex items-center justify-end gap-4">
+            {combo >= 2 && state.status === "playing" && (
+              <div className="relative flex flex-col items-end gap-1">
+                <div
+                  className="font-pixel text-[10px]"
+                  style={{
+                    color: combo >= 5 ? "#ff6b6b" : "#ffd24a",
+                    textShadow: "1px 1px 0 #000",
+                  }}
+                >
+                  COMBO x{combo}
+                </div>
+                <div
+                  style={{
+                    width: 60,
+                    height: 5,
+                    background: "#1a0f1f",
+                    boxShadow: "0 0 0 2px var(--border)",
+                    overflow: "hidden",
+                  }}
+                >
+                  <div
+                    key={combo}
+                    className="combo-bar-fill"
+                    style={{
+                      height: "100%",
+                      background: "linear-gradient(90deg, #ffd24a, #ff6b6b)",
+                      animationDuration: "2200ms",
+                    }}
+                  />
+                </div>
+              </div>
+            )}
             {role !== "spectator" && (
               <span
                 className="pixel-chip flex items-center gap-1.5 font-pixel text-[8px]"
@@ -1121,9 +1160,9 @@ function MatchHUD({
               </div>
               <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
                 {status !== "open"
-                  ? "RECONNECTING"
+                  ? "กำลังเชื่อมต่อใหม่"
                   : role === "spectator"
-                    ? `REFEREE · ${state.status.toUpperCase()}`
+                    ? `ผู้ตัดสิน · ${state.status.toUpperCase()}`
                     : state.status.toUpperCase()}
               </div>
             </div>
@@ -1182,7 +1221,7 @@ function PlayerBar({
   return (
     <div className={`flex-1 flex flex-col gap-1 ${side === "right" ? "items-end" : "items-start"}`}>
       <div className="flex items-center gap-2">
-        <span className="font-pixel text-[10px]">{player?.name ?? "WAITING..."}</span>
+        <span className="font-pixel text-[10px]">{player?.name ?? "รออยู่..."}</span>
         {player && (
           <span className="font-pixel text-[10px] text-[var(--gold)] flex items-center gap-1">
             <CoinIcon size={12} />
@@ -1191,7 +1230,7 @@ function PlayerBar({
         )}
         {player && !player.connected && (
           <span className="font-pixel text-[8px]" style={{ color: "#ff6b6b" }}>
-            RECONNECTING
+            กำลังเชื่อมต่อใหม่
           </span>
         )}
       </div>
@@ -1259,11 +1298,11 @@ function LobbyView({
       <div className="lobby-title-card pixel-panel">
         <div className="flex flex-wrap items-center justify-center gap-2">
           <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
-            MATCH LOBBY
+            ล็อบบี้ห้องแข่ง
           </span>
           {isHost && (
             <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
-              HOST
+              เจ้าของห้อง
             </span>
           )}
         </div>
@@ -1273,25 +1312,25 @@ function LobbyView({
             ? "ส่งลิงก์ให้เพื่อน แล้วตั้งกติกาห้องก่อนเริ่ม"
             : self?.ready && opp?.ready
               ? "ทั้งสองฝั่งพร้อมแล้ว · กำลังนับถอยหลัง"
-              : `พร้อมแล้ว ${readyCount}/${settings.maxPlayers} · กด READY เพื่อเข้ารอบ`}
+              : `พร้อมแล้ว ${readyCount}/${settings.maxPlayers} · กด พร้อม เพื่อเข้ารอบ`}
         </p>
       </div>
 
       <RoomSettingsSummary settings={settings} isHost={isHost} onOpenSettings={onOpenSettings} />
 
       <div className="lobby-versus-grid">
-        <PlayerCard player={self} label="YOU" side="left" hostId={state.hostId} />
+        <PlayerCard player={self} label="คุณ" side="left" hostId={state.hostId} />
         <div className="lobby-vs-core" aria-hidden>
           <span>VS</span>
         </div>
         <PlayerCard
           player={opp}
-          label="RIVAL"
+          label="คู่แข่ง"
           side="right"
           hostId={state.hostId}
           canKick={isHost && Boolean(opp)}
           onKick={(id) => (oppBotId ? onRemoveBot(id) : onKick(id))}
-          kickLabel={oppBotId ? "REMOVE BOT" : "KICK"}
+          kickLabel={oppBotId ? "ลบบอท" : "เตะ"}
         />
       </div>
 
@@ -1306,7 +1345,7 @@ function LobbyView({
             className="pixel-btn lobby-ready-btn"
             data-accent={self?.ready ? undefined : "true"}
           >
-            <span className="font-pixel text-[12px]">{self?.ready ? "UNREADY" : "READY UP"}</span>
+            <span className="font-pixel text-[12px]">{self?.ready ? "ยกเลิกพร้อม" : "พร้อม"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>
           </button>
           {canAddBot && (
@@ -1317,8 +1356,8 @@ function LobbyView({
               }}
               className="pixel-btn lobby-ready-btn"
             >
-              <span className="font-pixel text-[12px]">ADD BOT</span>
-              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+              <span className="font-pixel text-[12px]">เพิ่มบอท</span>
+              <span className="font-pixel text-[8px] opacity-70">เจ้าของห้อง</span>
             </button>
           )}
           {isHost && opp && (
@@ -1330,8 +1369,8 @@ function LobbyView({
               className="pixel-btn lobby-ready-btn"
               data-accent="true"
             >
-              <span className="font-pixel text-[12px]">START</span>
-              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+              <span className="font-pixel text-[12px]">เริ่ม</span>
+              <span className="font-pixel text-[8px] opacity-70">เจ้าของห้อง</span>
             </button>
           )}
           <button
@@ -1341,7 +1380,7 @@ function LobbyView({
             }}
             className="pixel-btn"
           >
-            <span className="font-pixel text-[10px]">LEAVE SLOT</span>
+            <span className="font-pixel text-[10px]">ออกจากสล็อต</span>
           </button>
         </div>
         <div className="lobby-ruleline" />
@@ -1383,7 +1422,7 @@ function CropBanView({
       <div className="lobby-title-card pixel-panel">
         <div className="flex flex-wrap items-center justify-center gap-2">
           <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
-            CROP BAN
+            แบนผัก
           </span>
           <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
             00:{ss}
@@ -1392,7 +1431,7 @@ function CropBanView({
         <h2 className="font-pixel lobby-title">แบนผัก 1 อย่าง</h2>
         <p className="lobby-subtitle">
           {isSpectator ? (
-            `รอ ${activePlayer?.name ?? "Rival"} แบนพืช...`
+            `รอ ${activePlayer?.name ?? "คู้แข่ง"} แบนพืช...`
           ) : isMyTurn ? (
             <span className="text-[#86efac] font-bold">ตาของคุณในการแบน</span>
           ) : (
@@ -1414,7 +1453,7 @@ function CropBanView({
                 style={{ background: player.ready ? "rgba(255, 210, 74, 0.08)" : undefined }}
               >
                 <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">
-                  PLAYER {idx + 1}: <span className="text-white">{player.name}</span>
+                  ผู้เล่น {idx + 1}: <span className="text-white">{player.name}</span>
                 </div>
                 <div className="flex items-center gap-3 mt-1 min-h-[44px]">
                   {crop && Icon ? (
@@ -1478,7 +1517,7 @@ function CropBanView({
               <span className="farm-crop-body">
                 <span className="farm-crop-name">{crop.name}</span>
                 {isBannedByOther && (
-                  <span className="font-pixel text-[7px] text-[#ff6b6b] block">ALREADY BANNED</span>
+                  <span className="font-pixel text-[7px] text-[#ff6b6b] block">แบนแล้ว</span>
                 )}
                 <span className="farm-crop-prices">
                   <span>ซื้อ {crop.seedCost}</span>
@@ -1507,7 +1546,7 @@ function CropBanView({
               {!isMyTurn
                 ? "รออีกฝ่ายแบนพืช..."
                 : self.ready
-                  ? "READY (ยืนยันแล้ว)"
+                  ? "พร้อม (ยืนยันแล้ว)"
                   : "ยืนยันการแบน (Confirm Ban)"}
             </span>
           </button>
@@ -1529,7 +1568,7 @@ function CropBanView({
               >
                 {player.name}:{" "}
                 {player.bannedCrop ? `แบน ${CROPS[player.bannedCrop].name}` : "ยังไม่เลือก"}
-                {player.ready ? " [READY]" : isPlayerTurn ? " [กำลังแบน]" : " [รอแบน]"}
+                {player.ready ? " [พร้อม]" : isPlayerTurn ? " [กำลังแบน]" : " [รอแบน]"}
               </span>
             );
           })}
@@ -1596,7 +1635,7 @@ function CropSelectionView({
       <div className="lobby-title-card pixel-panel">
         <div className="flex flex-wrap items-center justify-center gap-2">
           <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
-            {isLocked ? "LOCKED CROPS" : "CROP SELECTION"}
+            {isLocked ? "ล็อกผักแล้ว" : "เลือกผัก"}
           </span>
           <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
             {isLocked ? "เตรียมเริ่มเกม" : `${mm}:${ss}`}
@@ -1606,7 +1645,7 @@ function CropSelectionView({
         <p className="lobby-subtitle">
           {isLocked
             ? "ล็อกผักแล้ว · เตรียมตัว 3, 2, 1"
-            : `เลือกของตัวเอง ${selected.length}/${SELECTED_CROP_COUNT} แล้วกด READY`}
+            : `เลือกของตัวเอง ${selected.length}/${SELECTED_CROP_COUNT} แล้วกด พร้อม`}
         </p>
       </div>
 
@@ -1624,10 +1663,10 @@ function CropSelectionView({
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-pixel text-[10px] text-[var(--gold)]">
-                      PLAYER {idx + 1}: {player.name}
+                      ผู้เล่น {idx + 1}: {player.name}
                     </span>
                     <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-                      {player.ready ? "READY (LOCKED)" : "PICKING"}
+                      {player.ready ? "พร้อม (ล็อก)" : "กำลังเลือก"}
                     </span>
                   </div>
                   <div className="grid grid-cols-4 gap-2">
@@ -1720,7 +1759,7 @@ function CropSelectionView({
                 </span>
                 <span className="farm-crop-body">
                   <span className="farm-crop-name">{crop.name}</span>
-                  {banned && <span className="font-pixel text-[7px] text-[#ff6b6b]">BANNED</span>}
+                  {banned && <span className="font-pixel text-[7px] text-[#ff6b6b]">แบน</span>}
                   <span className="farm-crop-prices">
                     <span>ซื้อ {crop.seedCost}</span>
                     <span>ขาย {crop.sellPrice}</span>
@@ -1741,7 +1780,7 @@ function CropSelectionView({
               data-gold={player.ready ? "true" : undefined}
             >
               {player.name}: {player.selectedCrops.length}/{SELECTED_CROP_COUNT}{" "}
-              {player.ready ? "READY" : "PICKING"}
+              {player.ready ? "พร้อม" : "กำลังเลือก"}
             </span>
           ))}
         </div>
@@ -1756,7 +1795,7 @@ function CropSelectionView({
             data-accent={self?.ready ? undefined : "true"}
             disabled={selected.length !== SELECTED_CROP_COUNT}
           >
-            <span className="font-pixel text-[12px]">{self?.ready ? "UNREADY" : "READY"}</span>
+            <span className="font-pixel text-[12px]">{self?.ready ? "ยกเลิกพร้อม" : "พร้อม"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>
           </button>
         )}
@@ -1788,13 +1827,13 @@ function RoomSettingsSummary({
         {STAGE_COPY[settings.stage].label}
       </span>
       <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-        TARGET {settings.targetCoins}
+        เป้าหมาย {settings.targetCoins}
       </span>
       <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-        TIME {Math.round(settings.durationMs / 60000)} MIN
+        เวลา {Math.round(settings.durationMs / 60000)} นาที
       </span>
       <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-        SLOTS {settings.maxPlayers}
+        สล็อต {settings.maxPlayers}
       </span>
       {isHost ? (
         <button
@@ -1804,10 +1843,12 @@ function RoomSettingsSummary({
           }}
           className="pixel-btn px-3 py-2"
         >
-          <span className="font-pixel text-[8px]">SETTINGS</span>
+          <span className="font-pixel text-[8px]">ตั้งค่า</span>
         </button>
       ) : (
-        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">HOST SETTINGS</span>
+        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+          ตั้งค่าเจ้าของห้อง
+        </span>
       )}
     </div>
   );
@@ -1820,7 +1861,7 @@ function PlayerCard({
   hostId,
   canKick = false,
   onKick,
-  kickLabel = "KICK",
+  kickLabel = "เตะ",
 }: {
   player?: PublicPlayer;
   label: string;
@@ -1842,10 +1883,10 @@ function PlayerCard({
         <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</span>
         <div className="flex items-center gap-2">
           {player?.isBot && (
-            <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">BOT</span>
+            <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">บอท</span>
           )}
           {player?.id === hostId && (
-            <span className="font-pixel text-[7px] text-[var(--gold)]">HOST</span>
+            <span className="font-pixel text-[7px] text-[var(--gold)]">เจ้าของห้อง</span>
           )}
           <span className="lobby-status-dot" data-ready={ready ? "true" : undefined} />
         </div>
@@ -1869,9 +1910,9 @@ function PlayerCard({
           </div>
         )}
       </div>
-      <div className="lobby-player-name font-pixel">{player?.name ?? "OPEN SLOT"}</div>
+      <div className="lobby-player-name font-pixel">{player?.name ?? "สล็อตว่าง"}</div>
       <div className="lobby-player-meta font-pixel" data-ready={ready ? "true" : undefined}>
-        {player ? (ready ? "LOCKED IN" : "WAITING") : "INVITE FRIEND"}
+        {player ? (ready ? "พร้อมแล้ว" : "รออยู่") : "เชิญเพื่อน"}
       </div>
       {canKick && player && (
         <button
@@ -1921,7 +1962,7 @@ function SettingsModal({
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="font-pixel text-[10px] tracking-[3px] text-[#d9c6ef]">
-              HOST SETTINGS
+              ตั้งค่าเจ้าของห้อง
             </div>
             <h3 className="font-pixel text-[34px] text-[var(--gold)] mt-2 leading-relaxed">
               ตั้งค่าห้อง
@@ -1934,7 +1975,7 @@ function SettingsModal({
             }}
             className="pixel-btn px-4 py-3"
           >
-            <span className="font-pixel text-[10px]">CLOSE</span>
+            <span className="font-pixel text-[10px]">ปิด</span>
           </button>
         </div>
 
@@ -1961,7 +2002,11 @@ function SettingsModal({
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <SettingField label="TARGET" helper="เหรียญที่ต้องทำให้ถึงก่อน" value={draft.targetCoins}>
+          <SettingField
+            label="เป้าหมาย"
+            helper="เหรียญที่ต้องทำให้ถึงก่อน"
+            value={draft.targetCoins}
+          >
             <input
               className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3"
               type="number"
@@ -1995,7 +2040,7 @@ function SettingsModal({
               }
             />
           </SettingField>
-          <SettingField label="SLOTS" helper="ตอนนี้ล็อก 2 คน" value={draft.maxPlayers}>
+          <SettingField label="สล็อต" helper="ตอนนี้ล็อก 2 คน" value={draft.maxPlayers}>
             <input
               className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3 opacity-80"
               type="number"
@@ -2015,7 +2060,7 @@ function SettingsModal({
             }}
             className="pixel-btn px-5 py-4"
           >
-            <span className="font-pixel text-[11px]">CANCEL</span>
+            <span className="font-pixel text-[11px]">ยกเลิก</span>
           </button>
           <button
             onClick={() => {
@@ -2025,7 +2070,7 @@ function SettingsModal({
             className="pixel-btn px-5 py-4"
             data-accent="true"
           >
-            <span className="font-pixel text-[11px]">SAVE SETTINGS</span>
+            <span className="font-pixel text-[11px]">บันทึกการตั้งค่า</span>
           </button>
         </div>
       </div>
@@ -2081,15 +2126,15 @@ function SpectatorLobbyView({
       <div className="lobby-title-card pixel-panel">
         <div className="flex flex-wrap items-center justify-center gap-2">
           <span className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
-            REFEREE VIEW
+            มุมผู้ตัดสิน
           </span>
           {isHost && (
             <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
-              HOST
+              เจ้าของห้อง
             </span>
           )}
         </div>
-        <h2 className="font-pixel lobby-title">WATCH MODE</h2>
+        <h2 className="font-pixel lobby-title">โหมดชม</h2>
         <p className="lobby-subtitle">เริ่มเป็นผู้ชมก่อน · กดเข้า slot เมื่อต้องการลงแข่ง</p>
       </div>
 
@@ -2102,24 +2147,24 @@ function SpectatorLobbyView({
       <div className="lobby-versus-grid">
         <PlayerCard
           player={players[0]}
-          label="PLAYER 1"
+          label="ผู้เล่น 1"
           side="left"
           hostId={state.hostId}
           canKick={isHost && state.status === "lobby" && Boolean(players[0]?.isBot)}
           onKick={onRemoveBot}
-          kickLabel="REMOVE BOT"
+          kickLabel="ลบบอท"
         />
         <div className="lobby-vs-core" aria-hidden>
           <span>VS</span>
         </div>
         <PlayerCard
           player={players[1]}
-          label="PLAYER 2"
+          label="ผู้เล่น 2"
           side="right"
           hostId={state.hostId}
           canKick={isHost && state.status === "lobby" && Boolean(players[1]?.isBot)}
           onKick={onRemoveBot}
-          kickLabel="REMOVE BOT"
+          kickLabel="ลบบอท"
         />
       </div>
 
@@ -2136,7 +2181,7 @@ function SpectatorLobbyView({
             disabled={slotsFull}
           >
             <span className="font-pixel text-[12px]">
-              {slotsFull ? "PLAYER SLOTS FULL" : "ENTER PLAYER SLOT"}
+              {slotsFull ? "สล็อตผู้เล่นเต็ม" : "เข้าสล็อตผู้เล่น"}
             </span>
           </button>
           {canAddBot && (
@@ -2147,8 +2192,8 @@ function SpectatorLobbyView({
               }}
               className="pixel-btn lobby-ready-btn"
             >
-              <span className="font-pixel text-[12px]">ADD BOT</span>
-              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+              <span className="font-pixel text-[12px]">เพิ่มบอท</span>
+              <span className="font-pixel text-[8px] opacity-70">เจ้าของห้อง</span>
             </button>
           )}
           {isHost && slotsFull && (
@@ -2160,8 +2205,8 @@ function SpectatorLobbyView({
               className="pixel-btn lobby-ready-btn"
               data-accent="true"
             >
-              <span className="font-pixel text-[12px]">START</span>
-              <span className="font-pixel text-[8px] opacity-70">HOST</span>
+              <span className="font-pixel text-[12px]">เริ่ม</span>
+              <span className="font-pixel text-[8px] opacity-70">เจ้าของห้อง</span>
             </button>
           )}
         </div>
@@ -2201,7 +2246,7 @@ function CountdownView({
         }}
         key={n}
       >
-        {n > 0 ? n : "GO!"}
+        {n > 0 ? n : "เริ่ม!"}
       </div>
       {isHost && n > 0 && (
         <button
@@ -2211,7 +2256,7 @@ function CountdownView({
           }}
           className="pixel-btn pointer-events-auto"
         >
-          <span className="font-pixel text-[10px]">CANCEL COUNTDOWN</span>
+          <span className="font-pixel text-[10px]">ยกเลิกนับถอยหลัง</span>
         </button>
       )}
     </div>
@@ -2258,10 +2303,12 @@ function SpectatorMatchView({
       <div className="pixel-panel flex flex-wrap items-center justify-center gap-3 px-5 py-3">
         <span className="flex items-center gap-2">
           <span className="live-dot" aria-hidden />
-          <span className="font-pixel text-[8px] tracking-[2px] text-[var(--accent)]">LIVE</span>
+          <span className="font-pixel text-[8px] tracking-[2px] text-[var(--accent)]">
+            ถ่ายทอดสด
+          </span>
         </span>
         <span className="h-4 w-[2px] bg-[#1a0f1f]" aria-hidden />
-        <span className="font-pixel text-[10px] text-[var(--gold)]">REFEREE VIEW</span>
+        <span className="font-pixel text-[10px] text-[var(--gold)]">มุมผู้ตัดสิน</span>
         <span className="pixel-chip font-pixel text-[8px]">{players.length}/2 PLAYERS</span>
         <span
           className="pixel-chip flex items-center gap-1.5 font-pixel text-[8px]"
@@ -2275,7 +2322,7 @@ function SpectatorMatchView({
       <div className="flex flex-col xl:flex-row items-center gap-4 xl:gap-6">
         {players.map((player, i) => (
           <div key={player.id} className="flex flex-col items-center gap-2">
-            <OpponentStatusCard player={player} label={`PLAYER ${i + 1}`} />
+            <OpponentStatusCard player={player} label={`ผู้เล่น ${i + 1}`} />
             <SelfField
               player={player}
               events={events.filter((e) => e.ev.playerId === player.id)}
@@ -2291,7 +2338,7 @@ function SpectatorMatchView({
 
 function OpponentStatusCard({
   player,
-  label = "OPPONENT",
+  label = "คู่แข่ง",
 }: {
   player: PublicPlayer;
   label?: string;
@@ -2315,14 +2362,14 @@ function OpponentStatusCard({
       </div>
       <div className="mx-1 h-8 w-1" style={{ background: "#1a0f1f" }} />
       <div className="flex flex-col gap-1">
-        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">COINS</div>
+        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">เหรียญ</div>
         <div className="font-pixel text-[12px] text-[var(--gold)]">{player.coins}</div>
       </div>
       <div
         className="font-pixel text-[8px]"
         style={{ color: player.connected ? "#86efac" : "#f87171" }}
       >
-        {player.connected ? "ONLINE" : "OFFLINE"}
+        {player.connected ? "ออนไลน์" : "ออฟไลน์"}
       </div>
     </div>
   );
@@ -2346,13 +2393,13 @@ function Toolbar({
   return (
     <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
       <div className="farm-toolbar-section farm-toolbar-tools">
-        <span className="farm-toolbar-label">TOOLS</span>
+        <span className="farm-toolbar-label">อุปกรณ์</span>
         <div className="farm-tool-grid">
           {(
             [
-              { id: "hoe", label: "HOE", Icon: HoeIcon, key: "1" },
-              { id: "watering_can", label: "CAN", Icon: WaterCanIcon, key: "2" },
-              { id: "seed", label: "SEED", Icon: SeedIcon, key: "3" },
+              { id: "hoe", label: "จอบ", Icon: HoeIcon, key: "1" },
+              { id: "watering_can", label: "นํ้า", Icon: WaterCanIcon, key: "2" },
+              { id: "seed", label: "เมล็ด", Icon: SeedIcon, key: "3" },
             ] as {
               id: Tool;
               label: string;
@@ -2378,7 +2425,7 @@ function Toolbar({
       </div>
 
       <div className="farm-toolbar-section farm-toolbar-crops">
-        <span className="farm-toolbar-label">CROPS</span>
+        <span className="farm-toolbar-label">พืชผัก</span>
         <div className="farm-crop-grid">
           {cropPool
             .map((id) => CROPS[id])
@@ -2459,7 +2506,7 @@ function MobileControls({
         data-accent="true"
         onPointerDown={sendAction}
       >
-        <span className="font-pixel text-[10px]">USE</span>
+        <span className="font-pixel text-[10px]">ใช้</span>
       </button>
     </div>
   );
@@ -2696,12 +2743,12 @@ function EndOverlay({
   const lost = Boolean(winner && !spectator && !won && self);
   const reasonText =
     reason === "race"
-      ? "FIRST TO 500"
+      ? "ถึง 500 กอน"
       : reason === "timeout"
-        ? "TIME UP"
+        ? "หมดเวลา"
         : reason === "kick"
-          ? "KICKED"
-          : "DISCONNECTED";
+          ? "ถุกเตะ"
+          : "ตัดการเชื่อมต่อ";
   const subText = won ? "ยอดเยี่ยม! คุณคือผู้ชนะ" : "ผู้ชนะรอบนี้";
   const sortedPlayers = [...players].sort((a, b) => b.coins - a.coins);
 
@@ -2728,7 +2775,7 @@ function EndOverlay({
               className="font-pixel text-[32px]"
               style={{ color: "#f4e4c1", textShadow: "3px 3px 0 #1a0f1f" }}
             >
-              DRAW
+              เสมอ
             </div>
             <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">
               {reasonText}
@@ -2814,9 +2861,9 @@ function EndOverlay({
                 </div>
                 {stat && (
                   <div className="flex items-center justify-between gap-3 text-[8px] text-[var(--muted-foreground)]">
-                    <span>HARVEST {stat.harvests}</span>
-                    <span>EARNED {stat.coinsEarned}</span>
-                    <span>TOP {stat.topCrop ? CROPS[stat.topCrop].name : "-"}</span>
+                    <span>เก็บเกี่ยว {stat.harvests}</span>
+                    <span>ไดรรับ {stat.coinsEarned}</span>
+                    <span>ท็อป {stat.topCrop ? CROPS[stat.topCrop].name : "-"}</span>
                   </div>
                 )}
               </div>
@@ -2825,7 +2872,7 @@ function EndOverlay({
         </div>
         {recap && (
           <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-            TIME LEFT {Math.ceil(recap.timeRemainingMs / 1000)}s
+            เวลาที่เหลือ {Math.ceil(recap.timeRemainingMs / 1000)}ว"
           </div>
         )}
         {!spectator && (
@@ -2839,7 +2886,7 @@ function EndOverlay({
             disabled={self?.ready || closeCountdown === 0}
           >
             <span className="font-pixel text-[12px]">
-              {self?.ready ? "READY — WAITING" : "REMATCH"}
+              {self?.ready ? "พร้อม — รออยู่" : "แข่งใหม่อีกครั้ง"}
             </span>
           </button>
         )}

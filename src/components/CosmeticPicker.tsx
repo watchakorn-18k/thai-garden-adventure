@@ -32,11 +32,11 @@ export default function CosmeticPicker({ value, onChange, compact = false, onClo
               cosmetics={value}
             />
           </div>
-          <span className="font-pixel text-[9px] text-[var(--gold)]">OUTFIT</span>
+          <span className="font-pixel text-[9px] text-[var(--gold)]">ชุด</span>
         </div>
         {onClose && (
           <button type="button" onClick={onClose} className="pixel-btn px-2 py-1">
-            <span className="font-pixel text-[8px]">CLOSE</span>
+            <span className="font-pixel text-[8px]">ปิด</span>
           </button>
         )}
       </div>

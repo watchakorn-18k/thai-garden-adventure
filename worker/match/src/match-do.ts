@@ -423,6 +423,7 @@ export class MatchRoom implements DurableObject {
             ev.cropId,
             ev.reward,
             now,
+            0.2,
           );
           player.combo = nextState.combo;
           player.lastHarvestAt = nextState.lastHarvestAt;

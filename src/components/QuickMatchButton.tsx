@@ -11,7 +11,7 @@ interface Props {
 
 // One-tap matchmaking: asks the server to pair you, then drops you into the
 // room as a player. No room code, no manual room creation.
-export default function QuickMatchButton({ label = "QUICK MATCH", className, style }: Props) {
+export default function QuickMatchButton({ label = "จับคู่ด่วน", className, style }: Props) {
   const navigate = useNavigate();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);

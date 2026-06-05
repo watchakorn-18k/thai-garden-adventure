@@ -103,7 +103,7 @@ export default function CropIndexBook({
             : "pixel-panel group flex w-full items-center justify-between gap-4 overflow-hidden px-5 py-4 text-left transition-transform duration-200 active:translate-y-[1px]"
         }
         aria-expanded={open}
-        title="Crop index"
+        title="ดัชนีพืช"
       >
         {iconOnly ? (
           <BookIcon size={22} />
@@ -124,7 +124,7 @@ export default function CropIndexBook({
               <div>
                 <div className="mb-1 flex items-center gap-3">
                   <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-                    CROP BOOK
+                    สมุดพืช
                   </span>
                   <span className="h-[3px] w-8 bg-[#1a0f1f]" />
                   <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
@@ -137,7 +137,7 @@ export default function CropIndexBook({
               </div>
             </div>
             <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
-              {open ? "CLOSE" : "OPEN"}
+              {open ? "ปิด" : "เปิด"}
             </span>
           </>
         )}
@@ -153,7 +153,7 @@ export default function CropIndexBook({
         >
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
             <div className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-              SEED LEDGER
+              บัญชีเมล็ด
             </div>
             <div
               className="pixel-chip flex items-center gap-2"

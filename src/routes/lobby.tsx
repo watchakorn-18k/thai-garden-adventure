@@ -84,7 +84,7 @@ function LobbyPage() {
           className="font-pixel text-[28px] text-[var(--gold)]"
           style={{ textShadow: "3px 3px 0 #1a0f1f, 0 0 24px rgba(255,210,74,0.4)" }}
         >
-          1v1 ESPORT MODE
+          โหมดแข่ง 1v1
         </h1>
         <p className="font-pixel text-[9px] text-[var(--muted-foreground)]">
           คนสร้างห้องตั้งค่าด่าน เป้าหมาย เวลา และเตะผู้เล่นได้ก่อนเริ่ม
@@ -93,7 +93,7 @@ function LobbyPage() {
 
       <div className="relative z-10 pixel-panel p-6 flex flex-col gap-5 min-w-[360px]">
         <div className="flex flex-col gap-2 items-center">
-          <QuickMatchButton label="QUICK MATCH" className="pixel-btn w-full justify-center py-3" />
+          <QuickMatchButton label="จับคู่ด่วน" className="pixel-btn w-full justify-center py-3" />
           <span className="font-pixel text-[8px] text-[var(--muted-foreground)] text-center">
             กดปุ่มเดียว จับคู่อัตโนมัติ ไม่ต้องสร้างห้อง
           </span>
@@ -101,12 +101,12 @@ function LobbyPage() {
 
         <div className="flex items-center gap-3">
           <span className="h-0.5 flex-1 bg-background" />
-          <span className="font-pixel text-[8px] text-muted-foreground">OR</span>
+          <span className="font-pixel text-[8px] text-muted-foreground">หรือ</span>
           <span className="h-0.5 flex-1 bg-background" />
         </div>
 
         <label className="flex flex-col gap-2">
-          <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">PLAYER NAME</span>
+          <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">ชื่อผู้เล่น</span>
           <input
             value={name}
             onChange={(e) => saveName(e.target.value.slice(0, 16))}
@@ -117,7 +117,7 @@ function LobbyPage() {
         </label>
 
         <div className="flex flex-col gap-2">
-          <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">ROOM CODE</span>
+          <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">รหัสห้อง</span>
           <input
             value={joinCode}
             onChange={(e) => setJoinCode(e.target.value.toUpperCase().slice(0, 6))}
@@ -126,7 +126,7 @@ function LobbyPage() {
             className="pixel-chip font-pixel text-[14px] tracking-[4px] px-3 py-2 outline-none flex-1 text-center"
           />
           <button onClick={join} className="pixel-btn" data-accent="true">
-            <span className="font-pixel text-[12px]">JOIN / CREATE ROOM</span>
+            <span className="font-pixel text-[12px]">เข้าร่วม / สร้างห้อง</span>
           </button>
           <span className="font-pixel text-[8px] text-[var(--muted-foreground)] text-center">
             ทุกคนเริ่มเป็นผู้ชมก่อน แล้วค่อยกดลงแข่งในห้อง

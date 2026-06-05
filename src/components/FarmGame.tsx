@@ -339,8 +339,8 @@ export default function FarmGame() {
 
               const variety = nextState.crops.length;
               let popupText = `+${total}`;
-              if (variety > 1) popupText += ` Mix x${variety}`;
-              if (isCrit) popupText = `CRIT ${popupText}`;
+              if (variety > 1) popupText += ` ผสม x${variety}`;
+              if (isCrit) popupText = `คริติคัล ${popupText}`;
               addPopup(ev.x, ev.y, popupText, "good");
 
               burstParticles(ev.x, ev.y, "sparkle");
@@ -887,14 +887,20 @@ export default function FarmGame() {
               </div>
             </div>
           )}
-          <div
-            className="pixel-chip flex items-center gap-1.5 font-pixel text-[8px]"
+          <button
+            type="button"
+            onClick={() => {
+              if (autoBotActive) {
+                pauseAutoBot();
+              } else {
+                botPausedRef.current = false;
+                setAutoBotActive(true);
+              }
+              SFX.click();
+            }}
+            className="pixel-chip pixel-btn flex items-center gap-1.5 font-pixel text-[8px]"
             data-gold={autoBotActive ? "true" : undefined}
-            title={
-              autoBotActive
-                ? "บอททำงานอัตโนมัติ (ขยับเพื่อหยุด)"
-                : "บอทหยุดชั่วคราว (จะเริ่มใหม่ใน 1 นาที)"
-            }
+            title={autoBotActive ? "บอททำงานอัตโนมัติ (คลิกเพื่อหยุด)" : "บอทหยุด (คลิกเพื่อเริ่ม)"}
           >
             <span
               className={
@@ -908,8 +914,8 @@ export default function FarmGame() {
                   : { width: 9, height: 9, background: "#7d6a5a", boxShadow: "0 0 0 2px #1a0f1f" }
               }
             />
-            {autoBotActive ? "AUTO" : "PAUSED"}
-          </div>
+            {autoBotActive ? "อัตโนมัติ" : "หยุด"}
+          </button>
           <div
             className={`pixel-chip flex items-center gap-2 ${hudPulse ? "pulse-glow" : ""}`}
             data-gold="true"
@@ -987,7 +993,7 @@ export default function FarmGame() {
           </div>
           <div className="cta-multiplayer-actions">
             <span className="cta-btn-bob">
-              <QuickMatchButton label="QUICK MATCH" className="pixel-btn cta-quick-match" />
+              <QuickMatchButton label="จับคู่ด่วน" className="pixel-btn cta-quick-match" />
             </span>
             <span className="cta-btn-bob" data-delay="true">
               <a href="/lobby" className="pixel-btn cta-1v1-link">
@@ -1216,7 +1222,7 @@ export default function FarmGame() {
               textShadow: "2px 2px 0 #1a0f1f, 0 0 10px rgba(255,210,74,0.8)",
             }}
           >
-            x{comboShown.level} COMBO!
+            x{comboShown.level} คอมโบ!
           </div>
         )}
 
@@ -1263,13 +1269,13 @@ export default function FarmGame() {
       {/* Toolbar */}
       <div className="farm-toolbar relative z-10 mt-3 w-full max-w-5xl pixel-panel">
         <div className="farm-toolbar-section farm-toolbar-tools">
-          <span className="farm-toolbar-label">TOOLS</span>
+          <span className="farm-toolbar-label">อุปกรณ์</span>
           <div className="farm-tool-grid">
             {(
               [
-                { id: "hoe", label: "HOE", Icon: HoeIcon, key: "1" },
-                { id: "watering_can", label: "CAN", Icon: WaterCanIcon, key: "2" },
-                { id: "seed", label: "SEED", Icon: SeedIcon, key: "3" },
+                { id: "hoe", label: "จอบ", Icon: HoeIcon, key: "1" },
+                { id: "watering_can", label: "น้ำ", Icon: WaterCanIcon, key: "2" },
+                { id: "seed", label: "เมล็ด", Icon: SeedIcon, key: "3" },
               ] as {
                 id: Tool;
                 label: string;
@@ -1297,7 +1303,7 @@ export default function FarmGame() {
         </div>
 
         <div className="farm-toolbar-section farm-toolbar-crops">
-          <span className="farm-toolbar-label">CROPS</span>
+          <span className="farm-toolbar-label">พืชผัก</span>
           <div className="farm-crop-grid">
             {(Object.values(CROPS) as Crop[]).map((c) => {
               const active = seedChoice === c.id && tool === "seed";
@@ -1354,7 +1360,7 @@ export default function FarmGame() {
           >
             <div className="flex items-center gap-3 mb-5">
               <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-                CONTROLS
+                ควบคุม
               </span>
               <span className="font-pixel text-[8px] tracking-[1.5px] text-[var(--muted-foreground)] opacity-70">
                 คู่มือการเล่น
@@ -1384,7 +1390,7 @@ export default function FarmGame() {
                     <kbd className="pixel-key">D</kbd>
                   </div>
                   <div className="flex flex-col gap-1 pt-1">
-                    <span className="font-pixel text-[10px] tracking-wider">MOVE</span>
+                    <span className="font-pixel text-[10px] tracking-wider">เดิน</span>
                     <span className="font-pixel text-[8px] text-[var(--muted-foreground)] leading-relaxed">
                       เดินสำรวจ · ลูกศรก็ได้
                     </span>
@@ -1394,7 +1400,7 @@ export default function FarmGame() {
                 <div className="flex items-center gap-4">
                   <kbd className="pixel-key pixel-key-wide">SPACE</kbd>
                   <div className="flex flex-col gap-1">
-                    <span className="font-pixel text-[10px] tracking-wider">USE TOOL</span>
+                    <span className="font-pixel text-[10px] tracking-wider">ใช้เครื่องมือ</span>
                     <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
                       ทำกับช่องที่หันหน้าใส่
                     </span>
@@ -1415,26 +1421,26 @@ export default function FarmGame() {
 
               <div className="flex flex-col gap-3 min-w-0">
                 <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-                  WORKFLOW
+                  ขั้นตอน
                 </span>
                 <div className="flow-strip">
-                  <FlowStep n="01" label="TILL" sub="ขุด">
+                  <FlowStep n="01" label="ขุด" sub="ขุด">
                     <HoeIcon size={20} />
                   </FlowStep>
                   <FlowArrow />
-                  <FlowStep n="02" label="SEED" sub="หว่าน">
+                  <FlowStep n="02" label="หว่าน" sub="หว่าน">
                     <SeedIcon size={20} />
                   </FlowStep>
                   <FlowArrow />
-                  <FlowStep n="03" label="WATER" sub="รดน้ำ">
+                  <FlowStep n="03" label="รดน้ำ" sub="รดน้ำ">
                     <WaterCanIcon size={20} />
                   </FlowStep>
                   <FlowArrow />
-                  <FlowStep n="04" label="WAIT" sub="พักผ่อน">
+                  <FlowStep n="04" label="รอ" sub="พักผ่อน">
                     <MoonIcon size={18} />
                   </FlowStep>
                   <FlowArrow />
-                  <FlowStep n="05" label="HARVEST" sub="เก็บ" gold>
+                  <FlowStep n="05" label="เก็บเกี่ยว" sub="เก็บ" gold>
                     <CoinIcon size={18} />
                   </FlowStep>
                 </div>
@@ -1492,7 +1498,7 @@ function HeaderOutfitMenu({
         aria-expanded={outfit.open}
         style={{ fontSize: 8 }}
       >
-        OUTFIT
+        ชุด
       </button>
       {outfit.open && (
         <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-[280px] max-w-[calc(100vw-2rem)]">
