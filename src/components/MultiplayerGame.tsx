@@ -843,6 +843,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           <div className="mt-6 w-full flex justify-center">
             <CropIndexBook
               compact
+              open={true}
               marketPrices={state.marketPrices}
               selectedCropId={self?.seedChoice}
               availableCropIds={
