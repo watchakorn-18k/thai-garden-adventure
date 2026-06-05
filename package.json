@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "deploy:match": "wrangler deploy --config worker/match/wrangler.toml",
     "lint": "eslint .",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "design:lint": "npx @google/design.md lint DESIGN.md"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
