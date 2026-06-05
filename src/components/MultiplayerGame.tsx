@@ -341,9 +341,11 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
     const audio = !state.winnerId
       ? drawAudio
-      : selfId && state.winnerId !== selfId
-        ? loserAudio
-        : winnerAudio;
+      : matchRole === "spectator"
+        ? winnerAudio
+        : selfId && state.winnerId !== selfId
+          ? loserAudio
+          : winnerAudio;
 
     for (const sound of endSounds) {
       if (sound === audio) continue;
@@ -365,7 +367,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       window.removeEventListener("keydown", play);
       if (audio) audio.pause();
     };
-  }, [musicEnabled, selfId, state?.status, state?.winnerId]);
+  }, [musicEnabled, selfId, state?.status, state?.winnerId, matchRole]);
 
   // Synchronize music/audio mute state with sfx setting
   useEffect(() => {

@@ -415,6 +415,7 @@ export default function FarmGame() {
     lastUserInputAtRef.current = Date.now();
     botPausedRef.current = true;
     botPlanRef.current = null;
+    botTargetRef.current = null;
     botIntentRef.current = null;
     setAutoBotActive(false);
   }, []);
@@ -507,11 +508,13 @@ export default function FarmGame() {
     const i = setInterval(() => {
       const now = Date.now();
       if (helpOpenRef.current) {
+        botTargetRef.current = null;
         botIntentRef.current = null;
         return;
       }
       if (botPausedRef.current) {
         if (now - lastUserInputAtRef.current < AUTO_RESUME_MS) {
+          botTargetRef.current = null;
           botIntentRef.current = null;
           return;
         }
@@ -519,6 +522,7 @@ export default function FarmGame() {
         setAutoBotActive(true);
       }
       if (hasManualMovement(keys.current)) {
+        botTargetRef.current = null;
         botIntentRef.current = null;
         return;
       }
@@ -542,9 +546,12 @@ export default function FarmGame() {
         botPlanRef.current = plan;
       }
       if (!plan) {
+        botTargetRef.current = null;
         botIntentRef.current = null;
         return;
       }
+
+      botTargetRef.current = { x: plan.sx, y: plan.sy };
 
       const dx = plan.sx - posRef.current.x;
       const dy = plan.sy - posRef.current.y;
@@ -553,6 +560,7 @@ export default function FarmGame() {
         botIntentRef.current = { dx: dx / dist, dy: dy / dist };
         return;
       }
+      botTargetRef.current = null;
       botIntentRef.current = null;
       posRef.current = { x: plan.sx, y: plan.sy };
       setPos(posRef.current);
@@ -613,9 +621,24 @@ export default function FarmGame() {
       if (k.has("keyd") || k.has("arrowright")) dx += 1;
 
       const manualMoving = dx !== 0 || dy !== 0;
-      if (!manualMoving && botIntentRef.current) {
-        dx = botIntentRef.current.dx;
-        dy = botIntentRef.current.dy;
+      if (!manualMoving && botTargetRef.current) {
+        const target = botTargetRef.current;
+        const cur = posRef.current;
+        const tdx = target.x - cur.x;
+        const tdy = target.y - cur.y;
+        const tdist = Math.hypot(tdx, tdy);
+        const step = SPEED * dt;
+        if (tdist <= step) {
+          posRef.current = { x: target.x, y: target.y };
+          setPos(posRef.current);
+          dx = 0;
+          dy = 0;
+          botIntentRef.current = null;
+        } else {
+          dx = tdx / tdist;
+          dy = tdy / tdist;
+          botIntentRef.current = { dx, dy };
+        }
       }
       const moving = dx !== 0 || dy !== 0;
       if (moving) {
