@@ -70,6 +70,7 @@ interface StoredRoomState {
   settings?: RoomSettings;
   players: Omit<PlayerState, "connected" | "inputDir" | "lastMovementAt" | "lastActionAt">[];
   marketPrices?: Record<CropId, number>;
+  banTurnPlayerId?: string;
 }
 
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -104,6 +105,7 @@ export class MatchRoom implements DurableObject {
   private settings: RoomSettings = DEFAULT_ROOM_SETTINGS;
   private players = new Map<string, PlayerState>();
   private marketPrices: Record<CropId, number> = makeMarketPrices();
+  private banTurnPlayerId?: string;
   private initialized?: Promise<void>;
   private wsToPlayer = new WeakMap<WebSocket, string>();
   private wsToRole = new WeakMap<WebSocket, MatchRole>();
@@ -113,6 +115,7 @@ export class MatchRoom implements DurableObject {
   private lastPriceUpdateAt = 0;
   private snapshotTimer?: ReturnType<typeof setInterval>;
   private growthTimer?: ReturnType<typeof setInterval>;
+  private phaseTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private ctx: DurableObjectState,
@@ -229,6 +232,46 @@ export class MatchRoom implements DurableObject {
         this.broadcastSnapshot();
         return;
       }
+      if (this.status === "crop_ban") {
+        if (player.id !== this.banTurnPlayerId) return;
+        if (!player.bannedCrop) return;
+        if (player.ready) return;
+
+        const alreadyBanned = [...this.players.values()].some(
+          (p) => p.id !== player.id && p.ready && p.bannedCrop === player.bannedCrop,
+        );
+        if (alreadyBanned) {
+          this.sendTo(ws, {
+            t: "error",
+            code: "crop_already_banned",
+            message: "ผักชนิดนี้ถูกแบนไปแล้วโดยผู้เล่นอีกคน กรุณาเลือกผักชนิดอื่น",
+          });
+          return;
+        }
+
+        player.ready = true;
+
+        for (const p of this.players.values()) {
+          if (p.id !== player.id && !p.ready && p.bannedCrop === player.bannedCrop) {
+            p.bannedCrop = undefined;
+          }
+        }
+
+        const nextPlayer = [...this.players.values()].find((p) => p.id !== player.id);
+        if (nextPlayer && !nextPlayer.ready) {
+          this.banTurnPlayerId = nextPlayer.id;
+          this.banEndsAt = Date.now() + CROP_BAN_MS;
+          this.scheduleAlarm();
+          if (this.phaseTimer) clearTimeout(this.phaseTimer);
+          this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
+        } else {
+          this.maybeFastForwardCropBan();
+        }
+
+        this.persist();
+        this.broadcastSnapshot();
+        return;
+      }
       if (this.status === "crop_selection") {
         if (
           normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds()).length !==
@@ -256,6 +299,21 @@ export class MatchRoom implements DurableObject {
 
     if (msg.t === "ban_crop") {
       if (this.status !== "crop_ban") return;
+      if (player.id !== this.banTurnPlayerId) return;
+      if (player.ready) return;
+
+      const alreadyBanned = [...this.players.values()].some(
+        (p) => p.id !== player.id && p.ready && p.bannedCrop === msg.id,
+      );
+      if (alreadyBanned) {
+        this.sendTo(ws, {
+          t: "error",
+          code: "crop_already_banned",
+          message: "ผักชนิดนี้ถูกแบนไปแล้วโดยผู้เล่นอีกคน กรุณาเลือกผักชนิดอื่น",
+        });
+        return;
+      }
+
       player.bannedCrop = msg.id;
       this.persist();
       this.broadcastSnapshot();
@@ -348,16 +406,26 @@ export class MatchRoom implements DurableObject {
 
             // Update dynamic market prices
             const basePrice = CROPS[ev.cropId].sellPrice;
+            const currentPrice = this.marketPrices[ev.cropId];
+            const safeCurrentPrice =
+              typeof currentPrice === "number" && Number.isFinite(currentPrice)
+                ? currentPrice
+                : basePrice;
             this.marketPrices[ev.cropId] = Math.max(
               basePrice * 0.5,
-              this.marketPrices[ev.cropId] - basePrice * 0.1,
+              safeCurrentPrice - basePrice * 0.1,
             );
             for (const cId of Object.keys(this.marketPrices) as CropId[]) {
               if (cId !== ev.cropId) {
                 const otherBase = CROPS[cId].sellPrice;
+                const otherCurrent = this.marketPrices[cId];
+                const safeOtherCurrent =
+                  typeof otherCurrent === "number" && Number.isFinite(otherCurrent)
+                    ? otherCurrent
+                    : otherBase;
                 this.marketPrices[cId] = Math.min(
                   otherBase * 1.2,
-                  this.marketPrices[cId] + otherBase * 0.03,
+                  safeOtherCurrent + otherBase * 0.03,
                 );
               }
             }
@@ -433,7 +501,7 @@ export class MatchRoom implements DurableObject {
       return;
     }
     if (this.status === "crop_ban" && this.banEndsAt && now >= this.banEndsAt) {
-      this.startCropSelection();
+      this.handleBanTimerExpiry();
       return;
     }
     if (this.status === "crop_selection" && this.selectionEndsAt && now >= this.selectionEndsAt) {
@@ -479,6 +547,7 @@ export class MatchRoom implements DurableObject {
     this.hostId = stored.hostId;
     this.hostSessionId = stored.hostSessionId;
     this.settings = roomSettingsSchema.catch(DEFAULT_ROOM_SETTINGS).parse(stored.settings);
+    this.banTurnPlayerId = stored.banTurnPlayerId;
     this.players = new Map(
       stored.players.map((p) => [
         p.id,
@@ -547,6 +616,7 @@ export class MatchRoom implements DurableObject {
         settings: this.settings,
         players,
         marketPrices: this.marketPrices,
+        banTurnPlayerId: this.banTurnPlayerId,
       } satisfies StoredRoomState),
     );
   }
@@ -742,7 +812,7 @@ export class MatchRoom implements DurableObject {
       sessionId,
       role: "player",
       host: this.hostSessionId === sessionId,
-      state: this.publicState(),
+      state: this.getFilteredState("player", playerId),
     });
     this.persist();
     this.broadcastSnapshot();
@@ -787,7 +857,7 @@ export class MatchRoom implements DurableObject {
       sessionId: spectatorSessionId,
       role: "spectator",
       host: this.hostSessionId === spectatorSessionId,
-      state: this.publicState(),
+      state: this.getFilteredState("spectator", spectatorId),
     });
     this.persist();
     this.broadcastSnapshot();
@@ -837,7 +907,7 @@ export class MatchRoom implements DurableObject {
         sessionId: spectatorSessionId,
         role,
         host: this.hostSessionId === spectatorSessionId,
-        state: this.publicState(),
+        state: this.getFilteredState(role, spectatorId),
       });
       this.broadcastSnapshot();
       return;
@@ -914,7 +984,7 @@ export class MatchRoom implements DurableObject {
       sessionId,
       role,
       host: this.hostSessionId === sessionId,
-      state: this.publicState(),
+      state: this.getFilteredState(role, playerId),
     });
     this.persist();
     this.broadcastSnapshot();
@@ -941,7 +1011,8 @@ export class MatchRoom implements DurableObject {
     this.status = "countdown";
     this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
     this.scheduleAlarm();
-    setTimeout(() => this.startCropBan(), COUNTDOWN_MS);
+    if (this.phaseTimer) clearTimeout(this.phaseTimer);
+    this.phaseTimer = setTimeout(() => this.startCropBan(), COUNTDOWN_MS);
   }
 
   private startCropBan(): void {
@@ -955,10 +1026,71 @@ export class MatchRoom implements DurableObject {
       p.selectedCrops = [];
       p.seedChoice = DEFAULT_SELECTED_CROPS[0];
     }
+
+    const pList = [...this.players.values()];
+    if (pList.length > 0) {
+      const randIdx = Math.floor(Math.random() * pList.length);
+      this.banTurnPlayerId = pList[randIdx].id;
+    } else {
+      this.banTurnPlayerId = undefined;
+    }
+
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
-    setTimeout(() => this.startCropSelection(), CROP_BAN_MS);
+    if (this.phaseTimer) clearTimeout(this.phaseTimer);
+    this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
+  }
+
+  private maybeFastForwardCropBan(): void {
+    if (this.status !== "crop_ban") return;
+    if (this.players.size !== this.settings.maxPlayers) return;
+    const allReady = [...this.players.values()].every((p) => p.bannedCrop && p.ready);
+    if (!allReady) return;
+    const now = Date.now();
+    if (this.banEndsAt && this.banEndsAt - now > 5000) {
+      this.banEndsAt = now + 5000;
+      this.scheduleAlarm();
+      if (this.phaseTimer) clearTimeout(this.phaseTimer);
+      this.phaseTimer = setTimeout(() => this.startCropSelection(), 5000);
+    }
+  }
+
+  private handleBanTimerExpiry(): void {
+    if (this.status !== "crop_ban") return;
+    const activePlayer = this.banTurnPlayerId ? this.players.get(this.banTurnPlayerId) : undefined;
+    if (activePlayer && !activePlayer.ready) {
+      if (!activePlayer.bannedCrop) {
+        const bannedAlready = [...this.players.values()]
+          .filter((p) => p.ready && p.bannedCrop)
+          .map((p) => p.bannedCrop!);
+        const allowed = (Object.keys(CROPS) as CropId[]).filter(
+          (id) => !bannedAlready.includes(id),
+        );
+        const randIdx = Math.floor(Math.random() * allowed.length);
+        activePlayer.bannedCrop = allowed[randIdx];
+      }
+      activePlayer.ready = true;
+
+      for (const p of this.players.values()) {
+        if (p.id !== activePlayer.id && !p.ready && p.bannedCrop === activePlayer.bannedCrop) {
+          p.bannedCrop = undefined;
+        }
+      }
+
+      const nextPlayer = [...this.players.values()].find((p) => p.id !== activePlayer.id);
+      if (nextPlayer && !nextPlayer.ready) {
+        this.banTurnPlayerId = nextPlayer.id;
+        this.banEndsAt = Date.now() + CROP_BAN_MS;
+        this.scheduleAlarm();
+        if (this.phaseTimer) clearTimeout(this.phaseTimer);
+        this.phaseTimer = setTimeout(() => this.handleBanTimerExpiry(), CROP_BAN_MS);
+        this.persist();
+        this.broadcastSnapshot();
+        return;
+      }
+    }
+    this.startCropSelection();
   }
 
   private startCropSelection(): void {
@@ -1003,7 +1135,8 @@ export class MatchRoom implements DurableObject {
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
-    setTimeout(() => this.startPlaying(), COUNTDOWN_MS);
+    if (this.phaseTimer) clearTimeout(this.phaseTimer);
+    this.phaseTimer = setTimeout(() => this.startPlaying(), COUNTDOWN_MS);
   }
 
   private startPlaying(): void {
@@ -1080,7 +1213,11 @@ export class MatchRoom implements DurableObject {
       for (const cId of Object.keys(this.marketPrices) as CropId[]) {
         const base = CROPS[cId].sellPrice;
         const current = this.marketPrices[cId];
-        if (current < base) {
+        if (!Number.isFinite(current)) {
+          // Heal corrupted NaN/Infinity price back to base
+          this.marketPrices[cId] = base;
+          pricesChanged = true;
+        } else if (current < base) {
           this.marketPrices[cId] = Math.min(base, current + base * 0.005);
           pricesChanged = true;
         } else if (current > base) {
@@ -1161,6 +1298,7 @@ export class MatchRoom implements DurableObject {
     this.countdownEndsAt = undefined;
     this.banEndsAt = undefined;
     this.selectionEndsAt = undefined;
+    this.banTurnPlayerId = undefined;
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = 0;
     for (const p of this.players.values()) {
@@ -1215,11 +1353,38 @@ export class MatchRoom implements DurableObject {
       recap: this.recap,
       players,
       marketPrices: this.marketPrices,
+      banTurnPlayerId: this.banTurnPlayerId,
     };
   }
 
+  private getFilteredState(role: MatchRole, playerId?: string): PublicMatchState {
+    const state = this.publicState();
+    if (role === "spectator") {
+      return state;
+    }
+    state.players = state.players.map((p) => {
+      if (p.id === playerId) return p;
+      const opponent = { ...p };
+      if (state.status === "crop_ban") {
+        if (!opponent.ready) {
+          opponent.bannedCrop = undefined;
+        }
+      } else if (state.status === "crop_selection") {
+        opponent.selectedCrops = [];
+        opponent.seedChoice = undefined as any;
+      }
+      return opponent;
+    });
+    return state;
+  }
+
   private broadcastSnapshot(): void {
-    this.broadcast({ t: "snapshot", state: this.publicState() });
+    for (const ws of this.ctx.getWebSockets()) {
+      const role = this.wsToRole.get(ws) ?? "player";
+      const playerId = this.wsToPlayer.get(ws);
+      const filteredState = this.getFilteredState(role, playerId);
+      this.sendTo(ws, { t: "snapshot", state: filteredState });
+    }
   }
 
   private broadcast(msg: ServerMsg): void {

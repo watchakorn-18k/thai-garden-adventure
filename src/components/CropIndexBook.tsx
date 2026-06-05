@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { CROPS, type Crop, type CropId } from "@/lib/game-types";
 import {
   ChiliIcon,
@@ -10,7 +10,9 @@ import {
   LemongrassIcon,
   PapayaIcon,
   BasilIcon,
+  SeedIcon,
 } from "./PixelIcons";
+import PixelCrop from "./PixelCrop";
 import { SFX } from "@/lib/sfx";
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
@@ -23,6 +25,28 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   papaya: PapayaIcon,
   basil: BasilIcon,
 };
+
+function DynamicCropIcon({ cropId, stage }: { cropId: CropId; stage: number }) {
+  if (stage === 0) {
+    return <SeedIcon size={38} />;
+  }
+  if (stage === 1) {
+    return (
+      <div style={{ width: 38, height: 38 }}>
+        <PixelCrop id={cropId} stage={0} />
+      </div>
+    );
+  }
+  if (stage === 2) {
+    return (
+      <div style={{ width: 38, height: 38 }}>
+        <PixelCrop id={cropId} stage={1} />
+      </div>
+    );
+  }
+  const RipeIcon = CROP_ICONS[cropId];
+  return <RipeIcon size={38} />;
+}
 
 interface CropIndexBookProps {
   marketPrices?: Record<CropId, number>;
@@ -42,6 +66,15 @@ export default function CropIndexBook({
   iconOnly = false,
 }: CropIndexBookProps) {
   const [open, setOpen] = useState(false);
+  const [animationStage, setAnimationStage] = useState(0);
+
+  useEffect(() => {
+    if (!open) return;
+    const interval = setInterval(() => {
+      setAnimationStage((prev) => (prev + 1) % 4);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, [open]);
   const crops = availableCropIds?.length
     ? availableCropIds.map((id) => CROPS[id]).filter(Boolean)
     : (Object.values(CROPS) as Crop[]);
@@ -122,7 +155,7 @@ export default function CropIndexBook({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.1fr_0.9fr] lg:grid-cols-[1.15fr_0.95fr_0.9fr]">
+          <div className="max-h-[380px] overflow-y-auto pr-2 custom-scrollbar grid grid-cols-1 gap-3 md:grid-cols-[1.1fr_0.9fr] lg:grid-cols-[1.15fr_0.95fr_0.9fr]">
             {crops.map((crop, index) => {
               const Icon = CROP_ICONS[crop.id];
               const marketPrice = Math.round(marketPrices?.[crop.id] ?? crop.sellPrice);
@@ -167,7 +200,7 @@ export default function CropIndexBook({
                             boxShadow: "inset 0 0 0 2px var(--gold)",
                           }}
                         >
-                          <Icon size={38} />
+                          <DynamicCropIcon cropId={crop.id} stage={animationStage} />
                         </div>
                         <div>
                           <p className="font-pixel text-[13px] text-[#f4e4c1]">{crop.name}</p>

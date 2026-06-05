@@ -24,25 +24,37 @@ const HARVESTING_SOUNDS = [
 
 function ensure() {
   if (typeof window === "undefined") return null;
-  if (!ctx) {
-    const Ctor =
-      window.AudioContext ||
-      (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    ctx = new Ctor();
-    master = ctx.createGain();
-    master.gain.value = 0.25;
-    master.connect(ctx.destination);
+  try {
+    if (!ctx) {
+      const Ctor =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!Ctor) return null;
+      ctx = new Ctor();
+      master = ctx.createGain();
+      master.gain.value = 0.25;
+      master.connect(ctx.destination);
 
-    // Pre-generate 2-second shared white noise buffer to prevent runtime allocations
-    const sampleRate = ctx.sampleRate;
-    const size = sampleRate * 2;
-    noiseBuffer = ctx.createBuffer(1, size, sampleRate);
-    const data = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < size; i++) {
-      data[i] = Math.random() * 2 - 1;
+      // Pre-generate 2-second shared white noise buffer to prevent runtime allocations
+      const sampleRate = ctx.sampleRate;
+      const size = sampleRate * 2;
+      noiseBuffer = ctx.createBuffer(1, size, sampleRate);
+      const data = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < size; i++) {
+        data[i] = Math.random() * 2 - 1;
+      }
+      
+      // Trigger lazy preloading in the background
+      setTimeout(preloadAudio, 100);
     }
+    if (ctx.state === "suspended") {
+      void ctx.resume().catch(() => undefined);
+    }
+  } catch (e) {
+    console.warn("WebAudio initialization failed, synthesizer sounds disabled:", e);
+    ctx = null;
+    master = null;
   }
-  if (ctx.state === "suspended") ctx.resume();
   return ctx;
 }
 
@@ -128,12 +140,75 @@ function pop() {
   o.stop(now + 0.11);
 }
 
+const audioPool: Record<string, HTMLAudioElement[]> = {};
+const MAX_POOL_SIZE = 5;
+
+export function preloadAudio() {
+  if (typeof window === "undefined") return;
+  const allUrls = [...HOE_SOUNDS, ...WATERING_SOUNDS, ...HARVESTING_SOUNDS];
+  for (const url of allUrls) {
+    try {
+      if (!audioPool[url]) {
+        audioPool[url] = [];
+      }
+      if (audioPool[url].length === 0) {
+        const audio = new Audio();
+        audio.src = url;
+        audio.preload = "auto";
+        audioPool[url].push(audio);
+      }
+    } catch (e) {
+      console.warn("Failed to preload audio asset:", url, e);
+    }
+  }
+}
+
+export function cleanupSfxPool() {
+  for (const url in audioPool) {
+    const pool = audioPool[url];
+    for (const audio of pool) {
+      try {
+        audio.pause();
+        audio.removeAttribute("src");
+        audio.load();
+      } catch (e) {
+        // ignore
+      }
+    }
+    delete audioPool[url];
+  }
+}
+
 function playOverlap(urls: string[], volume = 1) {
   if (typeof window === "undefined" || muted) return;
-  const url = urls[Math.floor(Math.random() * urls.length)];
-  const audio = new Audio(url);
-  audio.volume = volume;
-  void audio.play().catch(() => undefined);
+  try {
+    const url = urls[Math.floor(Math.random() * urls.length)];
+    if (!audioPool[url]) {
+      audioPool[url] = [];
+    }
+
+    let audio = audioPool[url].find((a) => a.paused || a.ended);
+
+    if (!audio) {
+      if (audioPool[url].length < MAX_POOL_SIZE) {
+        audio = new Audio();
+        audio.src = url;
+        audio.preload = "auto";
+        audioPool[url].push(audio);
+      } else {
+        audio = audioPool[url][0];
+        audio.pause();
+        audio.currentTime = 0;
+      }
+    }
+
+    audio.volume = volume;
+    void audio.play().catch((err) => {
+      console.warn("SFX audio play failed or was interrupted:", err);
+    });
+  } catch (err) {
+    console.error("Error playing overlap audio:", err);
+  }
 }
 
 export const SFX = {

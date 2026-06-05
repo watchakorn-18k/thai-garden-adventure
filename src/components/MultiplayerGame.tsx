@@ -22,7 +22,7 @@ import { applyAction, facingTile } from "@/lib/game-logic";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
-import { SFX } from "@/lib/sfx";
+import { SFX, setMuted } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
 import gamePlayMusicUrl from "../../game_play.wav";
 import winnerSoundUrl from "../../winner_sound.mp3";
@@ -233,10 +233,17 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         state?.status === "crop_ban" ||
         state?.status === "crop_selection" ||
         state?.status === "prepare_countdown");
-    const audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
-    lobbyMusicRef.current = audio;
-    audio.loop = true;
-    audio.volume = 0.35;
+    
+    let audio: HTMLAudioElement | null = null;
+    try {
+      audio = lobbyMusicRef.current ?? new Audio(lobbyMusicUrl);
+      lobbyMusicRef.current = audio;
+      audio.loop = true;
+      audio.volume = 0.35;
+    } catch (e) {
+      console.warn("Failed to initialize lobby music:", e);
+      return;
+    }
 
     if (!shouldPlayLobbyMusic) {
       audio.pause();
@@ -245,7 +252,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     }
 
     const play = () => {
-      void audio.play().catch(() => undefined);
+      if (audio) void audio.play().catch(() => undefined);
     };
     play();
     window.addEventListener("pointerdown", play, { once: true });
@@ -254,16 +261,22 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     return () => {
       window.removeEventListener("pointerdown", play);
       window.removeEventListener("keydown", play);
-      audio.pause();
+      if (audio) audio.pause();
     };
   }, [musicEnabled, state?.status]);
 
   useEffect(() => {
     const shouldPlayGameMusic = musicEnabled && state?.status === "playing";
-    const audio = gamePlayMusicRef.current ?? new Audio(gamePlayMusicUrl);
-    gamePlayMusicRef.current = audio;
-    audio.loop = true;
-    audio.volume = 0.3;
+    let audio: HTMLAudioElement | null = null;
+    try {
+      audio = gamePlayMusicRef.current ?? new Audio(gamePlayMusicUrl);
+      gamePlayMusicRef.current = audio;
+      audio.loop = true;
+      audio.volume = 0.3;
+    } catch (e) {
+      console.warn("Failed to initialize gameplay music:", e);
+      return;
+    }
 
     if (!shouldPlayGameMusic) {
       audio.pause();
@@ -272,7 +285,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     }
 
     const play = () => {
-      void audio.play().catch(() => undefined);
+      if (audio) void audio.play().catch(() => undefined);
     };
     play();
     window.addEventListener("pointerdown", play, { once: true });
@@ -281,29 +294,42 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     return () => {
       window.removeEventListener("pointerdown", play);
       window.removeEventListener("keydown", play);
-      audio.pause();
+      if (audio) audio.pause();
     };
   }, [musicEnabled, state?.status]);
 
   useEffect(() => {
-    const winnerAudio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
-    const loserAudio = loserSoundRef.current ?? new Audio(loserSoundUrl);
-    const drawAudio = drawSoundRef.current ?? new Audio(drawSoundUrl);
-    winnerSoundRef.current = winnerAudio;
-    loserSoundRef.current = loserAudio;
-    drawSoundRef.current = drawAudio;
-    winnerAudio.loop = true;
-    loserAudio.loop = true;
-    drawAudio.loop = true;
-    winnerAudio.volume = 0.22;
-    loserAudio.volume = 0.22;
-    drawAudio.volume = 0.22;
+    let winnerAudio: HTMLAudioElement | null = null;
+    let loserAudio: HTMLAudioElement | null = null;
+    let drawAudio: HTMLAudioElement | null = null;
+    
+    try {
+      winnerAudio = winnerSoundRef.current ?? new Audio(winnerSoundUrl);
+      loserAudio = loserSoundRef.current ?? new Audio(loserSoundUrl);
+      drawAudio = drawSoundRef.current ?? new Audio(drawSoundUrl);
+      
+      winnerSoundRef.current = winnerAudio;
+      loserSoundRef.current = loserAudio;
+      drawSoundRef.current = drawAudio;
+      
+      winnerAudio.loop = true;
+      loserAudio.loop = true;
+      drawAudio.loop = true;
+      winnerAudio.volume = 0.22;
+      loserAudio.volume = 0.22;
+      drawAudio.volume = 0.22;
+    } catch (e) {
+      console.warn("Failed to initialize match outcome music:", e);
+      return;
+    }
 
     const endSounds = [winnerAudio, loserAudio, drawAudio];
     const stopEndSounds = () => {
       for (const sound of endSounds) {
-        sound.pause();
-        sound.currentTime = 0;
+        if (sound) {
+          sound.pause();
+          sound.currentTime = 0;
+        }
       }
     };
 
@@ -317,14 +343,17 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       : selfId && state.winnerId !== selfId
         ? loserAudio
         : winnerAudio;
+        
     for (const sound of endSounds) {
       if (sound === audio) continue;
-      sound.pause();
-      sound.currentTime = 0;
+      if (sound) {
+        sound.pause();
+        sound.currentTime = 0;
+      }
     }
 
     const play = () => {
-      void audio.play().catch(() => undefined);
+      if (audio) void audio.play().catch(() => undefined);
     };
     play();
     window.addEventListener("pointerdown", play, { once: true });
@@ -333,9 +362,43 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
     return () => {
       window.removeEventListener("pointerdown", play);
       window.removeEventListener("keydown", play);
-      audio.pause();
+      if (audio) audio.pause();
     };
   }, [musicEnabled, selfId, state?.status, state?.winnerId]);
+
+  // Synchronize music/audio mute state with sfx setting
+  useEffect(() => {
+    setMuted(!musicEnabled);
+  }, [musicEnabled]);
+
+  // Clean up and release all audio elements on component unmount
+  useEffect(() => {
+    return () => {
+      const audios = [
+        lobbyMusicRef.current,
+        gamePlayMusicRef.current,
+        winnerSoundRef.current,
+        loserSoundRef.current,
+        drawSoundRef.current,
+      ];
+      for (const audio of audios) {
+        if (audio) {
+          try {
+            audio.pause();
+            audio.removeAttribute("src");
+            audio.load();
+          } catch (e) {
+            console.error("Error cleaning up audio resource:", e);
+          }
+        }
+      }
+      lobbyMusicRef.current = null;
+      gamePlayMusicRef.current = null;
+      winnerSoundRef.current = null;
+      loserSoundRef.current = null;
+      drawSoundRef.current = null;
+    };
+  }, []);
 
   const toggleLobbyMusic = useCallback(() => {
     SFX.click();
@@ -358,6 +421,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSpectator = matchRole === "spectator";
+  const currentRole = matchRole === "spectator" ? "SPECTATOR" : "PLAYER";
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
   const renderedSelf = localPlayer ?? self;
   const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
@@ -688,6 +752,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           self={self}
           isSpectator={isSpectator}
           onBanCrop={(id) => send({ t: "ban_crop", id })}
+          onReady={() => send({ t: "ready" })}
         />
       )}
 
@@ -758,7 +823,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
       )}
-      {state.status !== "crop_ban" &&
+      {currentRole === "SPECTATOR" &&
+        state.status !== "crop_ban" &&
         state.status !== "crop_selection" &&
         state.status !== "prepare_countdown" && (
           <CropIndexBook
@@ -768,13 +834,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             availableCropIds={
               state.status === "playing" && self ? selectedCropPool(self.selectedCrops) : undefined
             }
-            onSelectCrop={
-              !isSpectator && self && state.status === "playing"
-                ? (id) => {
-                    send({ t: "seed", id });
-                  }
-                : undefined
-            }
+            onSelectCrop={undefined}
           />
         )}
       {state.status === "playing" && self && !isSpectator && (
@@ -1257,11 +1317,13 @@ function CropBanView({
   self,
   isSpectator,
   onBanCrop,
+  onReady,
 }: {
   state: PublicMatchState;
   self?: PublicPlayer;
   isSpectator: boolean;
   onBanCrop: (id: CropId) => void;
+  onReady: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1275,6 +1337,9 @@ function CropBanView({
     .toString()
     .padStart(2, "0");
 
+  const activePlayer = state.players.find((p) => p.id === state.banTurnPlayerId);
+  const isMyTurn = !isSpectator && self?.id === state.banTurnPlayerId;
+
   return (
     <section className="lobby-stage relative z-10 w-full max-w-5xl">
       <div className="lobby-title-card pixel-panel">
@@ -1287,32 +1352,96 @@ function CropBanView({
           </span>
         </div>
         <h2 className="font-pixel lobby-title">แบนผัก 1 อย่าง</h2>
-        <p className="lobby-subtitle">แบนซ้ำกันได้ · หลังหมดเวลา จะเลือกได้เฉพาะผักที่ไม่โดนแบน</p>
+        <p className="lobby-subtitle">
+          {isSpectator ? (
+            `รอ ${activePlayer?.name ?? "Rival"} แบนพืช...`
+          ) : isMyTurn ? (
+            <span className="text-[#86efac] font-bold">ตาของคุณในการแบน</span>
+          ) : (
+            <span className="text-[var(--muted-foreground)]">รออีกฝ่ายแบนพืช...</span>
+          )}
+        </p>
       </div>
+
+      {isSpectator && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 my-2">
+          {state.players.map((player, idx) => {
+            const crop = player.bannedCrop ? CROPS[player.bannedCrop] : null;
+            const Icon = crop ? CROP_ICONS[crop.id] : null;
+            return (
+              <div
+                key={player.id}
+                className="pixel-panel p-4 flex flex-col items-center justify-center gap-2"
+                data-ready={player.ready ? "true" : undefined}
+                style={{ background: player.ready ? "rgba(255, 210, 74, 0.08)" : undefined }}
+              >
+                <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">
+                  PLAYER {idx + 1}: <span className="text-white">{player.name}</span>
+                </div>
+                <div className="flex items-center gap-3 mt-1 min-h-[44px]">
+                  {crop && Icon ? (
+                    <>
+                      <Icon size={24} />
+                      <div className="font-pixel text-[14px] text-[var(--gold)]">
+                        แบน {crop.name}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="font-pixel text-[11px] text-[var(--muted-foreground)] animate-pulse">
+                      กำลังเลือก...
+                    </div>
+                  )}
+                </div>
+                <div className="font-pixel text-[8px] mt-1">
+                  {player.ready ? (
+                    <span className="text-[#86efac]">ยืนยันแล้ว [LOCKED]</span>
+                  ) : (
+                    <span className="text-[var(--muted-foreground)]">กำลังเลือก</span>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
 
       <div className="pixel-panel my-4 grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
         {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
           const Icon = CROP_ICONS[crop.id];
           const active = self?.bannedCrop === crop.id;
+          const isBannedByOther = state.players.some(
+            (p) => p.id !== self?.id && p.ready && p.bannedCrop === crop.id,
+          );
+          const disabled = isSpectator || self?.ready || isBannedByOther || !isMyTurn;
           return (
             <button
               key={crop.id}
               type="button"
               onClick={() => {
-                if (isSpectator) return;
+                if (disabled) return;
                 SFX.click();
                 onBanCrop(crop.id);
               }}
-              disabled={isSpectator}
+              disabled={disabled}
               className="farm-crop-card pixel-btn text-left"
               data-active={active ? "true" : undefined}
               title={`แบน ${crop.name}`}
+              style={
+                isBannedByOther
+                  ? { opacity: 0.4, filter: "grayscale(100%)", cursor: "not-allowed" }
+                  : !isMyTurn
+                    ? { opacity: 0.5, filter: "grayscale(50%)", cursor: "not-allowed" }
+                    : undefined
+              }
             >
               <span className="farm-crop-icon">
                 <Icon size={26} />
               </span>
               <span className="farm-crop-body">
                 <span className="farm-crop-name">{crop.name}</span>
+                {isBannedByOther && (
+                  <span className="font-pixel text-[7px] text-[#ff6b6b] block">ALREADY BANNED</span>
+                )}
                 <span className="farm-crop-prices">
                   <span>ซื้อ {crop.seedCost}</span>
                   <span>ขาย {crop.sellPrice}</span>
@@ -1323,20 +1452,52 @@ function CropBanView({
         })}
       </div>
 
+      {self?.bannedCrop && !isSpectator && (
+        <div className="flex justify-center my-4">
+          <button
+            type="button"
+            onClick={() => {
+              if (self.ready || !isMyTurn) return;
+              SFX.click();
+              onReady();
+            }}
+            disabled={self.ready || !isMyTurn}
+            className="pixel-btn lobby-ready-btn w-full max-w-xs"
+            data-accent={self.ready || !isMyTurn ? undefined : "true"}
+          >
+            <span className="font-pixel text-[12px]">
+              {!isMyTurn
+                ? "รออีกฝ่ายแบนพืช..."
+                : self.ready
+                  ? "READY (ยืนยันแล้ว)"
+                  : "ยืนยันการแบน (Confirm Ban)"}
+            </span>
+          </button>
+        </div>
+      )}
+
       <div className="pixel-panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex flex-wrap gap-2">
-          {state.players.map((player) => (
-            <span
-              key={player.id}
-              className="pixel-chip font-pixel text-[8px]"
-              data-gold={player.bannedCrop ? "true" : undefined}
-            >
-              {player.name}: {player.bannedCrop ? CROPS[player.bannedCrop].name : "ยังไม่แบน"}
-            </span>
-          ))}
+          {state.players.map((player) => {
+            const isPlayerTurn = state.banTurnPlayerId === player.id;
+            return (
+              <span
+                key={player.id}
+                className="pixel-chip font-pixel text-[8px]"
+                data-gold={player.ready ? "true" : undefined}
+                style={
+                  isPlayerTurn && !player.ready ? { border: "1px solid var(--gold)" } : undefined
+                }
+              >
+                {player.name}:{" "}
+                {player.bannedCrop ? `แบน ${CROPS[player.bannedCrop].name}` : "ยังไม่เลือก"}
+                {player.ready ? " [READY]" : isPlayerTurn ? " [กำลังแบน]" : " [รอแบน]"}
+              </span>
+            );
+          })}
         </div>
         <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          ไม่ต้องกด READY · หมดเวลาแล้วไปเลือกเมล็ด
+          แบนพืชทีละเทิร์น สลับกันแบนเพื่อความสมดุล
         </span>
       </div>
     </section>
@@ -1412,46 +1573,94 @@ function CropSelectionView({
       </div>
 
       <div className="pixel-panel my-4 flex flex-col gap-3 px-4 py-4">
-        <div>
-          <div className="mb-2 font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">
-            ตะกร้าผักของคุณ · กด X หรือกดผักซ้ำเพื่อเอาออก
-          </div>
-          <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
-            {Array.from({ length: SELECTED_CROP_COUNT }).map((_, index) => {
-              const cropId = selected[index];
-              const crop = cropId ? CROPS[cropId] : undefined;
-              const Icon = crop ? CROP_ICONS[crop.id] : undefined;
+        {isSpectator ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {state.players.map((player, idx) => {
+              const pSelected = player.selectedCrops.filter((id) => !bannedCrops.includes(id));
               return (
                 <div
-                  key={index}
-                  className="pixel-chip flex min-h-[54px] items-center justify-between gap-2 px-3 py-2 font-pixel text-[8px]"
-                  data-gold={crop ? "true" : undefined}
+                  key={player.id}
+                  className="pixel-panel p-4 flex flex-col gap-2"
+                  data-ready={player.ready ? "true" : undefined}
+                  style={{ background: player.ready ? "rgba(255, 210, 74, 0.08)" : undefined }}
                 >
-                  {crop && Icon ? (
-                    <>
-                      <span className="flex items-center gap-2">
-                        <Icon size={22} />
-                        {crop.name}
-                      </span>
-                      {!isLocked && !isSpectator && (
-                        <button
-                          type="button"
-                          onClick={() => toggleCrop(crop.id)}
-                          className="pixel-btn px-2 py-1"
-                          aria-label={`เอา ${crop.name} ออกจากตะกร้า`}
+                  <div className="flex items-center justify-between">
+                    <span className="font-pixel text-[10px] text-[var(--gold)]">
+                      PLAYER {idx + 1}: {player.name}
+                    </span>
+                    <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+                      {player.ready ? "READY (LOCKED)" : "PICKING"}
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    {Array.from({ length: SELECTED_CROP_COUNT }).map((_, index) => {
+                      const cropId = pSelected[index];
+                      const crop = cropId ? CROPS[cropId] : undefined;
+                      const Icon = crop ? CROP_ICONS[crop.id] : undefined;
+                      return (
+                        <div
+                          key={index}
+                          className="pixel-chip flex min-h-[50px] flex-col items-center justify-center gap-1 p-2 font-pixel text-[7px]"
+                          data-gold={crop ? "true" : undefined}
                         >
-                          <span className="font-pixel text-[8px]">X</span>
-                        </button>
-                      )}
-                    </>
-                  ) : (
-                    <span className="text-[var(--muted-foreground)]">ช่องว่าง {index + 1}</span>
-                  )}
+                          {crop && Icon ? (
+                            <>
+                              <Icon size={18} />
+                              <span className="text-center truncate w-full">{crop.name}</span>
+                            </>
+                          ) : (
+                            <span className="text-[var(--muted-foreground)]">ว่าง</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
                 </div>
               );
             })}
           </div>
-        </div>
+        ) : (
+          <div>
+            <div className="mb-2 font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">
+              ตะกร้าผักของคุณ · กด X หรือกดผักซ้ำเพื่อเอาออก
+            </div>
+            <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+              {Array.from({ length: SELECTED_CROP_COUNT }).map((_, index) => {
+                const cropId = selected[index];
+                const crop = cropId ? CROPS[cropId] : undefined;
+                const Icon = crop ? CROP_ICONS[crop.id] : undefined;
+                return (
+                  <div
+                    key={index}
+                    className="pixel-chip flex min-h-[54px] items-center justify-between gap-2 px-3 py-2 font-pixel text-[8px]"
+                    data-gold={crop ? "true" : undefined}
+                  >
+                    {crop && Icon ? (
+                      <>
+                        <span className="flex items-center gap-2">
+                          <Icon size={22} />
+                          {crop.name}
+                        </span>
+                        {!isLocked && !isSpectator && (
+                          <button
+                            type="button"
+                            onClick={() => toggleCrop(crop.id)}
+                            className="pixel-btn px-2 py-1"
+                            aria-label={`เอา ${crop.name} ออกจากตะกร้า`}
+                          >
+                            <span className="font-pixel text-[8px]">X</span>
+                          </button>
+                        )}
+                      </>
+                    ) : (
+                      <span className="text-[var(--muted-foreground)]">ช่องว่าง {index + 1}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
           {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
