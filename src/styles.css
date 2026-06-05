@@ -1482,3 +1482,64 @@
   background: var(--gold);
   border: 1px solid #1a0f1f;
 }
+
+/* Multiplayer call-to-action under the single-player field */
+@keyframes cta-rise {
+  0% {
+    transform: translateY(16px) scale(0.96);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+@keyframes cta-label-glow {
+  0%,
+  100% {
+    opacity: 0.7;
+    text-shadow: none;
+  }
+  50% {
+    opacity: 1;
+    text-shadow: 0 0 8px rgba(255, 210, 74, 0.6);
+  }
+}
+.cta-multiplayer {
+  animation: cta-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.cta-multiplayer-label {
+  color: var(--gold);
+  animation: cta-label-glow 2.4s ease-in-out infinite;
+}
+/* Idle nearly-still, then a snappy squash/stretch pop every cycle — classic game "juice". */
+@keyframes cta-btn-bob {
+  0%,
+  88%,
+  100% {
+    transform: translateY(0) scale(1, 1);
+  }
+  90% {
+    transform: translateY(0) scale(1.08, 0.9);
+  }
+  93% {
+    transform: translateY(-6px) scale(0.94, 1.08);
+  }
+  96% {
+    transform: translateY(0) scale(1.03, 0.97);
+  }
+  98% {
+    transform: translateY(0) scale(1, 1);
+  }
+}
+/* The pop lives on a wrapper so the button keeps its own hover/active lift. */
+.cta-btn-bob {
+  display: inline-flex;
+  animation: cta-btn-bob 5s cubic-bezier(0.3, 1.6, 0.5, 1) infinite;
+}
+.cta-btn-bob[data-delay="true"] {
+  animation-delay: 2.5s;
+}
+.cta-btn-bob:hover {
+  animation-play-state: paused;
+}

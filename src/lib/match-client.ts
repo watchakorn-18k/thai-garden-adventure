@@ -36,6 +36,23 @@ function wsBaseUrl(): string {
   return `${proto}//${window.location.host}`;
 }
 
+function httpBaseUrl(): string {
+  if (typeof window === "undefined") return "http://127.0.0.1:8787";
+  const isLocal =
+    window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+  if (isLocal) return "http://127.0.0.1:8787";
+  return `${window.location.protocol}//${window.location.host}`;
+}
+
+// Ask the matchmaker to pair us into a room. Returns the room code to join as a player.
+export async function requestQuickMatch(): Promise<string> {
+  const res = await fetch(`${httpBaseUrl()}/matchmake`, { method: "POST" });
+  if (!res.ok) throw new Error(`matchmake failed: ${res.status}`);
+  const data = (await res.json()) as { code?: string };
+  if (!data.code || !/^[A-Z0-9]{6}$/.test(data.code)) throw new Error("matchmake bad response");
+  return data.code;
+}
+
 function sessionKey(code: string): string {
   return `tg.match.${code}.sessionId`;
 }

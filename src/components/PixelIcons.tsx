@@ -14,6 +14,70 @@ const wrap = (size: number, body: React.ReactNode) => (
   </svg>
 );
 
+export function HelpBookIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      <rect x="3" y="3" width="10" height="10" fill="#1a0f1f" />
+      <rect x="4" y="2" width="8" height="1" fill="#f4e4c1" />
+      <rect x="4" y="3" width="8" height="9" fill="#f4e4c1" />
+      <rect x="11" y="4" width="1" height="8" fill="#c8a878" />
+      <rect x="5" y="4" width="5" height="1" fill="#8b6420" />
+      <rect x="5" y="6" width="6" height="1" fill="#2d1b3d" />
+      <rect x="5" y="8" width="4" height="1" fill="#2d1b3d" />
+      <rect x="8" y="10" width="1" height="1" fill="#d94e6a" />
+      <rect x="9" y="9" width="1" height="1" fill="#d94e6a" />
+      <rect x="10" y="8" width="1" height="1" fill="#d94e6a" />
+      <rect x="10" y="6" width="1" height="2" fill="#d94e6a" />
+      <rect x="8" y="5" width="2" height="1" fill="#d94e6a" />
+      <rect x="7" y="6" width="1" height="1" fill="#d94e6a" />
+      <rect x="8" y="12" width="1" height="1" fill="#ffd24a" />
+    </>,
+  );
+}
+
+export function SpeakerOnIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* speaker body + cone */}
+      <rect x="3" y="6" width="2" height="4" fill="#4a2f5c" />
+      <rect x="5" y="5" width="1" height="6" fill="#f4e4c1" />
+      <rect x="6" y="4" width="1" height="8" fill="#f4e4c1" />
+      <rect x="7" y="3" width="1" height="10" fill="#f4e4c1" />
+      {/* sound waves */}
+      <rect x="9" y="6" width="1" height="1" fill="#ffd24a" />
+      <rect x="9" y="9" width="1" height="1" fill="#ffd24a" />
+      <rect x="10" y="7" width="1" height="2" fill="#ffd24a" />
+      <rect x="11" y="4" width="1" height="2" fill="#e8a23a" />
+      <rect x="11" y="10" width="1" height="2" fill="#e8a23a" />
+      <rect x="12" y="6" width="1" height="4" fill="#e8a23a" />
+    </>,
+  );
+}
+
+export function SpeakerOffIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* speaker body + cone */}
+      <rect x="3" y="6" width="2" height="4" fill="#4a2f5c" />
+      <rect x="5" y="5" width="1" height="6" fill="#b89dd1" />
+      <rect x="6" y="4" width="1" height="8" fill="#b89dd1" />
+      <rect x="7" y="3" width="1" height="10" fill="#b89dd1" />
+      {/* mute cross */}
+      <rect x="9" y="5" width="1" height="1" fill="#d94e6a" />
+      <rect x="10" y="6" width="1" height="1" fill="#d94e6a" />
+      <rect x="11" y="7" width="1" height="1" fill="#d94e6a" />
+      <rect x="12" y="8" width="1" height="1" fill="#d94e6a" />
+      <rect x="12" y="5" width="1" height="1" fill="#d94e6a" />
+      <rect x="11" y="6" width="1" height="1" fill="#d94e6a" />
+      <rect x="9" y="8" width="1" height="1" fill="#d94e6a" />
+      <rect x="10" y="7" width="1" height="1" fill="#d94e6a" />
+    </>,
+  );
+}
+
 export function HoeIcon({ size = 24 }: IconProps) {
   return wrap(
     size,

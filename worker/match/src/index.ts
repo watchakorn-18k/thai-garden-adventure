@@ -1,10 +1,12 @@
 import { MatchRoom } from "./match-do";
+import { Matchmaker } from "./matchmaker-do";
 import { ROOM_CODE_RE } from "../../../src/lib/match-protocol";
 
-export { MatchRoom };
+export { MatchRoom, Matchmaker };
 
 interface Env {
   MATCH_ROOM: DurableObjectNamespace;
+  MATCHMAKER: DurableObjectNamespace;
 }
 
 const CORS = {
@@ -26,6 +28,17 @@ export default {
       const stub = env.MATCH_ROOM.get(id);
       const forward = new Request(`https://room/ws?code=${code}`, request);
       return stub.fetch(forward);
+    }
+
+    if (url.pathname === "/matchmake" && request.method === "POST") {
+      const id = env.MATCHMAKER.idFromName("global");
+      const stub = env.MATCHMAKER.get(id);
+      const res = await stub.fetch("https://matchmaker/pair", { method: "POST" });
+      const body = await res.text();
+      return new Response(body, {
+        status: res.status,
+        headers: { ...CORS, "content-type": "application/json" },
+      });
     }
 
     if (url.pathname === "/health") {

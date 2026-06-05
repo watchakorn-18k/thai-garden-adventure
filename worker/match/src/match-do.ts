@@ -142,6 +142,17 @@ export class MatchRoom implements DurableObject {
   async fetch(request: Request): Promise<Response> {
     await this.ensureInitialized();
     const url = new URL(request.url);
+    if (url.pathname === "/joinable") {
+      // Matchmaker asks this before pairing a player in: a room is joinable
+      // only while still in the lobby with an open player slot.
+      const joinable = this.status === "lobby" && this.players.size < this.settings.maxPlayers;
+      return Response.json({
+        joinable,
+        status: this.status,
+        players: this.players.size,
+        maxPlayers: this.settings.maxPlayers,
+      });
+    }
     if (url.pathname === "/ws") {
       if (request.headers.get("Upgrade") !== "websocket") {
         return new Response("Expected WebSocket", { status: 426 });

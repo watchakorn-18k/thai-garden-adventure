@@ -3,6 +3,7 @@ import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
 import CosmeticPicker from "./CosmeticPicker";
 import CropIndexBook from "./CropIndexBook";
+import QuickMatchButton from "./QuickMatchButton";
 import {
   HoeIcon,
   WaterCanIcon,
@@ -17,6 +18,9 @@ import {
   LemongrassIcon,
   PapayaIcon,
   BasilIcon,
+  HelpBookIcon,
+  SpeakerOnIcon,
+  SpeakerOffIcon,
 } from "./PixelIcons";
 import {
   COLS,
@@ -30,7 +34,7 @@ import {
   type Tool,
 } from "@/lib/game-types";
 import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from "@/lib/game-logic";
-import { SFX, setMuted, isMuted } from "@/lib/sfx";
+import { SFX, setMuted, isMuted, startBgm } from "@/lib/sfx";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
 
 const TILE = 56;
@@ -75,6 +79,7 @@ export default function FarmGame() {
   });
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
   const [outfitOpen, setOutfitOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const [popups, setPopups] = useState<
     { id: number; x: number; y: number; text: string; tone: "good" | "bad" | "info" }[]
   >([]);
@@ -348,10 +353,20 @@ export default function FarmGame() {
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
+      if (helpOpen) {
+        if (e.key === "Escape") setHelpOpen(false);
+        e.preventDefault();
+        return;
+      }
+
       const k = normalizedKeyboardKey(e);
       keys.current.add(k);
       if (["space", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
         e.preventDefault();
+      }
+      if (e.key === "?") {
+        setHelpOpen(true);
+        SFX.click();
       }
       if (k === "space" || k === "enter") {
         if (!e.repeat) doAction();
@@ -372,7 +387,22 @@ export default function FarmGame() {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [doAction]);
+  }, [doAction, helpOpen]);
+
+  // Browsers block autoplay until the first user gesture — start BGM then.
+  useEffect(() => {
+    const onFirstGesture = () => {
+      if (!isMuted()) startBgm();
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+    window.addEventListener("pointerdown", onFirstGesture);
+    window.addEventListener("keydown", onFirstGesture);
+    return () => {
+      window.removeEventListener("pointerdown", onFirstGesture);
+      window.removeEventListener("keydown", onFirstGesture);
+    };
+  }, []);
 
   useEffect(() => {
     const SPEED = 5.2; // tiles per second
@@ -612,14 +642,6 @@ export default function FarmGame() {
             <CoinIcon size={18} />
             <span>{coins}</span>
           </div>
-          <a
-            href="/lobby"
-            className="pixel-btn flex items-center gap-2"
-            data-accent="true"
-            style={{ fontSize: 10 }}
-          >
-            1V1
-          </a>
           <HeaderOutfitMenu
             outfit={{
               open: outfitOpen,
@@ -644,16 +666,30 @@ export default function FarmGame() {
           />
           <button
             onClick={() => {
+              setHelpOpen(true);
+              SFX.click();
+            }}
+            className="pixel-btn flex h-[34px] w-[34px] items-center justify-center p-0"
+            title="วิธีเล่น (?)"
+            aria-label="วิธีเล่น"
+          >
+            <HelpBookIcon size={22} />
+          </button>
+          <button
+            onClick={() => {
               const v = !isMuted();
               setMuted(v);
               setMutedState(v);
-              if (!v) SFX.click();
+              if (!v) {
+                startBgm();
+                SFX.click();
+              }
             }}
-            className="pixel-btn flex items-center gap-2"
-            title="Mute (M)"
-            style={{ fontSize: 10 }}
+            className="pixel-btn flex h-[34px] w-[34px] items-center justify-center p-0"
+            title="ปิด/เปิดเสียง (M)"
+            aria-label={muted ? "เปิดเสียง" : "ปิดเสียง"}
           >
-            {muted ? "🔇" : "🔊"}
+            {muted ? <SpeakerOffIcon size={22} /> : <SpeakerOnIcon size={22} />}
           </button>
         </div>
       </header>
@@ -661,7 +697,7 @@ export default function FarmGame() {
       {/* Field */}
       <div
         ref={fieldRef}
-        className={`relative field-frame scanlines ${screenShake ? "screen-shake" : ""}`}
+        className={`relative isolate mt-4 field-frame scanlines ${screenShake ? "screen-shake" : ""}`}
         style={{ width: COLS * TILE, height: ROWS * TILE }}
       >
         {tiles.map((row, y) =>
@@ -920,6 +956,31 @@ export default function FarmGame() {
         </div>
       </div>
 
+      {/* Multiplayer call-to-action — sits under the single-player field */}
+      <div className="cta-multiplayer relative z-10 flex flex-col items-center gap-3 py-4">
+        <span className="cta-multiplayer-label font-pixel text-[8px] tracking-[2px]">
+          อยากแข่งกับเพื่อน?
+        </span>
+        <div className="flex items-center gap-3">
+          <span className="cta-btn-bob">
+            <QuickMatchButton
+              label="QUICK MATCH"
+              className="pixel-btn flex h-11 min-w-[160px] items-center justify-center px-5"
+              style={{ fontSize: 11 }}
+            />
+          </span>
+          <span className="cta-btn-bob" data-delay="true">
+            <a
+              href="/lobby"
+              className="pixel-btn flex h-11 min-w-[80px] items-center justify-center px-5"
+              style={{ fontSize: 11 }}
+            >
+              1V1
+            </a>
+          </span>
+        </div>
+      </div>
+
       {/* Toolbar */}
       <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
         <div className="farm-toolbar-section farm-toolbar-tools">
@@ -993,88 +1054,111 @@ export default function FarmGame() {
         </div>
       </div>
 
-      {/* Controls panel */}
-      <div className="relative z-10 w-full max-w-5xl pixel-panel px-6 py-5">
-        <div className="flex items-center gap-3 mb-5">
-          <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">CONTROLS</span>
-          <span className="font-pixel text-[8px] tracking-[1.5px] text-[var(--muted-foreground)] opacity-70">
-            คู่มือการเล่น
-          </span>
-          <span className="flex-1 h-[3px] bg-[#1a0f1f]" />
-          <span className="font-pixel text-[8px] text-[var(--muted-foreground)] opacity-60">
-            V1.0
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-[auto_3px_1fr] gap-6 md:gap-7 items-start">
-          <div className="flex flex-col gap-5 min-w-[220px]">
-            <div className="flex items-start gap-4">
-              <div className="grid grid-cols-3 grid-rows-2 gap-1 shrink-0">
-                <span />
-                <kbd className="pixel-key">W</kbd>
-                <span />
-                <kbd className="pixel-key">A</kbd>
-                <kbd className="pixel-key">S</kbd>
-                <kbd className="pixel-key">D</kbd>
-              </div>
-              <div className="flex flex-col gap-1 pt-1">
-                <span className="font-pixel text-[10px] tracking-wider">MOVE</span>
-                <span className="font-pixel text-[8px] text-[var(--muted-foreground)] leading-relaxed">
-                  เดินสำรวจ · ลูกศรก็ได้
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <kbd className="pixel-key pixel-key-wide">SPACE</kbd>
-              <div className="flex flex-col gap-1">
-                <span className="font-pixel text-[10px] tracking-wider">USE TOOL</span>
-                <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-                  ทำกับช่องที่หันหน้าใส่
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 flex-wrap">
-              <span className="font-pixel text-[8px] text-[var(--muted-foreground)] mr-1">
-                เลือกเครื่องมือ
+      {/* Controls / how-to-play modal */}
+      {helpOpen && (
+        <div
+          className="fixed inset-0 z-40 flex items-center justify-center p-4"
+          style={{ background: "rgba(10,5,15,0.85)" }}
+          onClick={() => setHelpOpen(false)}
+        >
+          <div
+            className="relative w-full max-w-5xl pixel-panel px-6 py-5 help-modal-pop"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-modal="true"
+            aria-label="วิธีการเล่น"
+          >
+            <div className="flex items-center gap-3 mb-5">
+              <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
+                CONTROLS
               </span>
-              <kbd className="pixel-key pixel-key-sm">1</kbd>
-              <kbd className="pixel-key pixel-key-sm">2</kbd>
-              <kbd className="pixel-key pixel-key-sm">3</kbd>
+              <span className="font-pixel text-[8px] tracking-[1.5px] text-[var(--muted-foreground)] opacity-70">
+                คู่มือการเล่น
+              </span>
+              <span className="flex-1 h-[3px] bg-[#1a0f1f]" />
+              <button
+                type="button"
+                onClick={() => setHelpOpen(false)}
+                className="pixel-btn flex h-8 w-8 items-center justify-center p-0"
+                title="ปิด (ESC)"
+                aria-label="ปิด"
+                style={{ fontSize: 10 }}
+              >
+                ✕
+              </button>
             </div>
-          </div>
 
-          <span className="hidden md:block w-[3px] self-stretch bg-[#1a0f1f]" />
+            <div className="grid grid-cols-1 md:grid-cols-[auto_3px_1fr] gap-6 md:gap-7 items-start">
+              <div className="flex flex-col gap-5 min-w-[220px]">
+                <div className="flex items-start gap-4">
+                  <div className="grid grid-cols-3 grid-rows-2 gap-1 shrink-0">
+                    <span />
+                    <kbd className="pixel-key">W</kbd>
+                    <span />
+                    <kbd className="pixel-key">A</kbd>
+                    <kbd className="pixel-key">S</kbd>
+                    <kbd className="pixel-key">D</kbd>
+                  </div>
+                  <div className="flex flex-col gap-1 pt-1">
+                    <span className="font-pixel text-[10px] tracking-wider">MOVE</span>
+                    <span className="font-pixel text-[8px] text-[var(--muted-foreground)] leading-relaxed">
+                      เดินสำรวจ · ลูกศรก็ได้
+                    </span>
+                  </div>
+                </div>
 
-          <div className="flex flex-col gap-3 min-w-0">
-            <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-              WORKFLOW
-            </span>
-            <div className="flow-strip">
-              <FlowStep n="01" label="TILL" sub="ขุด">
-                <HoeIcon size={20} />
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n="02" label="SEED" sub="หว่าน">
-                <SeedIcon size={20} />
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n="03" label="WATER" sub="รดน้ำ">
-                <WaterCanIcon size={20} />
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n="04" label="WAIT" sub="พักผ่อน">
-                <MoonIcon size={18} />
-              </FlowStep>
-              <FlowArrow />
-              <FlowStep n="05" label="HARVEST" sub="เก็บ" gold>
-                <CoinIcon size={18} />
-              </FlowStep>
+                <div className="flex items-center gap-4">
+                  <kbd className="pixel-key pixel-key-wide">SPACE</kbd>
+                  <div className="flex flex-col gap-1">
+                    <span className="font-pixel text-[10px] tracking-wider">USE TOOL</span>
+                    <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+                      ทำกับช่องที่หันหน้าใส่
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="font-pixel text-[8px] text-[var(--muted-foreground)] mr-1">
+                    เลือกเครื่องมือ
+                  </span>
+                  <kbd className="pixel-key pixel-key-sm">1</kbd>
+                  <kbd className="pixel-key pixel-key-sm">2</kbd>
+                  <kbd className="pixel-key pixel-key-sm">3</kbd>
+                </div>
+              </div>
+
+              <span className="hidden md:block w-[3px] self-stretch bg-[#1a0f1f]" />
+
+              <div className="flex flex-col gap-3 min-w-0">
+                <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
+                  WORKFLOW
+                </span>
+                <div className="flow-strip">
+                  <FlowStep n="01" label="TILL" sub="ขุด">
+                    <HoeIcon size={20} />
+                  </FlowStep>
+                  <FlowArrow />
+                  <FlowStep n="02" label="SEED" sub="หว่าน">
+                    <SeedIcon size={20} />
+                  </FlowStep>
+                  <FlowArrow />
+                  <FlowStep n="03" label="WATER" sub="รดน้ำ">
+                    <WaterCanIcon size={20} />
+                  </FlowStep>
+                  <FlowArrow />
+                  <FlowStep n="04" label="WAIT" sub="พักผ่อน">
+                    <MoonIcon size={18} />
+                  </FlowStep>
+                  <FlowArrow />
+                  <FlowStep n="05" label="HARVEST" sub="เก็บ" gold>
+                    <CoinIcon size={18} />
+                  </FlowStep>
+                </div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

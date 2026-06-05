@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { makeRoomCode, ROOM_CODE_RE } from "@/lib/match-protocol";
+import QuickMatchButton from "@/components/QuickMatchButton";
 
 export const Route = createFileRoute("/lobby")({
   head: () => ({
@@ -30,6 +31,7 @@ function LobbyPage() {
     navigate({
       to: "/match/$code",
       params: { code },
+      search: { role: "spectator" },
     });
   };
 
@@ -50,6 +52,19 @@ function LobbyPage() {
       </header>
 
       <div className="relative z-10 pixel-panel p-6 flex flex-col gap-5 min-w-[360px]">
+        <div className="flex flex-col gap-2 items-center">
+          <QuickMatchButton label="QUICK MATCH" className="pixel-btn w-full justify-center py-3" />
+          <span className="font-pixel text-[8px] text-[var(--muted-foreground)] text-center">
+            กดปุ่มเดียว จับคู่อัตโนมัติ ไม่ต้องสร้างห้อง
+          </span>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <span className="h-0.5 flex-1 bg-background" />
+          <span className="font-pixel text-[8px] text-muted-foreground">OR</span>
+          <span className="h-0.5 flex-1 bg-background" />
+        </div>
+
         <label className="flex flex-col gap-2">
           <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">PLAYER NAME</span>
           <input

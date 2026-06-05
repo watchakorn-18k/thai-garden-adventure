@@ -43,7 +43,7 @@ function ensure() {
       for (let i = 0; i < size; i++) {
         data[i] = Math.random() * 2 - 1;
       }
-      
+
       // Trigger lazy preloading in the background
       setTimeout(preloadAudio, 100);
     }
@@ -61,9 +61,45 @@ function ensure() {
 export function setMuted(v: boolean) {
   muted = v;
   if (master) master.gain.value = v ? 0 : 0.25;
+  if (bgm) bgm.muted = v;
 }
 export function isMuted() {
   return muted;
+}
+
+// Looping background music (single shared element).
+const BGM_SRC = "/main_music.mp3";
+const BGM_VOLUME = 0.35;
+let bgm: HTMLAudioElement | null = null;
+
+export function startBgm() {
+  if (typeof window === "undefined") return;
+  try {
+    if (!bgm) {
+      bgm = new Audio(BGM_SRC);
+      bgm.loop = true;
+      bgm.preload = "auto";
+      bgm.volume = BGM_VOLUME;
+    }
+    bgm.muted = muted;
+    if (bgm.paused) {
+      void bgm.play().catch((err) => {
+        console.warn("BGM play failed (autoplay blocked until user gesture):", err);
+      });
+    }
+  } catch (e) {
+    console.warn("Failed to start background music:", e);
+  }
+}
+
+export function stopBgm() {
+  if (!bgm) return;
+  try {
+    bgm.pause();
+    bgm.currentTime = 0;
+  } catch {
+    // ignore
+  }
 }
 
 interface Note {
