@@ -153,6 +153,15 @@ export function useMatch({
           onEventsRef.current?.(parsed.events);
         } else if (parsed.t === "end") {
           onEndRef.current?.(parsed.winnerId, parsed.reason);
+        } else if (parsed.t === "room_closed") {
+          blockedReconnect = true;
+          clearSessionId(code);
+          try {
+            ws.close(1000, "room closed");
+          } catch {
+            /* noop */
+          }
+          setLastError({ code: "room_closed", message: "ห้องปิดแล้ว กลับไปหน้าล็อบบี้" });
         } else if (parsed.t === "error") {
           setLastError({ code: parsed.code, message: parsed.message });
           if (parsed.code === "kicked") {

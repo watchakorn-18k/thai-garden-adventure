@@ -46,6 +46,10 @@ function tilePriority(tile: Tile, tool: Tool): number {
   return tool === "hoe" ? 3 : 2;
 }
 
+function posHash(a: number, b: number): number {
+  return ((a * 374761393 + b * 668265263) >>> 0) & 0xff;
+}
+
 function neighborStand(
   tx: number,
   ty: number,
@@ -59,9 +63,13 @@ function neighborStand(
       { sx: tx - 1, sy: ty, dir: "right" },
     ] as { sx: number; sy: number; dir: Direction }[]
   ).filter((c) => c.sx >= 0 && c.sx < COLS && c.sy >= 0 && c.sy < ROWS);
-  cands.sort(
-    (a, b) => Math.hypot(a.sx - pos.x, a.sy - pos.y) - Math.hypot(b.sx - pos.x, b.sy - pos.y),
-  );
+  cands.sort((a, b) => {
+    const da = Math.hypot(a.sx - pos.x, a.sy - pos.y);
+    const db = Math.hypot(b.sx - pos.x, b.sy - pos.y);
+    if (da !== db) return da - db;
+    // deterministic per-tile tiebreak — avoids always picking "up" (stand-below)
+    return posHash(tx ^ a.sx, ty ^ a.sy) - posHash(tx ^ b.sx, ty ^ b.sy);
+  });
   return cands[0];
 }
 

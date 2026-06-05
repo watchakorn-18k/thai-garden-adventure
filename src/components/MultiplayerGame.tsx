@@ -817,6 +817,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           onRematch={() => send({ t: "rematch" })}
           self={self}
           spectator={isSpectator}
+          roomClosesAt={state.roomClosesAt}
         />
       )}
 
@@ -2676,6 +2677,7 @@ function EndOverlay({
   onRematch,
   self,
   spectator = false,
+  roomClosesAt,
 }: {
   winnerId?: string;
   reason?: "race" | "timeout" | "forfeit" | "kick";
@@ -2685,6 +2687,7 @@ function EndOverlay({
   onRematch: () => void;
   self?: PublicPlayer;
   spectator?: boolean;
+  roomClosesAt?: number;
 }) {
   const won = winnerId && winnerId === selfId;
   const tied = !winnerId;
@@ -2701,6 +2704,18 @@ function EndOverlay({
           : "DISCONNECTED";
   const subText = won ? "ยอดเยี่ยม! คุณคือผู้ชนะ" : "ผู้ชนะรอบนี้";
   const sortedPlayers = [...players].sort((a, b) => b.coins - a.coins);
+
+  const [closeCountdown, setCloseCountdown] = useState(() =>
+    roomClosesAt ? Math.max(0, Math.ceil((roomClosesAt - Date.now()) / 1000)) : 0,
+  );
+  useEffect(() => {
+    if (!roomClosesAt) return;
+    const tick = () =>
+      setCloseCountdown(Math.max(0, Math.ceil((roomClosesAt - Date.now()) / 1000)));
+    tick();
+    const i = setInterval(tick, 1000);
+    return () => clearInterval(i);
+  }, [roomClosesAt]);
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center px-4"
@@ -2821,12 +2836,20 @@ function EndOverlay({
             }}
             className="pixel-btn"
             data-accent={!self?.ready ? "true" : undefined}
-            disabled={self?.ready}
+            disabled={self?.ready || closeCountdown === 0}
           >
             <span className="font-pixel text-[12px]">
               {self?.ready ? "READY — WAITING" : "REMATCH"}
             </span>
           </button>
+        )}
+        {closeCountdown > 0 && (
+          <div className="font-pixel text-[9px] text-[var(--muted-foreground)] text-center">
+            ห้องปิดใน {closeCountdown} วินาที
+          </div>
+        )}
+        {closeCountdown === 0 && roomClosesAt && (
+          <div className="font-pixel text-[9px] text-[#ff6b6b] text-center">ห้องปิดแล้ว</div>
         )}
         <a href="/lobby" onClick={() => SFX.click()} className="pixel-btn">
           <span className="font-pixel text-[10px]">ออกจากห้อง</span>

@@ -411,6 +411,11 @@ export default function FarmGame() {
     [burstParticles, shake, spawnFlyCoins, spawnCrit, triggerScreenShake],
   );
 
+  const doActionRef = useRef(doAction);
+  useEffect(() => {
+    doActionRef.current = doAction;
+  }, [doAction]);
+
   const pauseAutoBot = useCallback(() => {
     lastUserInputAtRef.current = Date.now();
     botPausedRef.current = true;
@@ -496,15 +501,27 @@ export default function FarmGame() {
       }
     };
     const onUp = (e: KeyboardEvent) => keys.current.delete(normalizedKeyboardKey(e));
+    // Clear stuck keys on tab switch (keyup doesn't fire when switching away mid-press)
+    const onVisChange = () => {
+      if (document.hidden) keys.current.clear();
+    };
+    const onBlur = () => keys.current.clear();
     window.addEventListener("keydown", onDown);
     window.addEventListener("keyup", onUp);
+    document.addEventListener("visibilitychange", onVisChange);
+    window.addEventListener("blur", onBlur);
     return () => {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
+      document.removeEventListener("visibilitychange", onVisChange);
+      window.removeEventListener("blur", onBlur);
     };
   }, [doAction, helpOpen, pauseAutoBot]);
 
   useEffect(() => {
+    const BOT_SPEED = 5.2; // tiles/sec — same as manual
+    let lastBotMoveAt = Date.now();
+
     const i = setInterval(() => {
       const now = Date.now();
       if (helpOpenRef.current) {
@@ -553,15 +570,48 @@ export default function FarmGame() {
 
       botTargetRef.current = { x: plan.sx, y: plan.sy };
 
+      // Move toward stand position using Date.now() delta (immune to RAF pause)
+      const dtMs = Math.min(500, now - lastBotMoveAt);
+      lastBotMoveAt = now;
+      const dt = dtMs / 1000;
+
       const dx = plan.sx - posRef.current.x;
       const dy = plan.sy - posRef.current.y;
       const dist = Math.hypot(dx, dy);
       if (dist > 0.08) {
+        const step = BOT_SPEED * dt;
+        if (dist <= step) {
+          posRef.current = { x: plan.sx, y: plan.sy };
+        } else {
+          posRef.current = {
+            x: posRef.current.x + (dx / dist) * step,
+            y: posRef.current.y + (dy / dist) * step,
+          };
+        }
+        setPos(posRef.current);
+        // Update facing direction while walking
+        let nd: Direction = dirRef.current;
+        if (Math.abs(dx) > Math.abs(dy)) nd = dx > 0 ? "right" : "left";
+        else nd = dy > 0 ? "down" : "up";
+        if (nd !== dirRef.current) {
+          dirRef.current = nd;
+          setDir(nd);
+        }
+        if (!walkingRef.current) {
+          walkingRef.current = true;
+          setWalking(true);
+        }
         botIntentRef.current = { dx: dx / dist, dy: dy / dist };
         return;
       }
+
+      // Arrived at stand position
       botTargetRef.current = null;
       botIntentRef.current = null;
+      if (walkingRef.current) {
+        walkingRef.current = false;
+        setWalking(false);
+      }
       posRef.current = { x: plan.sx, y: plan.sy };
       setPos(posRef.current);
       dirRef.current = plan.dir;
@@ -570,11 +620,13 @@ export default function FarmGame() {
       setTool(plan.tool);
       seedChoiceRef.current = plan.seedChoice;
       if (plan.tool === "seed") setSeedChoice(plan.seedChoice);
-      if (now - lastBotActionAtRef.current < AUTO_BOT_ACTION_MS) return;
+      if (now - lastBotActionAtRef.current < AUTO_BOT_ACTION_MS) {
+        return;
+      }
       lastBotActionAtRef.current = now;
       botPlanRef.current = null;
       if (plan.tool === "seed") botSeedRotationRef.current += 1;
-      doAction({
+      doActionRef.current({
         pos: posRef.current,
         dir: plan.dir,
         tool: plan.tool,
@@ -583,7 +635,7 @@ export default function FarmGame() {
       });
     }, AUTO_BOT_TICK_MS);
     return () => clearInterval(i);
-  }, [doAction]);
+  }, []);
 
   // Browsers block autoplay until the first user gesture — start BGM then.
   useEffect(() => {
@@ -620,26 +672,8 @@ export default function FarmGame() {
       if (k.has("keya") || k.has("arrowleft")) dx -= 1;
       if (k.has("keyd") || k.has("arrowright")) dx += 1;
 
-      const manualMoving = dx !== 0 || dy !== 0;
-      if (!manualMoving && botTargetRef.current) {
-        const target = botTargetRef.current;
-        const cur = posRef.current;
-        const tdx = target.x - cur.x;
-        const tdy = target.y - cur.y;
-        const tdist = Math.hypot(tdx, tdy);
-        const step = SPEED * dt;
-        if (tdist <= step) {
-          posRef.current = { x: target.x, y: target.y };
-          setPos(posRef.current);
-          dx = 0;
-          dy = 0;
-          botIntentRef.current = null;
-        } else {
-          dx = tdx / tdist;
-          dy = tdy / tdist;
-          botIntentRef.current = { dx, dy };
-        }
-      }
+      // Bot movement is handled in its own setInterval (immune to RAF pause).
+      // RAF only drives manual keyboard movement.
       const moving = dx !== 0 || dy !== 0;
       if (moving) {
         // diagonal normalize

@@ -77,6 +77,7 @@ interface StoredRoomState {
   >[];
   marketPrices?: Record<CropId, number>;
   banTurnPlayerId?: string;
+  roomClosesAt?: number;
 }
 
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -85,6 +86,7 @@ const SNAPSHOT_INTERVAL_MS = 50;
 const GROWTH_INTERVAL_MS = 500;
 const PERSIST_INTERVAL_MS = 1000;
 const RECONNECT_GRACE_MS = 30_000;
+const ROOM_CLOSE_MS = 60_000;
 const MAX_SPECTATORS = 10;
 const BOT_TICK_MS = 150;
 const BOT_NAMES = ["บอทมะลิ", "บอทข้าวหอม", "บอทตะวัน", "บอทใบเตย", "บอทมะนาว"];
@@ -115,6 +117,7 @@ export class MatchRoom implements DurableObject {
   private players = new Map<string, PlayerState>();
   private marketPrices: Record<CropId, number> = makeMarketPrices();
   private banTurnPlayerId?: string;
+  private roomClosesAt?: number;
   private initialized?: Promise<void>;
   private wsToPlayer = new WeakMap<WebSocket, string>();
   private wsToRole = new WeakMap<WebSocket, MatchRole>();
@@ -546,6 +549,10 @@ export class MatchRoom implements DurableObject {
       }
       if (this.checkReconnectForfeit(now)) return;
     }
+    if (this.status === "ended" && this.roomClosesAt && now >= this.roomClosesAt) {
+      this.closeRoom();
+      return;
+    }
     this.scheduleAlarm();
   }
 
@@ -571,6 +578,7 @@ export class MatchRoom implements DurableObject {
     this.hostSessionId = stored.hostSessionId;
     this.settings = roomSettingsSchema.catch(DEFAULT_ROOM_SETTINGS).parse(stored.settings);
     this.banTurnPlayerId = stored.banTurnPlayerId;
+    this.roomClosesAt = stored.roomClosesAt;
     this.players = new Map(
       stored.players.map((p) => [
         p.id,
@@ -649,6 +657,7 @@ export class MatchRoom implements DurableObject {
         players,
         marketPrices: this.marketPrices,
         banTurnPlayerId: this.banTurnPlayerId,
+        roomClosesAt: this.roomClosesAt,
       } satisfies StoredRoomState),
     );
   }
@@ -696,7 +705,9 @@ export class MatchRoom implements DurableObject {
                   this.endsAt,
                   Number.isFinite(reconnectDeadline) ? reconnectDeadline : undefined,
                 )
-              : undefined;
+              : this.status === "ended"
+                ? this.roomClosesAt
+                : undefined;
     if (time) this.ctx.waitUntil(this.ctx.storage.setAlarm(time));
   }
 
@@ -1533,9 +1544,31 @@ export class MatchRoom implements DurableObject {
     }
     this.clearBotTimer();
     for (const p of this.players.values()) p.ready = false;
+    this.roomClosesAt = Date.now() + ROOM_CLOSE_MS;
     this.persist();
     this.broadcast({ t: "end", winnerId, reason });
     this.broadcastSnapshot();
+    this.scheduleAlarm();
+  }
+
+  private closeRoom(): void {
+    this.broadcast({ t: "room_closed" });
+    for (const [id, player] of this.players) {
+      if (player.connected) {
+        for (const ws of this.ctx.getWebSockets()) {
+          if (this.wsToPlayer.get(ws) === id) {
+            try {
+              ws.close(1000, "room closed");
+            } catch {
+              /* already closed */
+            }
+          }
+        }
+      }
+      this.players.delete(id);
+    }
+    this.roomClosesAt = undefined;
+    void this.ctx.storage.deleteAll();
   }
 
   private resetForRematch(): void {
@@ -1549,6 +1582,7 @@ export class MatchRoom implements DurableObject {
     this.banEndsAt = undefined;
     this.selectionEndsAt = undefined;
     this.banTurnPlayerId = undefined;
+    this.roomClosesAt = undefined;
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = 0;
     for (const p of this.players.values()) {
@@ -1606,6 +1640,7 @@ export class MatchRoom implements DurableObject {
       marketPrices: this.marketPrices,
       banTurnPlayerId: this.banTurnPlayerId,
       spectatorCount: this.spectatorCount(),
+      roomClosesAt: this.roomClosesAt,
     };
   }
 

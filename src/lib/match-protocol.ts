@@ -179,6 +179,7 @@ export interface PublicMatchState {
   marketPrices?: Record<CropId, number>;
   banTurnPlayerId?: string;
   spectatorCount?: number;
+  roomClosesAt?: number;
 }
 
 export type ServerEvent =
@@ -200,6 +201,7 @@ export type ServerMsg =
   | { t: "snapshot"; state: PublicMatchState }
   | { t: "events"; events: ServerEvent[] }
   | { t: "end"; winnerId?: string; reason: "race" | "timeout" | "forfeit" | "kick" }
+  | { t: "room_closed" }
   | { t: "error"; code: string; message: string };
 
 export function makeRoomCode(): string {
