@@ -1290,32 +1290,43 @@ function CropBanView({
           </span>
         </div>
         <h2 className="font-pixel lobby-title">แบนผัก 1 อย่าง</h2>
-        <p className="lobby-subtitle">แบนซ้ำกันได้ · กดยืนยันการแบนเพื่อล็อกตัวเลือก</p>
+        <p className="lobby-subtitle">แบนซ้ำกันไม่ได้ · กดยืนยันการแบนเพื่อล็อกตัวเลือก</p>
       </div>
 
       <div className="pixel-panel my-4 grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
         {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
           const Icon = CROP_ICONS[crop.id];
           const active = self?.bannedCrop === crop.id;
+          const isBannedByOther = state.players.some(
+            (p) => p.id !== self?.id && p.ready && p.bannedCrop === crop.id,
+          );
           return (
             <button
               key={crop.id}
               type="button"
               onClick={() => {
-                if (isSpectator || self?.ready) return;
+                if (isSpectator || self?.ready || isBannedByOther) return;
                 SFX.click();
                 onBanCrop(crop.id);
               }}
-              disabled={isSpectator || self?.ready}
+              disabled={isSpectator || self?.ready || isBannedByOther}
               className="farm-crop-card pixel-btn text-left"
               data-active={active ? "true" : undefined}
               title={`แบน ${crop.name}`}
+              style={
+                isBannedByOther
+                  ? { opacity: 0.4, filter: "grayscale(100%)", cursor: "not-allowed" }
+                  : undefined
+              }
             >
               <span className="farm-crop-icon">
                 <Icon size={26} />
               </span>
               <span className="farm-crop-body">
                 <span className="farm-crop-name">{crop.name}</span>
+                {isBannedByOther && (
+                  <span className="font-pixel text-[7px] text-[#ff6b6b] block">ALREADY BANNED</span>
+                )}
                 <span className="farm-crop-prices">
                   <span>ซื้อ {crop.seedCost}</span>
                   <span>ขาย {crop.sellPrice}</span>

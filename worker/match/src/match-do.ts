@@ -233,7 +233,27 @@ export class MatchRoom implements DurableObject {
       if (this.status === "crop_ban") {
         if (!player.bannedCrop) return;
         if (player.ready) return;
+
+        const alreadyBanned = [...this.players.values()].some(
+          (p) => p.id !== player.id && p.ready && p.bannedCrop === player.bannedCrop,
+        );
+        if (alreadyBanned) {
+          this.sendTo(ws, {
+            t: "error",
+            code: "crop_already_banned",
+            message: "ผักชนิดนี้ถูกแบนไปแล้วโดยผู้เล่นอีกคน กรุณาเลือกผักชนิดอื่น",
+          });
+          return;
+        }
+
         player.ready = true;
+
+        for (const p of this.players.values()) {
+          if (p.id !== player.id && !p.ready && p.bannedCrop === player.bannedCrop) {
+            p.bannedCrop = undefined;
+          }
+        }
+
         this.maybeFastForwardCropBan();
         this.persist();
         this.broadcastSnapshot();
@@ -267,6 +287,19 @@ export class MatchRoom implements DurableObject {
     if (msg.t === "ban_crop") {
       if (this.status !== "crop_ban") return;
       if (player.ready) return;
+
+      const alreadyBanned = [...this.players.values()].some(
+        (p) => p.id !== player.id && p.ready && p.bannedCrop === msg.id,
+      );
+      if (alreadyBanned) {
+        this.sendTo(ws, {
+          t: "error",
+          code: "crop_already_banned",
+          message: "ผักชนิดนี้ถูกแบนไปแล้วโดยผู้เล่นอีกคน กรุณาเลือกผักชนิดอื่น",
+        });
+        return;
+      }
+
       player.bannedCrop = msg.id;
       this.persist();
       this.broadcastSnapshot();
