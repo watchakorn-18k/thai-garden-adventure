@@ -34,11 +34,39 @@ import {
   type Tool,
 } from "@/lib/game-types";
 import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from "@/lib/game-logic";
-import { SFX, setMuted, isMuted, startBgm } from "@/lib/sfx";
+import { chooseFarmBotPlan, isFarmBotPlanValid, type FarmBotPlan } from "@/lib/farm-bot";
+import { SFX, setMuted, isMuted, startBgm, stopBgm } from "@/lib/sfx";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
+
+function isAutoBotPauseKey(key: string): boolean {
+  return [
+    "keyw",
+    "keya",
+    "keys",
+    "keyd",
+    "arrowup",
+    "arrowdown",
+    "arrowleft",
+    "arrowright",
+    "space",
+    "enter",
+    "digit1",
+    "digit2",
+    "digit3",
+  ].includes(key);
+}
+
+function hasManualMovement(keys: Set<string>): boolean {
+  return ["keyw", "keya", "keys", "keyd", "arrowup", "arrowdown", "arrowleft", "arrowright"].some(
+    (k) => keys.has(k),
+  );
+}
 
 const TILE = 56;
 const COMBO_WINDOW = 2200; // ms to keep combo alive
+const AUTO_RESUME_MS = 60_000;
+const AUTO_BOT_TICK_MS = 180;
+const AUTO_BOT_ACTION_MS = 450;
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
@@ -79,6 +107,7 @@ export default function FarmGame() {
   });
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
   const [outfitOpen, setOutfitOpen] = useState(false);
+  const [ledgerOpen, setLedgerOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const [popups, setPopups] = useState<
     { id: number; x: number; y: number; text: string; tone: "good" | "bad" | "info" }[]
@@ -119,6 +148,43 @@ export default function FarmGame() {
   const keys = useRef<Set<string>>(new Set());
   const popupId = useRef(0);
   const fieldRef = useRef<HTMLDivElement>(null);
+  const tilesRef = useRef<Tile[][]>(tiles);
+  const coinsRef = useRef(coins);
+  const toolRef = useRef<Tool>(tool);
+  const seedChoiceRef = useRef<CropId>(seedChoice);
+  const marketPricesRef = useRef(marketPrices);
+  const comboStateRef = useRef(comboState);
+  const helpOpenRef = useRef(helpOpen);
+  const botPlanRef = useRef<FarmBotPlan | null>(null);
+  const botTargetRef = useRef<{ x: number; y: number } | null>(null);
+  const botIntentRef = useRef<{ dx: number; dy: number } | null>(null);
+  const botSeedRotationRef = useRef(0);
+  const lastBotActionAtRef = useRef(0);
+  const lastUserInputAtRef = useRef(0);
+  const botPausedRef = useRef(false);
+  const [autoBotActive, setAutoBotActive] = useState(true);
+
+  useEffect(() => {
+    tilesRef.current = tiles;
+  }, [tiles]);
+  useEffect(() => {
+    coinsRef.current = coins;
+  }, [coins]);
+  useEffect(() => {
+    toolRef.current = tool;
+  }, [tool]);
+  useEffect(() => {
+    seedChoiceRef.current = seedChoice;
+  }, [seedChoice]);
+  useEffect(() => {
+    marketPricesRef.current = marketPrices;
+  }, [marketPrices]);
+  useEffect(() => {
+    comboStateRef.current = comboState;
+  }, [comboState]);
+  useEffect(() => {
+    helpOpenRef.current = helpOpen;
+  }, [helpOpen]);
 
   const facingTile = useCallback(() => {
     let x = Math.round(pos.x);
@@ -211,119 +277,156 @@ export default function FarmGame() {
     setTimeout(() => setCrits((c) => c.filter((q) => q.id !== id)), 500);
   };
 
-  const doAction = useCallback(() => {
-    const t = facingTile();
-    if (!t) return;
-    setActing(true);
-    setTimeout(() => setActing(false), 320);
+  const doAction = useCallback(
+    (override?: {
+      pos?: { x: number; y: number };
+      dir?: Direction;
+      tool?: Tool;
+      seedChoice?: CropId;
+      now?: number;
+    }) => {
+      const actionPos = override?.pos ?? posRef.current;
+      const actionDir = override?.dir ?? dirRef.current;
+      const actionTool = override?.tool ?? toolRef.current;
+      const actionSeed = override?.seedChoice ?? seedChoiceRef.current;
+      const actionNow = override?.now ?? Date.now();
+      const tx =
+        Math.round(actionPos.x) + (actionDir === "right" ? 1 : actionDir === "left" ? -1 : 0);
+      const ty = Math.round(actionPos.y) + (actionDir === "down" ? 1 : actionDir === "up" ? -1 : 0);
+      if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return;
 
-    setTiles((grid) => {
-      const result = applyAction({
-        tiles: grid,
-        coins,
-        pos: { x: Math.round(pos.x), y: Math.round(pos.y) },
-        dir,
-        tool,
-        seedChoice,
-        marketPrices,
-        now: Date.now(),
-      });
-      let nextCoins = result.coins;
-      for (const ev of result.events) {
-        if (ev.kind === "harvest") {
-          if (ev.reward === 0) {
-            addPopup(ev.x, ev.y, "เหี่ยว", "bad");
-            burstParticles(ev.x, ev.y, "dirt");
-            SFX.till();
-            setCombo(0);
-            setComboState({ combo: 0, lastHarvestAt: Date.now(), crops: [] });
-          } else {
-            const isCrit = Math.random() < 0.18;
-            const { bonus, nextState } = updateComboAndGetBonus(
-              comboState,
-              ev.cropId,
-              ev.reward,
-              Date.now(),
-            );
-            setComboState(nextState);
-            setCombo(nextState.combo);
+      setActing(true);
+      setTimeout(() => setActing(false), 320);
 
-            const critBonus = isCrit ? ev.reward : 0;
-            const total = ev.reward + bonus + critBonus;
-            nextCoins += total - ev.reward; // applyAction already added ev.reward
+      setTiles((grid) => {
+        const result = applyAction({
+          tiles: grid,
+          coins: coinsRef.current,
+          pos: { x: Math.round(actionPos.x), y: Math.round(actionPos.y) },
+          dir: actionDir,
+          tool: actionTool,
+          seedChoice: actionSeed,
+          marketPrices: marketPricesRef.current,
+          now: actionNow,
+        });
+        let nextCoins = result.coins;
 
-            const variety = nextState.crops.length;
-            let popupText = `+${total}`;
-            if (variety > 1) {
-              popupText += ` Mix x${variety}`;
-            }
-            if (isCrit) {
-              popupText = `CRIT ${popupText}`;
-            }
-            addPopup(ev.x, ev.y, popupText, "good");
-
-            burstParticles(ev.x, ev.y, "sparkle");
-            spawnFlyCoins(ev.x, ev.y, Math.min(8, Math.max(3, Math.floor(total / 10))));
-
-            if (nextState.combo >= 2) {
-              const id = ++popupId.current;
-              setComboShown({ id, level: nextState.combo, x: ev.x, y: ev.y });
-              setTimeout(() => setComboShown((cs) => (cs && cs.id === id ? null : cs)), 1100);
-              SFX.combo(nextState.combo);
-            }
-            if (comboTimer.current) clearTimeout(comboTimer.current);
-            comboTimer.current = setTimeout(() => {
+        for (const ev of result.events) {
+          if (ev.kind === "harvest") {
+            if (ev.reward === 0) {
+              addPopup(ev.x, ev.y, "เหี่ยว", "bad");
+              burstParticles(ev.x, ev.y, "dirt");
+              SFX.till();
               setCombo(0);
-              setComboState({ combo: 0, lastHarvestAt: Date.now(), crops: [] });
-            }, COMBO_WINDOW);
-
-            const basePrice = CROPS[ev.cropId].sellPrice;
-            setMarketPrices((prev) => {
-              const next = { ...prev };
-              next[ev.cropId] = Math.max(basePrice * 0.5, prev[ev.cropId] - basePrice * 0.1);
-              for (const cId of Object.keys(prev) as CropId[]) {
-                if (cId !== ev.cropId) {
-                  const otherBase = CROPS[cId].sellPrice;
-                  next[cId] = Math.min(otherBase * 1.2, prev[cId] + otherBase * 0.03);
-                }
-              }
-              return next;
-            });
-
-            if (isCrit) {
-              spawnCrit(ev.x, ev.y);
-              triggerScreenShake(1);
-              SFX.crit();
+              const resetCombo = { combo: 0, lastHarvestAt: actionNow, crops: [] };
+              comboStateRef.current = resetCombo;
+              setComboState(resetCombo);
             } else {
-              SFX.harvest();
+              const isCrit = Math.random() < 0.18;
+              const { bonus, nextState } = updateComboAndGetBonus(
+                comboStateRef.current,
+                ev.cropId,
+                ev.reward,
+                actionNow,
+              );
+              comboStateRef.current = nextState;
+              setComboState(nextState);
+              setCombo(nextState.combo);
+
+              const critBonus = isCrit ? ev.reward : 0;
+              const total = ev.reward + bonus + critBonus;
+              nextCoins += total - ev.reward;
+
+              const variety = nextState.crops.length;
+              let popupText = `+${total}`;
+              if (variety > 1) popupText += ` Mix x${variety}`;
+              if (isCrit) popupText = `CRIT ${popupText}`;
+              addPopup(ev.x, ev.y, popupText, "good");
+
+              burstParticles(ev.x, ev.y, "sparkle");
+              spawnFlyCoins(ev.x, ev.y, Math.min(8, Math.max(3, Math.floor(total / 10))));
+
+              if (nextState.combo >= 2) {
+                const id = ++popupId.current;
+                setComboShown({ id, level: nextState.combo, x: ev.x, y: ev.y });
+                setTimeout(() => setComboShown((cs) => (cs && cs.id === id ? null : cs)), 1100);
+                SFX.combo(nextState.combo);
+              }
+              if (comboTimer.current) clearTimeout(comboTimer.current);
+              comboTimer.current = setTimeout(() => {
+                setCombo(0);
+                const resetCombo = { combo: 0, lastHarvestAt: Date.now(), crops: [] };
+                comboStateRef.current = resetCombo;
+                setComboState(resetCombo);
+              }, COMBO_WINDOW);
+
+              const basePrice = CROPS[ev.cropId].sellPrice;
+              setMarketPrices((prev) => {
+                const next = { ...prev };
+                next[ev.cropId] = Math.max(basePrice * 0.5, prev[ev.cropId] - basePrice * 0.1);
+                for (const cId of Object.keys(prev) as CropId[]) {
+                  if (cId !== ev.cropId) {
+                    const otherBase = CROPS[cId].sellPrice;
+                    next[cId] = Math.min(otherBase * 1.2, prev[cId] + otherBase * 0.03);
+                  }
+                }
+                marketPricesRef.current = next;
+                return next;
+              });
+
+              if (isCrit) {
+                spawnCrit(ev.x, ev.y);
+                triggerScreenShake(1);
+                SFX.crit();
+              } else {
+                SFX.harvest();
+              }
             }
+          } else if (ev.kind === "till") {
+            addPopup(ev.x, ev.y, "ขุด", "info");
+            burstParticles(ev.x, ev.y, "dirt");
+            shake(ev.x, ev.y);
+            SFX.hoe();
+          } else if (ev.kind === "water") {
+            addPopup(ev.x, ev.y, "รดน้ำ", "info");
+            burstParticles(ev.x, ev.y, "water");
+            SFX.water();
+          } else if (ev.kind === "plant") {
+            addPopup(ev.x, ev.y, CROPS[ev.cropId].name, "info");
+            SFX.plant();
+          } else if (ev.kind === "insufficient_funds") {
+            addPopup(ev.x, ev.y, "เงินไม่พอ", "bad");
+            SFX.bad();
           }
-        } else if (ev.kind === "till") {
-          addPopup(ev.x, ev.y, "ขุด", "info");
-          burstParticles(ev.x, ev.y, "dirt");
-          shake(ev.x, ev.y);
-          SFX.hoe();
-        } else if (ev.kind === "water") {
-          addPopup(ev.x, ev.y, "รดน้ำ", "info");
-          burstParticles(ev.x, ev.y, "water");
-          SFX.water();
-        } else if (ev.kind === "plant") {
-          addPopup(ev.x, ev.y, CROPS[ev.cropId].name, "info");
-          SFX.plant();
-        } else if (ev.kind === "insufficient_funds") {
-          addPopup(ev.x, ev.y, "เงินไม่พอ", "bad");
-          SFX.bad();
         }
-      }
-      if (nextCoins !== coins) setCoins(nextCoins);
-      return result.tiles;
-    });
-  }, [facingTile, tool, seedChoice, coins, pos, dir, comboState, marketPrices]);
+
+        if (nextCoins !== coinsRef.current) {
+          coinsRef.current = nextCoins;
+          setCoins(nextCoins);
+        }
+        tilesRef.current = result.tiles;
+        return result.tiles;
+      });
+    },
+    [burstParticles, shake, spawnFlyCoins, spawnCrit, triggerScreenShake],
+  );
+
+  const pauseAutoBot = useCallback(() => {
+    lastUserInputAtRef.current = Date.now();
+    botPausedRef.current = true;
+    botPlanRef.current = null;
+    botIntentRef.current = null;
+    setAutoBotActive(false);
+  }, []);
 
   // crop growth tick (every 500ms)
   useEffect(() => {
     const i = setInterval(() => {
-      setTiles((grid) => tickGrowth(grid, Date.now()).tiles);
+      setTiles((grid) => {
+        const next = tickGrowth(grid, Date.now()).tiles;
+        tilesRef.current = next;
+        return next;
+      });
     }, 500);
     return () => clearInterval(i);
   }, []);
@@ -345,6 +448,7 @@ export default function FarmGame() {
             changed = true;
           }
         }
+        if (changed) marketPricesRef.current = next;
         return changed ? next : prev;
       });
     }, 1000);
@@ -360,6 +464,7 @@ export default function FarmGame() {
       }
 
       const k = normalizedKeyboardKey(e);
+      if (isAutoBotPauseKey(k) && !e.repeat) pauseAutoBot();
       keys.current.add(k);
       if (["space", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
         e.preventDefault();
@@ -371,9 +476,18 @@ export default function FarmGame() {
       if (k === "space" || k === "enter") {
         if (!e.repeat) doAction();
       }
-      if (k === "digit1") setTool("hoe");
-      if (k === "digit2") setTool("watering_can");
-      if (k === "digit3") setTool("seed");
+      if (k === "digit1") {
+        toolRef.current = "hoe";
+        setTool("hoe");
+      }
+      if (k === "digit2") {
+        toolRef.current = "watering_can";
+        setTool("watering_can");
+      }
+      if (k === "digit3") {
+        toolRef.current = "seed";
+        setTool("seed");
+      }
       if (k === "keym") {
         const v = !isMuted();
         setMuted(v);
@@ -387,7 +501,81 @@ export default function FarmGame() {
       window.removeEventListener("keydown", onDown);
       window.removeEventListener("keyup", onUp);
     };
-  }, [doAction, helpOpen]);
+  }, [doAction, helpOpen, pauseAutoBot]);
+
+  useEffect(() => {
+    const i = setInterval(() => {
+      const now = Date.now();
+      if (helpOpenRef.current) {
+        botIntentRef.current = null;
+        return;
+      }
+      if (botPausedRef.current) {
+        if (now - lastUserInputAtRef.current < AUTO_RESUME_MS) {
+          botIntentRef.current = null;
+          return;
+        }
+        botPausedRef.current = false;
+        setAutoBotActive(true);
+      }
+      if (hasManualMovement(keys.current)) {
+        botIntentRef.current = null;
+        return;
+      }
+
+      let plan = botPlanRef.current;
+      if (
+        !plan ||
+        !isFarmBotPlanValid({
+          tiles: tilesRef.current,
+          coins: coinsRef.current,
+          seedRotation: botSeedRotationRef.current,
+          plan,
+        })
+      ) {
+        plan = chooseFarmBotPlan({
+          tiles: tilesRef.current,
+          pos: posRef.current,
+          coins: coinsRef.current,
+          seedRotation: botSeedRotationRef.current,
+        });
+        botPlanRef.current = plan;
+      }
+      if (!plan) {
+        botIntentRef.current = null;
+        return;
+      }
+
+      const dx = plan.sx - posRef.current.x;
+      const dy = plan.sy - posRef.current.y;
+      const dist = Math.hypot(dx, dy);
+      if (dist > 0.08) {
+        botIntentRef.current = { dx: dx / dist, dy: dy / dist };
+        return;
+      }
+      botIntentRef.current = null;
+      posRef.current = { x: plan.sx, y: plan.sy };
+      setPos(posRef.current);
+      dirRef.current = plan.dir;
+      setDir(plan.dir);
+      toolRef.current = plan.tool;
+      setTool(plan.tool);
+      seedChoiceRef.current = plan.seedChoice;
+      if (plan.tool === "seed") setSeedChoice(plan.seedChoice);
+      if (now - lastBotActionAtRef.current < AUTO_BOT_ACTION_MS) return;
+      lastBotActionAtRef.current = now;
+      botPlanRef.current = null;
+      if (plan.tool === "seed") botSeedRotationRef.current += 1;
+      doAction({
+        pos: posRef.current,
+        dir: plan.dir,
+        tool: plan.tool,
+        seedChoice: plan.seedChoice,
+        now,
+      });
+    }, AUTO_BOT_TICK_MS);
+    return () => clearInterval(i);
+  }, [doAction]);
 
   // Browsers block autoplay until the first user gesture — start BGM then.
   useEffect(() => {
@@ -401,6 +589,8 @@ export default function FarmGame() {
     return () => {
       window.removeEventListener("pointerdown", onFirstGesture);
       window.removeEventListener("keydown", onFirstGesture);
+      // Leaving the single-player home (e.g. into the lobby) stops the home music.
+      stopBgm();
     };
   }, []);
 
@@ -422,6 +612,11 @@ export default function FarmGame() {
       if (k.has("keya") || k.has("arrowleft")) dx -= 1;
       if (k.has("keyd") || k.has("arrowright")) dx += 1;
 
+      const manualMoving = dx !== 0 || dy !== 0;
+      if (!manualMoving && botIntentRef.current) {
+        dx = botIntentRef.current.dx;
+        dy = botIntentRef.current.dy;
+      }
       const moving = dx !== 0 || dy !== 0;
       if (moving) {
         // diagonal normalize
@@ -545,7 +740,7 @@ export default function FarmGame() {
   );
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col items-center justify-start px-6 pb-6 gap-6 overflow-hidden">
+    <div className="relative min-h-screen w-full flex flex-col items-center justify-start px-6 pb-10 gap-8 overflow-hidden">
       {/* Sky decoration */}
       <div className="sky-stars" />
       {cloudConfig.map((c, i) => (
@@ -572,7 +767,7 @@ export default function FarmGame() {
       ))}
 
       {/* HUD */}
-      <header className="relative z-10 w-full max-w-5xl flex items-center justify-between gap-4 px-6 py-4 pixel-panel">
+      <header className="relative z-50 w-full max-w-5xl flex items-center justify-between gap-4 px-6 py-4 pixel-panel">
         <div className="flex items-center gap-4">
           <div
             className="flex items-center justify-center"
@@ -636,6 +831,29 @@ export default function FarmGame() {
             </div>
           )}
           <div
+            className="pixel-chip flex items-center gap-1.5 font-pixel text-[8px]"
+            data-gold={autoBotActive ? "true" : undefined}
+            title={
+              autoBotActive
+                ? "บอททำงานอัตโนมัติ (ขยับเพื่อหยุด)"
+                : "บอทหยุดชั่วคราว (จะเริ่มใหม่ใน 1 นาที)"
+            }
+          >
+            <span
+              className={
+                autoBotActive
+                  ? "live-dot mr-0.5"
+                  : "inline-block w-[9px] height-[9px] bg-slate-500 box-shadow-[0_0_0_2px_#1a0f1f] mr-0.5"
+              }
+              style={
+                autoBotActive
+                  ? undefined
+                  : { width: 9, height: 9, background: "#7d6a5a", boxShadow: "0 0 0 2px #1a0f1f" }
+              }
+            />
+            {autoBotActive ? "AUTO" : "PAUSED"}
+          </div>
+          <div
             className={`pixel-chip flex items-center gap-2 ${hudPulse ? "pulse-glow" : ""}`}
             data-gold="true"
           >
@@ -646,7 +864,11 @@ export default function FarmGame() {
             outfit={{
               open: outfitOpen,
               cosmetics,
-              onToggle: () => setOutfitOpen((current) => !current),
+              onToggle: () =>
+                setOutfitOpen((current) => {
+                  if (!current) setLedgerOpen(false);
+                  return !current;
+                }),
               onClose: () => setOutfitOpen(false),
               onChange: (next) => {
                 setCosmetics(next);
@@ -657,6 +879,11 @@ export default function FarmGame() {
           />
           <CropIndexBook
             iconOnly
+            open={ledgerOpen}
+            onOpenChange={(next) => {
+              setLedgerOpen(next);
+              if (next) setOutfitOpen(false);
+            }}
             marketPrices={marketPrices}
             selectedCropId={seedChoice}
             onSelectCrop={(id) => {
@@ -694,10 +921,30 @@ export default function FarmGame() {
         </div>
       </header>
 
+      {/* Multiplayer call-to-action — sits above the single-player field */}
+      <div className="cta-multiplayer relative z-0 w-full max-w-5xl">
+        <div className="cta-multiplayer-card">
+          <div className="cta-multiplayer-copy">
+            <span className="cta-multiplayer-label font-pixel">อยากแข่งกับเพื่อน?</span>
+            <span className="cta-multiplayer-subtitle">ท้าดวลทำสวนแบบเรียลไทม์</span>
+          </div>
+          <div className="cta-multiplayer-actions">
+            <span className="cta-btn-bob">
+              <QuickMatchButton label="QUICK MATCH" className="pixel-btn cta-quick-match" />
+            </span>
+            <span className="cta-btn-bob" data-delay="true">
+              <a href="/lobby" className="pixel-btn cta-1v1-link">
+                1V1
+              </a>
+            </span>
+          </div>
+        </div>
+      </div>
+
       {/* Field */}
       <div
         ref={fieldRef}
-        className={`relative isolate mt-4 field-frame scanlines ${screenShake ? "screen-shake" : ""}`}
+        className={`relative isolate mt-3 field-frame scanlines ${screenShake ? "screen-shake" : ""}`}
         style={{ width: COLS * TILE, height: ROWS * TILE }}
       >
         {tiles.map((row, y) =>
@@ -956,33 +1203,8 @@ export default function FarmGame() {
         </div>
       </div>
 
-      {/* Multiplayer call-to-action — sits under the single-player field */}
-      <div className="cta-multiplayer relative z-10 flex flex-col items-center gap-3 py-4">
-        <span className="cta-multiplayer-label font-pixel text-[8px] tracking-[2px]">
-          อยากแข่งกับเพื่อน?
-        </span>
-        <div className="flex items-center gap-3">
-          <span className="cta-btn-bob">
-            <QuickMatchButton
-              label="QUICK MATCH"
-              className="pixel-btn flex h-11 min-w-[160px] items-center justify-center px-5"
-              style={{ fontSize: 11 }}
-            />
-          </span>
-          <span className="cta-btn-bob" data-delay="true">
-            <a
-              href="/lobby"
-              className="pixel-btn flex h-11 min-w-[80px] items-center justify-center px-5"
-              style={{ fontSize: 11 }}
-            >
-              1V1
-            </a>
-          </span>
-        </div>
-      </div>
-
       {/* Toolbar */}
-      <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
+      <div className="farm-toolbar relative z-10 mt-3 w-full max-w-5xl pixel-panel">
         <div className="farm-toolbar-section farm-toolbar-tools">
           <span className="farm-toolbar-label">TOOLS</span>
           <div className="farm-tool-grid">
@@ -1001,8 +1223,10 @@ export default function FarmGame() {
               <button
                 key={t.id}
                 onClick={() => {
+                  toolRef.current = t.id;
                   setTool(t.id);
                   SFX.click();
+                  pauseAutoBot();
                 }}
                 className="farm-tool-btn pixel-btn"
                 data-active={tool === t.id}
@@ -1025,9 +1249,12 @@ export default function FarmGame() {
                 <button
                   key={c.id}
                   onClick={() => {
+                    seedChoiceRef.current = c.id;
                     setSeedChoice(c.id);
+                    toolRef.current = "seed";
                     setTool("seed");
                     SFX.click();
+                    pauseAutoBot();
                   }}
                   className="farm-crop-card pixel-btn"
                   data-active={active}

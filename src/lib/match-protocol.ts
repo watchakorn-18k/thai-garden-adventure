@@ -178,6 +178,7 @@ export interface PublicMatchState {
   players: PublicPlayer[];
   marketPrices?: Record<CropId, number>;
   banTurnPlayerId?: string;
+  spectatorCount?: number;
 }
 
 export type ServerEvent =

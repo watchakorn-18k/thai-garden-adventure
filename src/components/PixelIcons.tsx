@@ -339,3 +339,22 @@ export function BasilIcon({ size = 24 }: IconProps) {
     </>,
   );
 }
+
+export function EyeIcon({ size = 16 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* lid outline */}
+      <rect x="4" y="6" width="8" height="1" fill="#1a0f1f" />
+      <rect x="4" y="9" width="8" height="1" fill="#1a0f1f" />
+      <rect x="3" y="7" width="1" height="2" fill="#1a0f1f" />
+      <rect x="12" y="7" width="1" height="2" fill="#1a0f1f" />
+      {/* white */}
+      <rect x="4" y="7" width="8" height="2" fill="#f4e4c1" />
+      {/* iris */}
+      <rect x="7" y="6" width="2" height="4" fill="#e8a23a" />
+      <rect x="7" y="7" width="2" height="2" fill="#1a0f1f" />
+      <rect x="7" y="7" width="1" height="1" fill="#ffd24a" />
+    </>,
+  );
+}

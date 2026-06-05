@@ -17,6 +17,7 @@ import {
   LemongrassIcon,
   PapayaIcon,
   BasilIcon,
+  EyeIcon,
 } from "./PixelIcons";
 import { applyAction, facingTile } from "@/lib/game-logic";
 import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
@@ -185,16 +186,16 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
           // Play SFX on match events
           if (ev.kind === "till") {
-            if (ev.playerId !== selfId || matchRole === "spectator") SFX.hoe();
+            if (matchRole === "spectator") SFX.hoe();
           } else if (ev.kind === "water") {
-            if (ev.playerId !== selfId || matchRole === "spectator") SFX.water();
+            if (matchRole === "spectator") SFX.water();
           } else if (ev.kind === "plant") {
-            if (ev.playerId !== selfId || matchRole === "spectator") SFX.plant();
+            if (matchRole === "spectator") SFX.plant();
           } else if (ev.kind === "harvest") {
             if (ev.reward === 0) {
-              if (ev.playerId !== selfId || matchRole === "spectator") SFX.hoe();
+              if (matchRole === "spectator") SFX.hoe();
             } else {
-              if (ev.playerId !== selfId || matchRole === "spectator") SFX.harvest();
+              if (matchRole === "spectator") SFX.harvest();
               if (ev.playerId === selfId || matchRole === "spectator") {
                 const coinCount = Math.min(3, Math.ceil(ev.reward / 10));
                 for (let i = 0; i < coinCount; i++) {
@@ -778,7 +779,11 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
 
       {(state.status === "playing" || state.status === "ended") &&
         (isSpectator ? (
-          <SpectatorMatchView players={state.players} events={events} />
+          <SpectatorMatchView
+            players={state.players}
+            events={events}
+            spectatorCount={state.spectatorCount}
+          />
         ) : (
           self && (
             <div className="relative z-10 flex flex-col items-center gap-3">
@@ -831,15 +836,19 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         state.status !== "crop_ban" &&
         state.status !== "crop_selection" &&
         state.status !== "prepare_countdown" && (
-          <CropIndexBook
-            compact
-            marketPrices={state.marketPrices}
-            selectedCropId={self?.seedChoice}
-            availableCropIds={
-              state.status === "playing" && self ? selectedCropPool(self.selectedCrops) : undefined
-            }
-            onSelectCrop={undefined}
-          />
+          <div className="mt-6 w-full flex justify-center">
+            <CropIndexBook
+              compact
+              marketPrices={state.marketPrices}
+              selectedCropId={self?.seedChoice}
+              availableCropIds={
+                state.status === "playing" && self
+                  ? selectedCropPool(self.selectedCrops)
+                  : undefined
+              }
+              onSelectCrop={undefined}
+            />
+          </div>
         )}
       {state.status === "playing" && self && !isSpectator && (
         <MobileControls setMovement={setMovement} sendAction={sendAction} />
@@ -850,15 +859,6 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {lastError && status === "open" && <ConnectionBanner text={lastError.message} />}
 
       {!isSpectator && <MultiplayerControlsGuide />}
-      {isSpectator && <SpectatorGuide />}
-    </div>
-  );
-}
-
-function SpectatorGuide() {
-  return (
-    <div className="relative z-10 font-pixel text-[9px] text-[var(--muted-foreground)] text-center hidden sm:block">
-      <span className="pixel-chip mr-2">REFEREE VIEW</span>ดูคะแนน เวลา สถานะผู้เล่น สำหรับ live สด
     </div>
   );
 }
@@ -1015,6 +1015,7 @@ function MatchHUD({
     countdownEndsAt?: number;
     banEndsAt?: number;
     selectionEndsAt?: number;
+    spectatorCount?: number;
   };
   settings: RoomSettings;
   status: string;
@@ -1062,6 +1063,7 @@ function MatchHUD({
           ? state.selectionEndsAt
           : state.countdownEndsAt;
   const remaining = timerEndsAt ? Math.max(0, timerEndsAt - now) : settings.durationMs;
+  const spectatorCount = Math.max(0, state.spectatorCount ?? 0);
   const mm = Math.floor(remaining / 60000)
     .toString()
     .padStart(2, "0");
@@ -1100,6 +1102,16 @@ function MatchHUD({
           </div>
 
           <div className="flex items-center justify-end gap-4">
+            {role !== "spectator" && (
+              <span
+                className="pixel-chip flex items-center gap-1.5 font-pixel text-[8px]"
+                data-gold={spectatorCount > 0 ? "true" : undefined}
+                title="จำนวนผู้ชมปัจจุบัน"
+              >
+                <EyeIcon size={13} />
+                {spectatorCount} ชม
+              </span>
+            )}
             <div className="flex flex-col items-end gap-1">
               <div className="font-pixel text-[16px] text-[var(--gold)]">
                 {mm}:{ss}
@@ -2231,19 +2243,33 @@ function SelfField({
 function SpectatorMatchView({
   players,
   events,
+  spectatorCount,
 }: {
   players: PublicPlayer[];
   events: { id: number; ev: ServerEvent }[];
+  spectatorCount?: number;
 }) {
+  const watching = Math.max(1, spectatorCount ?? 1);
   return (
-    <div className="relative z-10 flex flex-col items-center gap-3">
-      <div className="pixel-panel flex items-center gap-4 px-4 py-3">
+    <div className="relative z-10 mt-2 flex flex-col items-center gap-4 sm:mt-3">
+      <div className="pixel-panel flex flex-wrap items-center justify-center gap-3 px-5 py-3">
+        <span className="flex items-center gap-2">
+          <span className="live-dot" aria-hidden />
+          <span className="font-pixel text-[8px] tracking-[2px] text-[var(--accent)]">LIVE</span>
+        </span>
+        <span className="h-4 w-[2px] bg-[#1a0f1f]" aria-hidden />
         <span className="font-pixel text-[10px] text-[var(--gold)]">REFEREE VIEW</span>
-        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          {players.length}/2 PLAYERS
+        <span className="pixel-chip font-pixel text-[8px]">{players.length}/2 PLAYERS</span>
+        <span
+          className="pixel-chip flex items-center gap-1.5 font-pixel text-[8px]"
+          data-gold="true"
+          title="จำนวนผู้ชม"
+        >
+          <EyeIcon size={13} />
+          {watching} กำลังดู
         </span>
       </div>
-      <div className="flex flex-col xl:flex-row items-center gap-4">
+      <div className="flex flex-col xl:flex-row items-center gap-4 xl:gap-6">
         {players.map((player, i) => (
           <div key={player.id} className="flex flex-col items-center gap-2">
             <OpponentStatusCard player={player} label={`PLAYER ${i + 1}`} />
@@ -2458,6 +2484,187 @@ function MoveButton({
   );
 }
 
+// Deterministic so SSR markup matches the client (no Math.random in render).
+const WINNER_CONFETTI_COLORS = ["#ffd24a", "#e8a23a", "#d94e6a", "#6ab04c", "#4cc2ee", "#f4e4c1"];
+const WINNER_CONFETTI = Array.from({ length: 22 }, (_, i) => ({
+  left: (i * 37) % 100,
+  delay: (i % 7) * 0.22,
+  dur: 1.9 + (i % 5) * 0.4,
+  color: WINNER_CONFETTI_COLORS[i % WINNER_CONFETTI_COLORS.length],
+  size: 5 + (i % 3) * 2,
+  drift: i % 2 ? 14 : -14,
+  spin: i % 2 ? 1 : -1,
+}));
+
+function champShade(hex: string, amount: number) {
+  const n = Number.parseInt(hex.slice(1), 16);
+  const clamp = (v: number) => Math.max(0, Math.min(255, v));
+  const r = clamp(((n >> 16) & 255) + amount);
+  const g = clamp(((n >> 8) & 255) + amount);
+  const b = clamp((n & 255) + amount);
+  return `#${((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1)}`;
+}
+
+const TROPHY_GOLD = "#ffd24a";
+const TROPHY_GOLD_DARK = "#d99b1f";
+const TROPHY_SHINE = "#fff3c4";
+const SKIN = "#f0c090";
+const SKIN_DARK = "#c08858";
+const INK = "#1a1208";
+
+/** Trophy held overhead. dy shifts the whole cup+arms together as one frame. */
+function trophyArms(dy: number, palette: { skin: string; skinDark: string }) {
+  const g = TROPHY_GOLD;
+  const gd = TROPHY_GOLD_DARK;
+  return (
+    <>
+      {/* left arm: shoulder -> hand on trophy base */}
+      <rect x="3" y={6 + dy} width="1" height="4" fill={palette.skin} />
+      <rect x="4" y={4 + dy} width="1" height="2" fill={palette.skin} />
+      <rect x="4" y={2 + dy} width="2" height="2" fill={palette.skin} />
+      {/* right arm (mirror, shaded) */}
+      <rect x="12" y={6 + dy} width="1" height="4" fill={palette.skinDark} />
+      <rect x="11" y={4 + dy} width="1" height="2" fill={palette.skinDark} />
+      <rect x="10" y={2 + dy} width="2" height="2" fill={palette.skinDark} />
+      {/* trophy base -> stem -> bowl -> mouth, all relative to dy */}
+      <rect x="5" y={1 + dy} width="6" height="1" fill={gd} />
+      <rect x="6" y={0 + dy} width="4" height="1" fill={g} />
+      <rect x="7" y={-1 + dy} width="2" height="1" fill={gd} />
+      <rect x="6" y={-3 + dy} width="4" height="2" fill={g} />
+      <rect x="5" y={-5 + dy} width="6" height="2" fill={g} />
+      <rect x="5" y={-6 + dy} width="6" height="1" fill={g} />
+      <rect x="6" y={-6 + dy} width="1" height="1" fill={TROPHY_SHINE} />
+      {/* handles */}
+      <rect x="4" y={-5 + dy} width="1" height="2" fill={g} />
+      <rect x="11" y={-5 + dy} width="1" height="2" fill={g} />
+    </>
+  );
+}
+
+const DUST = "#b89dd1";
+
+/** Pounding right arm: dy raises (negative) or slams (0) the fist; dust on impact. */
+function poundArm(raised: boolean, skin: string) {
+  if (raised) {
+    return (
+      <>
+        <rect x="12" y="8" width="1" height="2" fill={skin} />
+        <rect x="13" y="6" width="2" height="2" fill={skin} />
+      </>
+    );
+  }
+  return (
+    <>
+      <rect x="12" y="11" width="1" height="2" fill={skin} />
+      <rect x="13" y="13" width="2" height="2" fill={skin} />
+      {/* dust kicked up by the impact */}
+      <rect x="15" y="13" width="1" height="1" fill={DUST} opacity="0.7" />
+      <rect x="12" y="14" width="1" height="1" fill={DUST} opacity="0.5" />
+    </>
+  );
+}
+
+/** Defeated: front-facing farmer kneeling, pounding the ground, 2-frame flipbook. */
+function LoserKneel({ cosmetics }: { cosmetics: PlayerCosmetics }) {
+  const palette = {
+    hat: cosmetics.hat,
+    hatDark: champShade(cosmetics.hat, -70),
+    shirt: cosmetics.shirt,
+    shirtDark: champShade(cosmetics.shirt, -70),
+    pants: cosmetics.pants,
+    pantsDark: champShade(cosmetics.pants, -70),
+    skin: SKIN,
+    skinDark: SKIN_DARK,
+  };
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width="100%"
+      height="100%"
+      shapeRendering="crispEdges"
+      style={{
+        imageRendering: "pixelated",
+        overflow: "visible",
+        filter: "drop-shadow(0 2px 0 rgba(0,0,0,0.35))",
+      }}
+    >
+      {/* hat */}
+      <rect x="2" y="4" width="12" height="1" fill={palette.hat} />
+      <rect x="3" y="3" width="10" height="1" fill={palette.hat} />
+      <rect x="2" y="5" width="12" height="1" fill={palette.hatDark} />
+      <rect x="5" y="2" width="6" height="1" fill={palette.hat} />
+      <rect x="6" y="1" width="4" height="1" fill={palette.hatDark} />
+      {/* head bowed; downcast eyes + a tear */}
+      <rect x="5" y="6" width="6" height="3" fill={palette.skin} />
+      <rect x="5" y="9" width="6" height="1" fill={palette.skinDark} />
+      <rect x="6" y="8" width="1" height="1" fill={INK} />
+      <rect x="9" y="8" width="1" height="1" fill={INK} />
+      <rect x="9" y="9" width="1" height="1" fill="#4cc2ee" />
+      {/* slumped torso */}
+      <rect x="4" y="10" width="8" height="2" fill={palette.shirt} />
+      <rect x="4" y="12" width="8" height="1" fill={palette.shirtDark} />
+      {/* left arm hanging limp */}
+      <rect x="3" y="10" width="1" height="3" fill={palette.skin} />
+      {/* kneeling legs folded wide on the ground */}
+      <rect x="3" y="13" width="10" height="2" fill={palette.pants} />
+      <rect x="3" y="14" width="10" height="1" fill={palette.pantsDark} />
+      <rect x="3" y="15" width="3" height="1" fill="#2a1810" />
+      <rect x="10" y="15" width="3" height="1" fill="#2a1810" />
+      {/* pounding arm: two frames swapped by a steps animation */}
+      <g className="loser-frame loser-frame-a">{poundArm(true, palette.skin)}</g>
+      <g className="loser-frame loser-frame-b">{poundArm(false, palette.skin)}</g>
+    </svg>
+  );
+}
+
+/** Champion: front-facing farmer holding a trophy overhead, 2-frame flipbook. */
+function WinnerChampion({ cosmetics }: { cosmetics: PlayerCosmetics }) {
+  const palette = {
+    hat: cosmetics.hat,
+    hatDark: champShade(cosmetics.hat, -70),
+    shirt: cosmetics.shirt,
+    shirtDark: champShade(cosmetics.shirt, -70),
+    pants: cosmetics.pants,
+    pantsDark: champShade(cosmetics.pants, -70),
+    skin: SKIN,
+    skinDark: SKIN_DARK,
+  };
+  return (
+    <svg
+      viewBox="0 -8 16 24"
+      width="100%"
+      height="100%"
+      shapeRendering="crispEdges"
+      style={{
+        imageRendering: "pixelated",
+        overflow: "visible",
+        filter: "drop-shadow(0 2px 0 rgba(0,0,0,0.35))",
+      }}
+    >
+      {/* static body (front-facing) */}
+      <rect x="2" y="3" width="12" height="1" fill={palette.hat} />
+      <rect x="3" y="2" width="10" height="1" fill={palette.hat} />
+      <rect x="2" y="4" width="12" height="1" fill={palette.hatDark} />
+      <rect x="5" y="1" width="6" height="1" fill={palette.hat} />
+      <rect x="6" y="0" width="4" height="1" fill={palette.hatDark} />
+      <rect x="5" y="5" width="6" height="3" fill={palette.skin} />
+      <rect x="5" y="8" width="6" height="1" fill={palette.skinDark} />
+      <rect x="6" y="6" width="1" height="1" fill={INK} />
+      <rect x="9" y="6" width="1" height="1" fill={INK} />
+      <rect x="7" y="7" width="2" height="1" fill={palette.skinDark} />
+      <rect x="4" y="9" width="8" height="3" fill={palette.shirt} />
+      <rect x="4" y="11" width="8" height="1" fill={palette.shirtDark} />
+      <rect x="5" y="12" width="6" height="2" fill={palette.pants} />
+      <rect x="5" y="13" width="6" height="1" fill={palette.pantsDark} />
+      <rect x="5" y="14" width="2" height="2" fill="#2a1810" />
+      <rect x="9" y="14" width="2" height="2" fill="#2a1810" />
+      {/* arms + trophy: two frames swapped by a steps animation (true flipbook) */}
+      <g className="champ-frame champ-frame-a">{trophyArms(-2, palette)}</g>
+      <g className="champ-frame champ-frame-b">{trophyArms(2, palette)}</g>
+    </svg>
+  );
+}
+
 function EndOverlay({
   winnerId,
   reason,
@@ -2479,6 +2686,9 @@ function EndOverlay({
 }) {
   const won = winnerId && winnerId === selfId;
   const tied = !winnerId;
+  const winner = winnerId ? players.find((p) => p.id === winnerId) : undefined;
+  // Defeated player sees their own farmer kneeling; spectators/winner see the champion.
+  const lost = Boolean(winner && !spectator && !won && self);
   const reasonText =
     reason === "race"
       ? "FIRST TO 500"
@@ -2487,31 +2697,89 @@ function EndOverlay({
         : reason === "kick"
           ? "KICKED"
           : "DISCONNECTED";
+  const subText = won ? "ยอดเยี่ยม! คุณคือผู้ชนะ" : "ผู้ชนะรอบนี้";
   const sortedPlayers = [...players].sort((a, b) => b.coins - a.coins);
   return (
     <div
-      className="fixed inset-0 z-30 flex items-center justify-center"
+      className="fixed inset-0 z-30 flex items-center justify-center px-4"
       style={{ background: "rgba(10,5,15,0.85)" }}
     >
-      <div className="pixel-panel p-8 flex flex-col items-center gap-5 min-w-[360px]">
-        <div
-          className="font-pixel text-[32px]"
-          style={{
-            color: tied ? "#f4e4c1" : won ? "#ffd24a" : "#ff6b6b",
-            textShadow: "3px 3px 0 #1a0f1f",
-          }}
-        >
-          {spectator
-            ? tied
-              ? "DRAW"
-              : "MATCH END"
-            : tied
-              ? "DRAW"
-              : won
-                ? "YOU WIN!"
-                : "YOU LOSE"}
-        </div>
-        <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">{reasonText}</div>
+      <div className="pixel-panel p-8 flex flex-col items-center gap-5 w-[min(420px,92vw)]">
+        {tied || !winner ? (
+          <>
+            <div
+              className="font-pixel text-[32px]"
+              style={{ color: "#f4e4c1", textShadow: "3px 3px 0 #1a0f1f" }}
+            >
+              DRAW
+            </div>
+            <div className="font-pixel text-[10px] text-[var(--muted-foreground)]">
+              {reasonText}
+            </div>
+          </>
+        ) : lost && self ? (
+          <div className="loser-stage">
+            <div className="loser-title font-thai">แพ้แล้ว</div>
+            <div className="loser-kneel-zone">
+              <span className="loser-frustration loser-frustration-a" aria-hidden />
+              <span className="loser-frustration loser-frustration-b" aria-hidden />
+              <div className="loser-avatar">
+                <LoserKneel cosmetics={self.cosmetics} />
+              </div>
+            </div>
+            <div
+              className="winner-name font-pixel"
+              style={{ color: "#ff6b6b", textShadow: "3px 3px 0 #1a0f1f" }}
+            >
+              {self.name} (YOU)
+            </div>
+            <div className="winner-sub font-pixel text-[var(--muted-foreground)]">
+              เจ็บใจรอบนี้ · ชนะโดย {winner.name}
+            </div>
+          </div>
+        ) : (
+          <div className="winner-stage">
+            <div className="winner-confetti" aria-hidden>
+              {WINNER_CONFETTI.map((c, i) => (
+                <i
+                  key={i}
+                  style={
+                    {
+                      left: `${c.left}%`,
+                      width: c.size,
+                      height: c.size,
+                      background: c.color,
+                      "--dur": `${c.dur}s`,
+                      "--delay": `${c.delay}s`,
+                      "--drift": `${c.drift}px`,
+                      "--spin": `${c.spin * 360}deg`,
+                    } as React.CSSProperties
+                  }
+                />
+              ))}
+            </div>
+            <div className="winner-award font-thai">ผู้ชนะ</div>
+            <div className="winner-trophy-zone">
+              <span className="winner-spark winner-spark-a" aria-hidden />
+              <span className="winner-spark winner-spark-b" aria-hidden />
+              <span className="winner-spark winner-spark-c" aria-hidden />
+              <div className="winner-avatar">
+                <WinnerChampion cosmetics={winner.cosmetics} />
+              </div>
+              <div className="winner-podium font-pixel">1</div>
+            </div>
+            <div
+              className="winner-name font-pixel"
+              style={{ color: "#ffd24a", textShadow: "3px 3px 0 #1a0f1f" }}
+            >
+              {winner.name}
+              {winner.id === selfId ? " (YOU)" : ""}
+            </div>
+            <div className="winner-sub font-pixel text-[var(--muted-foreground)]">
+              {spectator ? "ผู้ชนะ" : subText} · {reasonText}
+            </div>
+          </div>
+        )}
         <div className="flex flex-col gap-2 w-full">
           {sortedPlayers.map((p) => {
             const stat = recap?.players.find((entry) => entry.id === p.id);
@@ -2558,12 +2826,8 @@ function EndOverlay({
             </span>
           </button>
         )}
-        <a
-          href="/lobby"
-          onClick={() => SFX.click()}
-          className="font-pixel text-[9px] text-[var(--muted-foreground)] opacity-70 hover:opacity-100"
-        >
-          ออกจากห้อง
+        <a href="/lobby" onClick={() => SFX.click()} className="pixel-btn">
+          <span className="font-pixel text-[10px]">ออกจากห้อง</span>
         </a>
       </div>
     </div>

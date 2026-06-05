@@ -55,6 +55,8 @@ interface CropIndexBookProps {
   availableCropIds?: CropId[];
   compact?: boolean;
   iconOnly?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 export default function CropIndexBook({
@@ -64,8 +66,16 @@ export default function CropIndexBook({
   availableCropIds,
   compact = false,
   iconOnly = false,
+  open: openProp,
+  onOpenChange,
 }: CropIndexBookProps) {
-  const [open, setOpen] = useState(false);
+  const [openInternal, setOpenInternal] = useState(false);
+  const controlled = openProp !== undefined;
+  const open = controlled ? openProp : openInternal;
+  const setOpen = (next: boolean) => {
+    if (!controlled) setOpenInternal(next);
+    onOpenChange?.(next);
+  };
   const [animationStage, setAnimationStage] = useState(0);
 
   useEffect(() => {
@@ -85,7 +95,7 @@ export default function CropIndexBook({
         type="button"
         onClick={() => {
           SFX.click();
-          setOpen((current) => !current);
+          setOpen(!open);
         }}
         className={
           iconOnly

@@ -1,7 +1,9 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { makeRoomCode, ROOM_CODE_RE } from "@/lib/match-protocol";
 import QuickMatchButton from "@/components/QuickMatchButton";
+import { SpeakerOffIcon, SpeakerOnIcon } from "@/components/PixelIcons";
+import { SFX, setMuted, startBgm, stopBgm } from "@/lib/sfx";
 
 export const Route = createFileRoute("/lobby")({
   head: () => ({
@@ -17,6 +19,34 @@ function LobbyPage() {
   );
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [musicEnabled, setMusicEnabled] = useState(true);
+
+  useEffect(() => {
+    setMuted(!musicEnabled);
+    if (musicEnabled) {
+      startBgm();
+    } else {
+      stopBgm();
+    }
+
+    const play = () => {
+      if (musicEnabled) startBgm();
+    };
+    window.addEventListener("pointerdown", play, { once: true });
+    window.addEventListener("keydown", play, { once: true });
+
+    return () => {
+      window.removeEventListener("pointerdown", play);
+      window.removeEventListener("keydown", play);
+      stopBgm();
+      setMuted(false);
+    };
+  }, [musicEnabled]);
+
+  const toggleMusic = () => {
+    SFX.click();
+    setMusicEnabled((current) => !current);
+  };
 
   const saveName = (n: string) => {
     setName(n);
@@ -38,6 +68,16 @@ function LobbyPage() {
   return (
     <div className="relative min-h-screen w-full flex flex-col items-center justify-center p-6 gap-6 overflow-hidden">
       <div className="sky-stars" />
+
+      <button
+        onClick={toggleMusic}
+        className="pixel-btn fixed right-4 top-4 z-20 flex h-12 w-12 items-center justify-center p-0"
+        data-active={musicEnabled ? "true" : undefined}
+        aria-label={musicEnabled ? "ปิดเพลง" : "เปิดเพลง"}
+        title={musicEnabled ? "ปิดเพลง" : "เปิดเพลง"}
+      >
+        {musicEnabled ? <SpeakerOnIcon size={24} /> : <SpeakerOffIcon size={24} />}
+      </button>
 
       <header className="relative z-10 flex flex-col items-center gap-2">
         <h1
@@ -102,9 +142,11 @@ function LobbyPage() {
 
       <a
         href="/"
-        className="relative z-10 font-pixel text-[9px] text-[var(--muted-foreground)] opacity-70 hover:opacity-100"
+        className="pixel-btn relative z-10 inline-flex items-center gap-2 px-4 py-2 no-underline"
+        style={{ fontSize: 9 }}
       >
-        ← กลับโหมดเดี่ยว
+        <span aria-hidden>←</span>
+        กลับโหมดเดี่ยว
       </a>
     </div>
   );

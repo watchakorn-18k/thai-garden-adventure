@@ -23,7 +23,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-border: var(--border);
   --color-gold: var(--gold);
-  --font-pixel: "Press Start 2P", "VT323", monospace;
+  --font-pixel: "Press Start 2P", "VT323", "Mali", monospace;
   --font-thai: "Mali", system-ui, sans-serif;
 }
 
@@ -1354,6 +1354,22 @@
 .speech-dot {
   animation: speech-dot 1s ease-in-out infinite;
 }
+.live-dot {
+  width: 9px;
+  height: 9px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px #1a0f1f;
+  animation: live-dot-pulse 1.1s ease-in-out infinite;
+}
+@keyframes live-dot-pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
 @keyframes match-sparkle-pulse {
   0%,
   100% {
@@ -1508,9 +1524,82 @@
 .cta-multiplayer {
   animation: cta-rise 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+.cta-multiplayer-card {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 18px;
+  width: 100%;
+  padding: 14px 18px;
+  background:
+    linear-gradient(90deg, rgba(217, 78, 106, 0.24), rgba(232, 162, 58, 0.16)), var(--card);
+  box-shadow:
+    inset 0 -4px 0 0 rgba(0, 0, 0, 0.35),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.1),
+    0 0 0 2px #1a0f1f,
+    0 0 0 4px var(--accent),
+    0 8px 0 4px rgba(0, 0, 0, 0.45);
+}
+.cta-multiplayer-copy {
+  display: grid;
+  gap: 8px;
+}
 .cta-multiplayer-label {
   color: var(--gold);
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-shadow: 2px 2px 0 #1a0f1f;
   animation: cta-label-glow 2.4s ease-in-out infinite;
+}
+.cta-multiplayer-subtitle {
+  color: var(--foreground);
+  font-family: var(--font-body);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+.cta-multiplayer-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.cta-quick-match,
+.cta-1v1-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 48px;
+  padding: 0 20px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+.cta-quick-match {
+  min-width: 190px;
+  background: var(--accent);
+  color: var(--accent-foreground);
+  box-shadow:
+    inset 0 -5px 0 0 rgba(0, 0, 0, 0.38),
+    inset 0 2px 0 0 rgba(255, 255, 255, 0.18),
+    0 0 0 2px #1a0f1f,
+    0 0 0 4px var(--gold),
+    0 6px 0 4px rgba(0, 0, 0, 0.45),
+    0 0 16px 4px rgba(255, 210, 74, 0.35);
+}
+.cta-1v1-link {
+  min-width: 88px;
+}
+@media (max-width: 767px) {
+  .cta-multiplayer-card {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    text-align: center;
+  }
+  .cta-multiplayer-actions {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
 }
 /* Idle nearly-still, then a snappy squash/stretch pop every cycle — classic game "juice". */
 @keyframes cta-btn-bob {
@@ -1542,4 +1631,379 @@
 }
 .cta-btn-bob:hover {
   animation-play-state: paused;
+}
+
+/* ── Winner celebration (match-end) ─────────────────────────── */
+.winner-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding-top: 4px;
+}
+.winner-award {
+  color: var(--gold);
+  font-size: 16px;
+  letter-spacing: 1px;
+  text-shadow: 2px 2px 0 #1a0f1f;
+  animation: winner-award-in 0.5s cubic-bezier(0.2, 0.85, 0.2, 1) both;
+}
+@keyframes winner-award-in {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.winner-trophy-zone {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  animation: winner-zone-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes winner-zone-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+/* gold ground glow under the champion (active-state only, per DESIGN.md) */
+.winner-trophy-zone::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  width: 70px;
+  height: 10px;
+  background: var(--gold);
+  opacity: 0.5;
+  box-shadow: 0 0 16px 4px rgba(255, 210, 74, 0.5);
+  animation: winner-ground-pulse 1.6s ease-in-out infinite;
+}
+@keyframes winner-ground-pulse {
+  0%,
+  100% {
+    opacity: 0.4;
+    transform: scaleX(0.85);
+  }
+  50% {
+    opacity: 0.65;
+    transform: scaleX(1.05);
+  }
+}
+.winner-avatar {
+  position: relative;
+  z-index: 2;
+  width: 64px;
+  height: 96px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  /* gentle whole-body bob; the arm-raise lives inside the sprite (flipbook) */
+  animation: winner-bob 0.9s steps(2, end) infinite;
+}
+@keyframes winner-bob {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-2px);
+  }
+}
+/* True 2-frame flipbook: hard-swap the trophy-raise frames in lockstep with
+   the body bob, so the cup never detaches from the hands. */
+.champ-frame {
+  opacity: 0;
+}
+.champ-frame-a {
+  animation: champ-flip-a 0.9s steps(1, end) infinite;
+}
+.champ-frame-b {
+  animation: champ-flip-b 0.9s steps(1, end) infinite;
+}
+@keyframes champ-flip-a {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes champ-flip-b {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.winner-podium {
+  position: absolute;
+  z-index: 1;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 16px;
+  font-size: 10px;
+  color: var(--primary-foreground);
+  background: var(--gold);
+  box-shadow:
+    0 0 0 2px #1a0f1f,
+    0 0 0 4px var(--border);
+}
+
+/* sparkles popping around the trophy */
+.winner-spark {
+  position: absolute;
+  z-index: 4;
+  width: 6px;
+  height: 6px;
+  background: var(--gold);
+  box-shadow: 0 0 6px 1px rgba(255, 210, 74, 0.8);
+  animation: winner-spark-pop 1.3s steps(1, end) infinite;
+}
+.winner-spark-a {
+  top: 6px;
+  left: 14px;
+  animation-delay: 0s;
+}
+.winner-spark-b {
+  top: 2px;
+  right: 16px;
+  animation-delay: 0.45s;
+}
+.winner-spark-c {
+  top: 22px;
+  right: 8px;
+  animation-delay: 0.9s;
+}
+@keyframes winner-spark-pop {
+  0%,
+  70%,
+  100% {
+    opacity: 0;
+    transform: scale(0.4);
+  }
+  20%,
+  45% {
+    opacity: 1;
+    transform: scale(1.3);
+  }
+}
+
+.winner-name {
+  font-size: 18px;
+  text-align: center;
+  animation: winner-name-in 0.5s cubic-bezier(0.2, 0.85, 0.2, 1) 0.1s both;
+}
+@keyframes winner-name-in {
+  0% {
+    opacity: 0;
+    transform: scale(0.7);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+.winner-sub {
+  font-size: 8px;
+  letter-spacing: 1px;
+  text-align: center;
+}
+
+/* falling confetti — square pixels, no blur */
+.winner-confetti {
+  position: absolute;
+  inset: -8px -8px auto -8px;
+  height: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+.winner-confetti i {
+  position: absolute;
+  top: 0;
+  box-shadow: 0 0 0 1px rgba(26, 15, 31, 0.6);
+  animation: winner-confetti-fall var(--dur) linear var(--delay) infinite;
+}
+@keyframes winner-confetti-fall {
+  0% {
+    opacity: 0;
+    transform: translate(0, -10px) rotate(0deg);
+  }
+  10% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.9;
+    transform: translate(var(--drift), 230px) rotate(var(--spin));
+  }
+}
+
+.loser-stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding-top: 4px;
+  animation: loser-stage-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes loser-stage-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.loser-title {
+  color: #ff6b6b;
+  font-size: 18px;
+  letter-spacing: 1px;
+  text-shadow: 2px 2px 0 #1a0f1f;
+}
+.loser-kneel-zone {
+  position: relative;
+  width: 96px;
+  height: 86px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+.loser-kneel-zone::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  width: 74px;
+  height: 10px;
+  background: var(--muted);
+  opacity: 0.7;
+  box-shadow: 0 0 0 2px #1a0f1f;
+}
+.loser-avatar {
+  position: relative;
+  z-index: 2;
+  width: 66px;
+  height: 66px;
+  animation: loser-slam-body 0.72s steps(2, end) infinite;
+  transform-origin: 50% 95%;
+}
+@keyframes loser-slam-body {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(2px) scaleY(0.96);
+  }
+}
+.loser-frame {
+  opacity: 0;
+}
+.loser-frame-a {
+  animation: loser-flip-a 0.72s steps(1, end) infinite;
+}
+.loser-frame-b {
+  animation: loser-flip-b 0.72s steps(1, end) infinite;
+}
+@keyframes loser-flip-a {
+  0% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+@keyframes loser-flip-b {
+  0% {
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+.loser-frustration {
+  position: absolute;
+  z-index: 3;
+  width: 7px;
+  height: 7px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px #1a0f1f;
+  animation: loser-frustration-pop 0.72s steps(1, end) infinite;
+}
+.loser-frustration-a {
+  top: 8px;
+  right: 20px;
+}
+.loser-frustration-b {
+  top: 18px;
+  left: 18px;
+  width: 5px;
+  height: 5px;
+  animation-delay: 0.36s;
+}
+@keyframes loser-frustration-pop {
+  0%,
+  45%,
+  100% {
+    opacity: 0;
+    transform: translateY(0) scale(0.6);
+  }
+  50%,
+  80% {
+    opacity: 1;
+    transform: translateY(-3px) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .winner-avatar,
+  .champ-frame-a,
+  .champ-frame-b,
+  .winner-trophy-zone::after,
+  .winner-spark,
+  .winner-confetti i,
+  .loser-stage,
+  .loser-avatar,
+  .loser-frame-a,
+  .loser-frame-b,
+  .loser-frustration {
+    animation: none;
+  }
+  /* keep one frame visible when motion is off */
+  .champ-frame-a,
+  .loser-frame-a {
+    opacity: 1;
+  }
 }

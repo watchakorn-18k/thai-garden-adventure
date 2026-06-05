@@ -133,14 +133,15 @@ Three families, loaded from Google Fonts in `src/routes/__root.tsx`.
 
 Hierarchy:
 
-| Role | Token | Notes |
-| --- | --- | --- |
-| Hero / lobby title | `h1` | rendered `clamp(18px, 4vw, 34px)`, color `gold`, hard shadow `3px 3px 0` ink. |
-| Section label | `label` | `gold`, uppercase feel, wide tracking. |
-| Button / chip / keycap | `button` | pixel `9–11px`. |
-| Crop name / body | `body` | Mali `13–15px`, hard `2px 2px 0` shadow on names. |
+| Role                   | Token    | Notes                                                                         |
+| ---------------------- | -------- | ----------------------------------------------------------------------------- |
+| Hero / lobby title     | `h1`     | rendered `clamp(18px, 4vw, 34px)`, color `gold`, hard shadow `3px 3px 0` ink. |
+| Section label          | `label`  | `gold`, uppercase feel, wide tracking.                                        |
+| Button / chip / keycap | `button` | pixel `9–11px`.                                                               |
+| Crop name / body       | `body`   | Mali `13–15px`, hard `2px 2px 0` shadow on names.                             |
 
 Rules:
+
 - Pixel text always gets a **hard offset shadow** (`Npx Npx 0 <ink>`), never a blur.
 - Never set the pixel face larger than ~18px in body flow, or use it for long paragraphs — it gets unreadable. Use Mali there.
 
@@ -195,6 +196,7 @@ Reusable classes live in `@layer base` of `src/styles.css`. Prefer them over ad-
 ## Do's and Don'ts
 
 **Do**
+
 - Use the defined tokens and the `.pixel-*` / `.farm-*` / `.flow-*` / `.lobby-*` classes.
 - Keep corners square and build depth from layered solid `box-shadow` steps.
 - Use the pixel face for game/UI chrome and Mali for prose and Thai text.
@@ -202,6 +204,7 @@ Reusable classes live in `@layer base` of `src/styles.css`. Prefer them over ad-
 - Keep `image-rendering: pixelated` intact.
 
 **Don't**
+
 - ❌ Add `border-radius` or blurred shadows for depth.
 - ❌ Use smooth/long transitions, parallax drift, or material-design elevation.
 - ❌ Set the pixel face above ~18px in body text, or use it for long paragraphs.
@@ -212,4 +215,4 @@ Reusable classes live in `@layer base` of `src/styles.css`. Prefer them over ad-
 
 ---
 
-*Tokens mirror `src/styles.css` `:root`. When this file and the CSS disagree, the CSS is the source of truth — update this doc to match.*
+_Tokens mirror `src/styles.css` `:root`. When this file and the CSS disagree, the CSS is the source of truth — update this doc to match._

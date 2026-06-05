@@ -17,7 +17,7 @@ const MOVE_SPEED_TILES_PER_SECOND = 5.8;
 // Time constant for exponential movement smoothing (ms). Lower = snappier and
 // closer to the server position, higher = smoother but more trailing.
 const MOVE_TAU = 45;
-const PIXEL_FONT = '"Press Start 2P", "VT323", monospace';
+const PIXEL_FONT = '"Press Start 2P", "VT323", "Mali", monospace';
 
 const TYPE_CODE: Record<"grass" | "tilled" | "watered", number> = {
   grass: 0,

@@ -85,7 +85,7 @@ const SNAPSHOT_INTERVAL_MS = 50;
 const GROWTH_INTERVAL_MS = 500;
 const PERSIST_INTERVAL_MS = 1000;
 const RECONNECT_GRACE_MS = 30_000;
-const MAX_SPECTATORS = 5;
+const MAX_SPECTATORS = 10;
 const BOT_TICK_MS = 150;
 const BOT_NAMES = ["บอทมะลิ", "บอทข้าวหอม", "บอทตะวัน", "บอทใบเตย", "บอทมะนาว"];
 const BOT_COSMETICS: PlayerCosmetics = { hat: "#8bc967", shirt: "#4cc2ee", pants: "#4a2f5c" };
@@ -1605,36 +1605,55 @@ export class MatchRoom implements DurableObject {
       players,
       marketPrices: this.marketPrices,
       banTurnPlayerId: this.banTurnPlayerId,
+      spectatorCount: this.spectatorCount(),
     };
   }
 
-  private getFilteredState(role: MatchRole, playerId?: string): PublicMatchState {
-    const state = this.publicState();
+  private getFilteredState(
+    role: MatchRole,
+    playerId?: string,
+    baseState: PublicMatchState = this.publicState(),
+  ): PublicMatchState {
     if (role === "spectator") {
-      return state;
+      return baseState;
     }
-    state.players = state.players.map((p) => {
-      if (p.id === playerId) return p;
-      const opponent = { ...p };
-      if (state.status === "crop_ban") {
-        if (!opponent.ready) {
-          opponent.bannedCrop = undefined;
+    return {
+      ...baseState,
+      players: baseState.players.map((p) => {
+        if (p.id === playerId) return p;
+        const opponent = { ...p };
+        if (baseState.status === "crop_ban") {
+          if (!opponent.ready) {
+            opponent.bannedCrop = undefined;
+          }
+        } else if (baseState.status === "crop_selection") {
+          opponent.selectedCrops = [];
+          opponent.seedChoice = undefined as any;
         }
-      } else if (state.status === "crop_selection") {
-        opponent.selectedCrops = [];
-        opponent.seedChoice = undefined as any;
-      }
-      return opponent;
-    });
-    return state;
+        return opponent;
+      }),
+    };
   }
 
   private broadcastSnapshot(): void {
+    const baseState = this.publicState();
+    const spectatorData = JSON.stringify({ t: "snapshot", state: baseState } satisfies ServerMsg);
+    const playerSnapshots = new Map<string, string>();
     for (const ws of this.ctx.getWebSockets()) {
       const role = this.wsToRole.get(ws) ?? "player";
       const playerId = this.wsToPlayer.get(ws);
-      const filteredState = this.getFilteredState(role, playerId);
-      this.sendTo(ws, { t: "snapshot", state: filteredState });
+      if (role === "spectator") {
+        this.sendSerializedTo(ws, spectatorData);
+        continue;
+      }
+      const cacheKey = playerId ?? "";
+      let data = playerSnapshots.get(cacheKey);
+      if (!data) {
+        const filteredState = this.getFilteredState(role, playerId, baseState);
+        data = JSON.stringify({ t: "snapshot", state: filteredState } satisfies ServerMsg);
+        playerSnapshots.set(cacheKey, data);
+      }
+      this.sendSerializedTo(ws, data);
     }
   }
 
@@ -1652,6 +1671,14 @@ export class MatchRoom implements DurableObject {
   private sendTo(ws: WebSocket, msg: ServerMsg): void {
     try {
       ws.send(JSON.stringify(msg));
+    } catch {
+      /* noop */
+    }
+  }
+
+  private sendSerializedTo(ws: WebSocket, data: string): void {
+    try {
+      ws.send(data);
     } catch {
       /* noop */
     }
