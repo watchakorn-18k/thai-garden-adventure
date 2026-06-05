@@ -688,6 +688,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           self={self}
           isSpectator={isSpectator}
           onBanCrop={(id) => send({ t: "ban_crop", id })}
+          onReady={() => send({ t: "ready" })}
         />
       )}
 
@@ -1257,11 +1258,13 @@ function CropBanView({
   self,
   isSpectator,
   onBanCrop,
+  onReady,
 }: {
   state: PublicMatchState;
   self?: PublicPlayer;
   isSpectator: boolean;
   onBanCrop: (id: CropId) => void;
+  onReady: () => void;
 }) {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -1287,7 +1290,7 @@ function CropBanView({
           </span>
         </div>
         <h2 className="font-pixel lobby-title">แบนผัก 1 อย่าง</h2>
-        <p className="lobby-subtitle">แบนซ้ำกันได้ · หลังหมดเวลา จะเลือกได้เฉพาะผักที่ไม่โดนแบน</p>
+        <p className="lobby-subtitle">แบนซ้ำกันได้ · กดยืนยันการแบนเพื่อล็อกตัวเลือก</p>
       </div>
 
       <div className="pixel-panel my-4 grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
@@ -1299,11 +1302,11 @@ function CropBanView({
               key={crop.id}
               type="button"
               onClick={() => {
-                if (isSpectator) return;
+                if (isSpectator || self?.ready) return;
                 SFX.click();
                 onBanCrop(crop.id);
               }}
-              disabled={isSpectator}
+              disabled={isSpectator || self?.ready}
               className="farm-crop-card pixel-btn text-left"
               data-active={active ? "true" : undefined}
               title={`แบน ${crop.name}`}
@@ -1323,20 +1326,41 @@ function CropBanView({
         })}
       </div>
 
+      {self?.bannedCrop && !isSpectator && (
+        <div className="flex justify-center my-4">
+          <button
+            type="button"
+            onClick={() => {
+              SFX.click();
+              onReady();
+            }}
+            disabled={self.ready}
+            className="pixel-btn lobby-ready-btn w-full max-w-xs"
+            data-accent={self.ready ? undefined : "true"}
+          >
+            <span className="font-pixel text-[12px]">
+              {self.ready ? "READY (ยืนยันแล้ว)" : "ยืนยันการแบน (Confirm Ban)"}
+            </span>
+          </button>
+        </div>
+      )}
+
       <div className="pixel-panel flex flex-wrap items-center justify-between gap-3 px-4 py-3">
         <div className="flex flex-wrap gap-2">
           {state.players.map((player) => (
             <span
               key={player.id}
               className="pixel-chip font-pixel text-[8px]"
-              data-gold={player.bannedCrop ? "true" : undefined}
+              data-gold={player.ready ? "true" : undefined}
             >
-              {player.name}: {player.bannedCrop ? CROPS[player.bannedCrop].name : "ยังไม่แบน"}
+              {player.name}:{" "}
+              {player.bannedCrop ? `แบน ${CROPS[player.bannedCrop].name}` : "ยังไม่เลือก"}
+              {player.ready ? " [READY]" : " [เลือกอยู่]"}
             </span>
           ))}
         </div>
         <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-          ไม่ต้องกด READY · หมดเวลาแล้วไปเลือกเมล็ด
+          เมื่อกดยืนยันครบทั้งสองฝั่ง เวลาจะลดเหลือ 5 วินาที
         </span>
       </div>
     </section>

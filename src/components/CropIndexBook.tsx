@@ -122,7 +122,7 @@ export default function CropIndexBook({
             </div>
           </div>
 
-          <div className="grid grid-cols-1 gap-3 md:grid-cols-[1.1fr_0.9fr] lg:grid-cols-[1.15fr_0.95fr_0.9fr]">
+          <div className="max-h-[380px] overflow-y-auto pr-2 custom-scrollbar grid grid-cols-1 gap-3 md:grid-cols-[1.1fr_0.9fr] lg:grid-cols-[1.15fr_0.95fr_0.9fr]">
             {crops.map((crop, index) => {
               const Icon = CROP_ICONS[crop.id];
               const marketPrice = Math.round(marketPrices?.[crop.id] ?? crop.sellPrice);

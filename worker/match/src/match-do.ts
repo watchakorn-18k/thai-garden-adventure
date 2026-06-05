@@ -113,6 +113,7 @@ export class MatchRoom implements DurableObject {
   private lastPriceUpdateAt = 0;
   private snapshotTimer?: ReturnType<typeof setInterval>;
   private growthTimer?: ReturnType<typeof setInterval>;
+  private phaseTimer?: ReturnType<typeof setTimeout>;
 
   constructor(
     private ctx: DurableObjectState,
@@ -229,6 +230,15 @@ export class MatchRoom implements DurableObject {
         this.broadcastSnapshot();
         return;
       }
+      if (this.status === "crop_ban") {
+        if (!player.bannedCrop) return;
+        if (player.ready) return;
+        player.ready = true;
+        this.maybeFastForwardCropBan();
+        this.persist();
+        this.broadcastSnapshot();
+        return;
+      }
       if (this.status === "crop_selection") {
         if (
           normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds()).length !==
@@ -256,6 +266,7 @@ export class MatchRoom implements DurableObject {
 
     if (msg.t === "ban_crop") {
       if (this.status !== "crop_ban") return;
+      if (player.ready) return;
       player.bannedCrop = msg.id;
       this.persist();
       this.broadcastSnapshot();
@@ -951,7 +962,8 @@ export class MatchRoom implements DurableObject {
     this.status = "countdown";
     this.countdownEndsAt = Date.now() + COUNTDOWN_MS;
     this.scheduleAlarm();
-    setTimeout(() => this.startCropBan(), COUNTDOWN_MS);
+    if (this.phaseTimer) clearTimeout(this.phaseTimer);
+    this.phaseTimer = setTimeout(() => this.startCropBan(), COUNTDOWN_MS);
   }
 
   private startCropBan(): void {
@@ -968,7 +980,22 @@ export class MatchRoom implements DurableObject {
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
-    setTimeout(() => this.startCropSelection(), CROP_BAN_MS);
+    if (this.phaseTimer) clearTimeout(this.phaseTimer);
+    this.phaseTimer = setTimeout(() => this.startCropSelection(), CROP_BAN_MS);
+  }
+
+  private maybeFastForwardCropBan(): void {
+    if (this.status !== "crop_ban") return;
+    if (this.players.size !== this.settings.maxPlayers) return;
+    const allReady = [...this.players.values()].every((p) => p.bannedCrop && p.ready);
+    if (!allReady) return;
+    const now = Date.now();
+    if (this.banEndsAt && this.banEndsAt - now > 5000) {
+      this.banEndsAt = now + 5000;
+      this.scheduleAlarm();
+      if (this.phaseTimer) clearTimeout(this.phaseTimer);
+      this.phaseTimer = setTimeout(() => this.startCropSelection(), 5000);
+    }
   }
 
   private startCropSelection(): void {
@@ -1013,7 +1040,8 @@ export class MatchRoom implements DurableObject {
     this.scheduleAlarm();
     this.persist();
     this.broadcastSnapshot();
-    setTimeout(() => this.startPlaying(), COUNTDOWN_MS);
+    if (this.phaseTimer) clearTimeout(this.phaseTimer);
+    this.phaseTimer = setTimeout(() => this.startPlaying(), COUNTDOWN_MS);
   }
 
   private startPlaying(): void {
