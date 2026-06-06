@@ -54,6 +54,8 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   basil: BasilIcon,
 };
 
+const TILE = 56;
+
 const STAGE_COPY: Record<RoomStage, { label: string; desc: string }> = {
   classic: { label: "สวนมาตรฐาน", desc: "สวนมาตรฐาน แข่งทำเหรียญไว" },
   water: { label: "สวนริมคลอง", desc: "คลองชลประทานล้อมสวน" },
@@ -74,6 +76,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outfitOpen, setOutfitOpen] = useState(false);
+  const [spectatorBookOpen, setSpectatorBookOpen] = useState(true);
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
   const [musicEnabled, setMusicEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -786,6 +789,7 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             players={state.players}
             events={events}
             spectatorCount={state.spectatorCount}
+            marketPrices={state.marketPrices}
           />
         ) : (
           self && (
@@ -843,7 +847,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
           <div className="mt-6 w-full flex justify-center">
             <CropIndexBook
               compact
-              open={true}
+              open={spectatorBookOpen}
+              onOpenChange={setSpectatorBookOpen}
               marketPrices={state.marketPrices}
               selectedCropId={self?.seedChoice}
               availableCropIds={
@@ -2293,11 +2298,20 @@ function SpectatorMatchView({
   players,
   events,
   spectatorCount,
+  marketPrices,
 }: {
   players: PublicPlayer[];
   events: { id: number; ev: ServerEvent }[];
   spectatorCount?: number;
+  marketPrices?: Record<CropId, number>;
 }) {
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 500);
+    return () => clearInterval(interval);
+  }, []);
+
   const watching = Math.max(1, spectatorCount ?? 1);
   return (
     <div className="relative z-10 mt-2 flex flex-col items-center gap-4 sm:mt-3">
@@ -2321,17 +2335,71 @@ function SpectatorMatchView({
         </span>
       </div>
       <div className="flex flex-col xl:flex-row items-center gap-4 xl:gap-6">
-        {players.map((player, i) => (
-          <div key={player.id} className="flex flex-col items-center gap-2">
-            <OpponentStatusCard player={player} label={`ผู้เล่น ${i + 1}`} />
-            <SelfField
-              player={player}
-              events={events.filter((e) => e.ev.playerId === player.id)}
-              actionFlash={0}
-              acting={false}
-            />
-          </div>
-        ))}
+        {players.map((player, i) => {
+          const overlays: Array<{
+            x: number;
+            y: number;
+            id: CropId;
+            progress: number;
+            price: number;
+          }> = [];
+          for (let y = 0; y < ROWS; y++) {
+            for (let x = 0; x < COLS; x++) {
+              const cell = player.tiles[y]?.[x];
+              if (!cell?.crop) continue;
+              const id = cell.crop.id as CropId;
+              const plantedAt = cell.crop.plantedAt;
+              const elapsed = Math.max(0, now - plantedAt);
+              const growTime = CROPS[id].growTime ?? 0;
+              const progress = growTime > 0 ? Math.min(1, elapsed / growTime) : 1;
+              const price = Math.round(marketPrices?.[id] ?? CROPS[id].sellPrice);
+              overlays.push({ x, y, id, progress, price });
+            }
+          }
+
+          return (
+            <div key={player.id} className="flex flex-col items-center gap-2">
+              <OpponentStatusCard player={player} label={`ผู้เล่น ${i + 1}`} />
+              <div className="relative" style={{ width: COLS * TILE, height: ROWS * TILE }}>
+                <SelfField
+                  player={player}
+                  events={events.filter((e) => e.ev.playerId === player.id)}
+                  actionFlash={0}
+                  acting={false}
+                />
+                <div className="absolute inset-0 pointer-events-none">
+                  {overlays.map((c) => {
+                    const left = c.x * TILE + 5;
+                    const overlayHeight = 16;
+                    const top = c.y * TILE + TILE - overlayHeight - 2;
+                    const pct = Math.round(c.progress * 100);
+                    return (
+                      <div
+                        key={`${c.x}-${c.y}`}
+                        style={{ left, top, width: TILE - 10, position: "absolute" }}
+                      >
+                        <div className="bg-transparent px-1 py-[1px] text-white">
+                          <div className="flex items-center justify-between gap-1 text-[7px] leading-none">
+                            <span className="flex items-center gap-[2px] font-pixel text-[7px] text-[var(--gold)]">
+                              <CoinIcon size={10} />
+                              {c.price}
+                            </span>
+                          </div>
+                          <div className="mt-[2px] h-[3px] w-full overflow-hidden rounded-full bg-white/20">
+                            <div
+                              className="h-full bg-gradient-to-r from-[#7fd8ff] to-[#4cc2ee]"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
