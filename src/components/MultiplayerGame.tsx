@@ -2150,6 +2150,16 @@ function SpectatorLobbyView({
         onOpenSettings={onOpenSettings}
       />
 
+      {slotsFull && (
+        <div className="mb-5 flex justify-center">
+          <div className="pixel-panel px-4 py-3">
+            <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">
+              สล็อตผู้เล่นเต็มแล้ว
+            </span>
+          </div>
+        </div>
+      )}
+
       <div className="lobby-versus-grid">
         <PlayerCard
           player={players[0]}
@@ -2177,19 +2187,18 @@ function SpectatorLobbyView({
       <div className="lobby-ready-row">
         <div className="lobby-ruleline" />
         <div className="flex flex-wrap items-center justify-center gap-3">
-          <button
-            onClick={() => {
-              SFX.epicSlot();
-              onClaimSlot();
-            }}
-            className="pixel-btn lobby-ready-btn"
-            data-accent={!slotsFull ? "true" : undefined}
-            disabled={slotsFull}
-          >
-            <span className="font-pixel text-[12px]">
-              {slotsFull ? "สล็อตผู้เล่นเต็ม" : "เข้าสล็อตผู้เล่น"}
-            </span>
-          </button>
+          {!slotsFull ? (
+            <button
+              onClick={() => {
+                SFX.epicSlot();
+                onClaimSlot();
+              }}
+              className="pixel-btn lobby-ready-btn"
+              data-accent="true"
+            >
+              <span className="font-pixel text-[12px]">เข้าสล็อตผู้เล่น</span>
+            </button>
+          ) : null}
           {canAddBot && (
             <button
               onClick={() => {
