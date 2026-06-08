@@ -86,6 +86,18 @@ server {
     proxy_send_timeout 3600s;
   }
 
+  # Quick Match (POST) + health check live on the match worker too.
+  # Without these, /matchmake falls through to the web app and 404s.
+  location = /matchmake {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+  }
+
+  location = /health {
+    proxy_pass http://127.0.0.1:8787;
+    proxy_set_header Host $host;
+  }
+
   location / {
     proxy_pass http://127.0.0.1:8080;
     proxy_set_header Host $host;

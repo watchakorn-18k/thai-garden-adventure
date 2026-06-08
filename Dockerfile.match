@@ -4,8 +4,12 @@ WORKDIR /app
 
 ENV WRANGLER_SEND_METRICS=false
 
+# --legacy-peer-deps: npm's strict peer resolution fails here because
+# @lovable.dev/vite-tanstack-config floats to a version demanding a newer nitro
+# than package.json pins. nitro is build-only for the web app and unused by the
+# match worker, so we ignore the conflict (bun.lock resolves it the same way).
 COPY package.json ./
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 COPY src ./src
 COPY worker ./worker
