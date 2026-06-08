@@ -1,7 +1,22 @@
 import { useEffect, useRef } from "react";
 import type Phaser from "phaser";
-import { COLS, CROPS, MARKET_TILE_POS, ROWS, type Cargo, type Direction } from "@/lib/game-types";
+import {
+  COLS,
+  CROP_COLOR,
+  CROPS,
+  MARKET_TILE_POS,
+  ROWS,
+  type Cargo,
+  type CropId,
+  type Direction,
+} from "@/lib/game-types";
 import type { PublicPlayer, ServerEvent } from "@/lib/match-protocol";
+
+function playerCargoStack(player: PublicPlayer): Cargo[] {
+  if (player.cargoStack && player.cargoStack.length > 0) return player.cargoStack;
+  if (player.carryingCargo) return [player.carryingCargo];
+  return [];
+}
 import {
   ART_GRID,
   cropRects,
@@ -59,8 +74,89 @@ function drawRects(g: Phaser.GameObjects.Graphics, rects: Rect[], ox: number, oy
   }
 }
 
+/** Per-crop bar color as a Phaser number, derived from the shared CROP_COLOR map. */
+const CROP_BAR_COLOR: Record<CropId, number> = Object.fromEntries(
+  (Object.keys(CROP_COLOR) as CropId[]).map((id) => [id, hexNum(CROP_COLOR[id])]),
+) as Record<CropId, number>;
+
+/** Draw a backpack basket behind the character. Uses art-grid coords (same as
+ *  farmerRects) so it scales identically to the body sprite.
+ *  `ox, oy` = top-left of the character sprite in pixel space.
+ *  `dir` = facing direction — basket is offset to the opposite side ("behind").
+ *  `s` = art-to-pixel scale (TILE / ART_GRID). */
+function drawBasket(
+  g: Phaser.GameObjects.Graphics,
+  ox: number,
+  oy: number,
+  dir: Direction,
+  s: number,
+  fillLevel: number,
+  topCropId?: CropId,
+) {
+  // Basket is 6×4 art-units, offset 8 art-units "behind" the 16-unit body
+  // Behind = opposite of facing: left→right side, right→left side, up→below, down→above
+  let bx: number;
+  let by: number;
+  if (dir === "left") {
+    // behind = right side of body
+    bx = 11;
+    by = 6;
+  } else if (dir === "right") {
+    // behind = left side of body
+    bx = -1;
+    by = 6;
+  } else if (dir === "up") {
+    // facing away — the pack sits on the visible back, centered over the torso
+    // (caller draws it IN FRONT of the body for this direction)
+    bx = 5;
+    by = 7;
+  } else {
+    // down — facing the camera; pack is hidden behind, only the top peeks above
+    // the head, overlapping the hat so it reads as attached
+    bx = 5;
+    by = -3;
+  }
+
+  const px = ox + bx * s;
+  const py = oy + by * s;
+  const w = 6 * s;
+  const h = 4 * s;
+
+  // Body
+  g.fillStyle(0x8b5a2b, 1);
+  g.fillRect(px, py, w, h);
+  // Rim
+  g.fillStyle(0xa06a3a, 1);
+  g.fillRect(px + 0.5 * s, py - 1 * s, w - 1 * s, 1 * s);
+  // Interior
+  g.fillStyle(0x5a2f17, 1);
+  g.fillRect(px + 1 * s, py + 0.5 * s, w - 2 * s, h - 1 * s);
+  // Woven band
+  g.fillStyle(0x6b3a1b, 1);
+  g.fillRect(px + 0.25 * s, py + h * 0.6, w - 0.5 * s, 0.25 * s);
+  // Handle
+  g.fillStyle(0x6b3a1b, 1);
+  g.fillRect(px + 1 * s, py - 1.5 * s, w - 2 * s, 0.5 * s);
+
+  // Fill bar — color matches the top crop in the basket. Sits below the basket
+  // normally, but above it when facing down (basket peeks over the head there,
+  // so a bar below would fall behind the body and be hidden).
+  if (fillLevel > 0) {
+    const barY = dir === "down" ? py - 2 * s : py + h + 1;
+    const barW = w;
+    const filled = Math.round((fillLevel / 5) * barW);
+    g.fillStyle(0x1a0f1f, 1);
+    g.fillRect(px, barY, barW, 1 * s);
+    const barColor = topCropId ? CROP_BAR_COLOR[topCropId] : 0xffd24a;
+    g.fillStyle(fillLevel >= 5 ? 0xffd24a : barColor, 1);
+    g.fillRect(px, barY, filled, 1 * s);
+    g.lineStyle(1, 0x1a0f1f, 1);
+    g.strokeRect(px, barY, barW, 1 * s);
+    g.lineStyle(0);
+  }
+}
+
 /**
- * Renders one player's playing field (tiles, crops, interpolated farmer, facing
  * marker, ambience and floating event text) inside a Phaser canvas. The React
  * shell (HUD, lobby, toolbar, …) stays outside in MultiplayerGame.
  */
@@ -289,14 +385,20 @@ export default function PhaserField({
               cosmetics: mate.cosmetics,
             });
             const s = TILE / ART_GRID;
+            // Cargo a seller is carrying — basket layers behind the body unless
+            // facing away (up), where it's on the visible back (drawn after).
+            const stack = playerCargoStack(mate);
+            const topCropId = stack[stack.length - 1]?.cropId;
+            if (stack.length > 0 && mate.dir !== "up") {
+              drawBasket(this.teammateG, baseX, baseY, mate.dir, s, stack.length, topCropId);
+            }
             for (const [rx, ry, rw, rh, color] of rects) {
               this.teammateG.fillStyle(hexNum(color), 1);
               const mx = flip ? ART_GRID - rx - rw : rx;
               this.teammateG.fillRect(baseX + mx * s, baseY + ry * s, rw * s, rh * s);
             }
-            // Cargo a seller is carrying rides above their head.
-            if (mate.carryingCargo) {
-              drawRects(this.teammateG, cropRects(mate.carryingCargo.cropId, 2), baseX, baseY - 16);
+            if (stack.length > 0 && mate.dir === "up") {
+              drawBasket(this.teammateG, baseX, baseY, mate.dir, s, stack.length, topCropId);
             }
 
             const label = this.teammateNameG[idx];
@@ -411,6 +513,17 @@ export default function PhaserField({
           const bob = this.moving ? (this.walkFrame % 2 === 0 ? 0 : -1.5) : 0;
           const baseX = this.disp.x * TILE;
           const baseY = this.disp.y * TILE - 10 + bob;
+
+          // Basket layering: when facing away (up) the pack is on the visible
+          // back, so it draws ON TOP of the body. Every other direction it's
+          // behind the body, so it draws first.
+          const stack = playerCargoStack(p);
+          const hasBasket = p.role === "seller" || stack.length > 0;
+          const topCropId = stack[stack.length - 1]?.cropId;
+          if (hasBasket && p.dir !== "up") {
+            drawBasket(this.farmerG, baseX, baseY, p.dir, TILE / ART_GRID, stack.length, topCropId);
+          }
+
           if (!flip) {
             drawRects(this.farmerG, rects, baseX, baseY);
           } else {
@@ -423,7 +536,16 @@ export default function PhaserField({
             }
           }
 
+          if (hasBasket && p.dir === "up") {
+            drawBasket(this.farmerG, baseX, baseY, p.dir, TILE / ART_GRID, stack.length, topCropId);
+          }
+
           const isActing = this.acting || actingRef.current;
+          // Skip farmer tool animation for seller actions (pickup, not hoe)
+          if (isActing && p.role === "seller") {
+            // brief bob animation only
+            return;
+          }
           if (isActing) {
             const isVertical = p.dir === "up" || p.dir === "down";
             const palette = paletteFor(p.cosmetics ?? {});
@@ -561,6 +683,65 @@ export default function PhaserField({
 
         spawnEvent(ev: ServerEvent) {
           if (ev.kind === "insufficient_funds") return;
+          if (ev.kind === "cargo_picked_up") {
+            // Show pickup text near the teammate who picked up
+            const mates = teammatesRef.current;
+            const picker = mates.find((m) => m.id === ev.playerId);
+            if (!picker) return;
+            const disp = this.teammateDisp.get(picker.id) ?? { x: picker.pos.x, y: picker.pos.y };
+            const label = this.add
+              .text(disp.x * TILE + TILE / 2, disp.y * TILE - 20, "หยิบ!", {
+                fontFamily: PIXEL_FONT,
+                fontSize: "10px",
+                color: "#ffd24a",
+                stroke: "#000000",
+                strokeThickness: 3,
+              })
+              .setOrigin(0.5, 0.5)
+              .setDepth(20);
+            this.tweens.add({
+              targets: label,
+              y: disp.y * TILE - 44,
+              alpha: 0,
+              duration: 700,
+              ease: "Quad.Out",
+              onComplete: () => label.destroy(),
+            });
+            this.drawTeammates();
+            return;
+          }
+          if (ev.kind === "cargo_sold") {
+            // Show sold text
+            const p = playerRef.current;
+            const isSelf = ev.playerId === p.id;
+            const mates = teammatesRef.current;
+            const seller = isSelf ? p : mates.find((m) => m.id === ev.playerId);
+            if (!seller) return;
+            const disp = isSelf
+              ? { x: seller.pos.x, y: seller.pos.y }
+              : (this.teammateDisp.get(seller.id) ?? { x: seller.pos.x, y: seller.pos.y });
+            const reward = ev.totalReward ?? ev.reward;
+            const label = this.add
+              .text(disp.x * TILE + TILE / 2, disp.y * TILE - 20, `+${reward}`, {
+                fontFamily: PIXEL_FONT,
+                fontSize: "12px",
+                color: "#ffd24a",
+                stroke: "#000000",
+                strokeThickness: 3,
+              })
+              .setOrigin(0.5, 0.5)
+              .setDepth(20);
+            this.tweens.add({
+              targets: label,
+              y: disp.y * TILE - 48,
+              alpha: 0,
+              duration: 950,
+              ease: "Quad.Out",
+              onComplete: () => label.destroy(),
+            });
+            if (!isSelf) this.drawTeammates();
+            return;
+          }
           if (!isSelfRef.current) {
             this.triggerAction();
           }

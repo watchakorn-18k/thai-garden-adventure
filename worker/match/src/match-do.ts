@@ -6,11 +6,13 @@ import {
   MARKET_TILE_POS,
   makeEmptyField,
   ROWS,
+  SELLER_BASKET_CAPACITY,
   type Cargo,
   type CropId,
   type Direction,
   type MatchTeam,
   type PlayerRole,
+  type SellerPuzzleChoice,
   type TeamId,
   type Tile,
   type Tool,
@@ -44,6 +46,7 @@ interface PlayerState {
   teamId?: TeamId;
   role?: PlayerRole;
   carryingCargo?: Cargo;
+  cargoStack?: Cargo[];
   pos: { x: number; y: number };
   dir: Direction;
   tool: Tool;
@@ -155,6 +158,10 @@ export class MatchRoom implements DurableObject {
       if (att?.playerId) this.wsToPlayer.set(ws, att.playerId);
       this.wsToRole.set(ws, att?.role ?? "player");
     }
+  }
+
+  private requiresCropSelection(player: PlayerState): boolean {
+    return !(this.settings.mode === "2v2" && player.role === "seller");
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -307,8 +314,9 @@ export class MatchRoom implements DurableObject {
       }
       if (this.status === "crop_selection") {
         if (
+          this.requiresCropSelection(player) &&
           normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds()).length !==
-          DEFAULT_SELECTED_CROPS.length
+            DEFAULT_SELECTED_CROPS.length
         )
           return;
         player.ready = !player.ready;
@@ -413,14 +421,20 @@ export class MatchRoom implements DurableObject {
       this.sellCargo(player, now);
       return;
     }
+    if (msg.t === "seller_puzzle_sell") {
+      if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
+      this.advanceMovement(now);
+      if (msg.pos) player.pos = clampPos(msg.pos);
+      this.sellCargo(player, now, msg.choice);
+      return;
+    }
     if (msg.t === "action") {
       if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
       this.advanceMovement(now);
       if (msg.pos) player.pos = clampPos(msg.pos);
       if (msg.dir) player.dir = msg.dir;
       if (this.settings.mode === "2v2" && player.role === "seller") {
-        if (player.carryingCargo) this.sellCargo(player, now);
-        else this.pickUpCargo(player, now);
+        if (playerCargoCount(player) < SELLER_BASKET_CAPACITY) this.pickUpCargo(player, now);
       } else {
         this.resolvePlayerAction(player, now);
       }
@@ -550,8 +564,9 @@ export class MatchRoom implements DurableObject {
       if (ev.kind === "harvest") {
         player.stats.harvests += 1;
         player.stats.cropHarvests[ev.cropId] += 1;
+        const cargoId = crypto.randomUUID();
         const cargo: Cargo = {
-          id: crypto.randomUUID(),
+          id: cargoId,
           cropId: ev.cropId,
           position: { x: ev.x, y: ev.y },
           ownerPlayerId: player.id,
@@ -578,7 +593,8 @@ export class MatchRoom implements DurableObject {
   private pickUpCargo(player: PlayerState, now: number): void {
     player.lastActionAt = now;
     if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
-    if (player.carryingCargo) return;
+    const stack = playerCargoStack(player);
+    if (stack.length >= SELLER_BASKET_CAPACITY) return;
     const idx = this.fieldCargo.findIndex(
       (cargo) =>
         cargo.teamId === player.teamId &&
@@ -586,30 +602,51 @@ export class MatchRoom implements DurableObject {
     );
     if (idx < 0) return;
     const [cargo] = this.fieldCargo.splice(idx, 1);
-    player.carryingCargo = cargo;
+    stack.push(cargo);
+    player.cargoStack = stack;
+    player.carryingCargo = stack[stack.length - 1];
     this.pendingEvents.push({ kind: "cargo_picked_up", playerId: player.id, cargoId: cargo.id });
     this.persist();
     this.broadcastSnapshot();
     this.flushEvents();
   }
 
-  private sellCargo(player: PlayerState, now: number): void {
+  private sellCargo(player: PlayerState, now: number, puzzleChoice?: SellerPuzzleChoice): void {
     player.lastActionAt = now;
     if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
-    const cargo = player.carryingCargo;
-    if (!cargo) return;
+    const stack = playerCargoStack(player);
+    if (stack.length === 0) return;
     if (Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) > 1.5)
       return;
     const team = this.teams.find((t) => t.id === player.teamId);
     if (!team) return;
+
+    // Sell one cargo (top of stack) per call
+    const cargo = stack.shift()!;
+    if (stack.length === 0) {
+      player.cargoStack = [];
+      player.carryingCargo = undefined;
+    } else {
+      player.cargoStack = stack;
+      player.carryingCargo = stack[stack.length - 1];
+    }
+
     const distance = Math.hypot(
       cargo.position.x - MARKET_TILE_POS.x,
       cargo.position.y - MARKET_TILE_POS.y,
     );
-    const reward = Math.round(cargo.baseReward * (1 + 0.1 * distance));
+    const baseReward = Math.round(cargo.baseReward * (1 + 0.1 * distance));
+    const correct = puzzleChoice !== undefined && puzzleChoice === cargo.cropId;
+    const reward =
+      puzzleChoice === undefined
+        ? baseReward
+        : correct
+          ? Math.round(baseReward * 1.25)
+          : Math.round(baseReward * 0.9);
+    const bonus = reward - baseReward;
+
     team.coins += reward;
     player.stats.coinsEarned += reward;
-    player.carryingCargo = undefined;
     this.mirrorTeamCoinsToPlayers();
     this.pendingEvents.push({
       kind: "cargo_sold",
@@ -618,6 +655,12 @@ export class MatchRoom implements DurableObject {
       cargoId: cargo.id,
       reward,
       distance,
+      puzzleChoice,
+      puzzleCorrect: puzzleChoice === undefined ? undefined : correct,
+      bonus: puzzleChoice === undefined ? undefined : bonus,
+      count: 1,
+      cargoIds: [cargo.id],
+      totalReward: reward,
     });
     this.checkTeamRaceWin();
     if (this.status !== "ended") {
@@ -658,7 +701,7 @@ export class MatchRoom implements DurableObject {
       for (const player of this.players.values()) {
         player.teamId = undefined;
         player.role = undefined;
-        player.carryingCargo = undefined;
+        clearPlayerCargo(player);
       }
       return;
     }
@@ -682,7 +725,7 @@ export class MatchRoom implements DurableObject {
     for (const [idx, player] of players.entries()) {
       player.teamId = idx < 2 ? "A" : "B";
       player.role = idx % 2 === 0 ? "farmer" : "seller";
-      if (player.role !== "seller") player.carryingCargo = undefined;
+      if (player.role !== "seller") clearPlayerCargo(player);
     }
     this.mirrorTeamCoinsToPlayers();
   }
@@ -1526,7 +1569,9 @@ export class MatchRoom implements DurableObject {
       ![...this.players.values()].every(
         (p) =>
           p.ready &&
-          normalizeSelectedCrops(p.selectedCrops).length === DEFAULT_SELECTED_CROPS.length,
+          (!this.requiresCropSelection(p) ||
+            normalizeSelectedCrops(p.selectedCrops, this.bannedCropIds()).length ===
+              DEFAULT_SELECTED_CROPS.length),
       )
     )
       return;
@@ -1720,10 +1765,12 @@ export class MatchRoom implements DurableObject {
    */
   private botSellerStep(bot: PlayerState, now: number): boolean {
     const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+    const stackCount = playerCargoCount(bot);
 
-    // Pick a target: the market when carrying, else the nearest team cargo.
+    // Decide target: market when basket full or no cargo left to collect, else nearest team cargo.
     let target: { x: number; y: number } | undefined;
-    if (bot.carryingCargo) {
+    const hasTeamCargo = this.fieldCargo.some((c) => c.teamId === bot.teamId);
+    if (stackCount > 0 && (stackCount >= SELLER_BASKET_CAPACITY || !hasTeamCargo)) {
       target = MARKET_TILE_POS;
     } else {
       let best: Cargo | undefined;
@@ -1736,9 +1783,13 @@ export class MatchRoom implements DurableObject {
           bestDist = d;
         }
       }
-      target = best?.position;
+      if (best) {
+        target = best.position;
+      } else if (stackCount > 0) {
+        target = MARKET_TILE_POS;
+      }
     }
-    if (!target) return false; // nothing to do — wait for the farmer to harvest
+    if (!target) return false;
 
     const dx = target.x - bot.pos.x;
     const dy = target.y - bot.pos.y;
@@ -1750,10 +1801,17 @@ export class MatchRoom implements DurableObject {
       return true;
     }
 
-    // Within reach: act. pick_up/sell_cargo validate role+distance themselves.
+    // Within reach: act.
     if (now - bot.lastActionAt < ACTION_COOLDOWN_MS) return false;
-    if (bot.carryingCargo) this.sellCargo(bot, now);
-    else this.pickUpCargo(bot, now);
+    const atMarket =
+      Math.hypot(MARKET_TILE_POS.x - bot.pos.x, MARKET_TILE_POS.y - bot.pos.y) <= 1.5;
+    if (atMarket && stackCount > 0) {
+      // Sell one cargo per tick: bot always matches the right customer (its crop)
+      const stack = playerCargoStack(bot);
+      this.sellCargo(bot, now, stack[0].cropId);
+    } else if (stackCount < SELLER_BASKET_CAPACITY) {
+      this.pickUpCargo(bot, now);
+    }
     return false;
   }
 
@@ -1983,6 +2041,7 @@ export class MatchRoom implements DurableObject {
       teamId: p.teamId,
       role: p.role,
       carryingCargo: p.carryingCargo,
+      cargoStack: p.cargoStack && p.cargoStack.length > 0 ? p.cargoStack : undefined,
       pos: p.pos,
       dir: p.dir,
       tool: p.tool,
@@ -2308,6 +2367,27 @@ function normalizeCargo(raw?: Cargo[]): Cargo[] {
 
 function isCropId(id: unknown): id is CropId {
   return typeof id === "string" && id in CROPS;
+}
+
+function playerCargoStack(player: PlayerState): Cargo[] {
+  if (!player.cargoStack || player.cargoStack.length === 0) {
+    if (player.carryingCargo) {
+      player.cargoStack = [player.carryingCargo];
+      player.carryingCargo = undefined;
+    } else {
+      player.cargoStack = [];
+    }
+  }
+  return player.cargoStack;
+}
+
+function playerCargoCount(player: PlayerState): number {
+  return playerCargoStack(player).length;
+}
+
+function clearPlayerCargo(player: PlayerState): void {
+  player.carryingCargo = undefined;
+  player.cargoStack = [];
 }
 
 function effectiveBannedCrops(players: Array<{ bannedCrop?: CropId }>): CropId[] {

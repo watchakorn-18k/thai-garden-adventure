@@ -77,6 +77,7 @@ Env access:
 
 ## Conventions for agents
 
+- Adding a new crop? Add it to `CROP_COLOR` in `src/lib/game-types.ts` too — it's the single source for crop signature colors (seller basket bar in `MultiplayerGame.tsx`, in-world basket bar in `PhaserField.tsx`). `Record<CropId, string>` will type-error if you miss it, but the bars need the color to render.
 - Edit existing files over creating new ones
 - No comments unless WHY is non-obvious
 - No backwards-compat shims, no `_unused` rename hacks

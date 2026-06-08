@@ -13,6 +13,7 @@ export type Tool = "hoe" | "watering_can" | "seed";
 export type MatchMode = "1v1" | "2v2";
 export type TeamId = "A" | "B";
 export type PlayerRole = "farmer" | "seller";
+export type SellerPuzzleChoice = CropId;
 
 export interface Cargo {
   id: string;
@@ -39,6 +40,7 @@ export interface MarketOrder {
 
 export const MARKET_TILE_POS = { x: 11, y: 7 } as const;
 export const CARGO_TTL_MS = 10_000;
+export const SELLER_BASKET_CAPACITY = 5;
 
 export interface Crop {
   id: CropId;
@@ -55,6 +57,19 @@ export interface Tile {
 
 export const COLS = 12;
 export const ROWS = 8;
+
+/** Per-crop signature color (CSS hex), picked from each crop's ripe palette.
+ *  Single source of truth — DOM uses the string directly, Phaser via hexNum(). */
+export const CROP_COLOR: Record<CropId, string> = {
+  chili: "#e03030",
+  rice: "#c8b040",
+  morning_glory: "#6ab04c",
+  eggplant: "#7b3fa0",
+  mango: "#f4a824",
+  lemongrass: "#8bc967",
+  papaya: "#f47820",
+  basil: "#4a9e3a",
+};
 
 export const CROPS: Record<CropId, Crop> = {
   morning_glory: {

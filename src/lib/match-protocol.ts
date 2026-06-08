@@ -7,6 +7,7 @@ import type {
   MatchMode,
   MatchTeam,
   PlayerRole,
+  SellerPuzzleChoice,
   TeamId,
   Tile,
   Tool,
@@ -49,6 +50,7 @@ const cropIdSchema = z.enum([
   "basil",
 ]);
 const matchRoleSchema = z.enum(["player", "spectator"]);
+const sellerPuzzleChoiceSchema = cropIdSchema;
 const matchModeSchema = z.enum(["1v1", "2v2"]);
 const roomStageSchema = z.enum(["classic", "water", "festival"]);
 export const roomSettingsSchema = z.object({
@@ -118,6 +120,11 @@ export const clientMsg = z.discriminatedUnion("t", [
     t: z.literal("sell_cargo"),
     pos: z.object({ x: z.number(), y: z.number() }).optional(),
   }),
+  z.object({
+    t: z.literal("seller_puzzle_sell"),
+    choice: sellerPuzzleChoiceSchema,
+    pos: z.object({ x: z.number(), y: z.number() }).optional(),
+  }),
   z.object({ t: z.literal("swap_role"), targetTeammateId: z.string().min(1) }),
   z.object({ t: z.literal("tool"), tool: toolSchema }),
   z.object({ t: z.literal("seed"), id: cropIdSchema }),
@@ -161,6 +168,7 @@ export interface PublicPlayer {
   teamId?: TeamId;
   role?: PlayerRole;
   carryingCargo?: Cargo;
+  cargoStack?: Cargo[];
   pos: { x: number; y: number };
   dir: Direction;
   tool: Tool;
@@ -228,6 +236,12 @@ export type ServerEvent =
       cargoId: string;
       reward: number;
       distance: number;
+      puzzleChoice?: SellerPuzzleChoice;
+      puzzleCorrect?: boolean;
+      bonus?: number;
+      count?: number;
+      cargoIds?: string[];
+      totalReward?: number;
     }
   | { kind: "cargo_spoiled"; playerId: string; cargoId: string; x: number; y: number }
   | { kind: "role_swapped"; playerId: string; playerId1: string; playerId2: string };

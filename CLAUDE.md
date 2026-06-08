@@ -64,6 +64,8 @@ Env-access patterns (documented in `src/lib/config.server.ts`):
 
 shadcn/ui in `src/components/ui/` (aliases in `components.json`: `@/components`, `@/components/ui`, `@/lib/utils`, `@/hooks`). Tailwind v4 with CSS variables, lucide-react icons. The current single feature is `src/components/FarmGame.tsx` — a self-contained Thai-themed Stardew-style farming game (mounted at `/` via `src/routes/index.tsx`) with pixel-art character (`PixelFarmer.tsx`). Tile/crop state is local React state; no persistence.
 
+**Adding a new crop:** also add it to `CROP_COLOR` in `src/lib/game-types.ts` — the single source for per-crop signature colors. It's `Record<CropId, string>` so a missing entry type-errors, but the colors must exist for the seller's basket bars to render: the DOM capacity bar in `MultiplayerGame.tsx` colors each filled slot by its crop, and `PhaserField.tsx` derives `CROP_BAR_COLOR` (number hex via `hexNum`) from the same map.
+
 ### Design system
 
 `DESIGN.md` (repo root) is the design system in `@google/design.md` format: YAML token front matter (colors, typography, rounded, spacing, components) + prose rationale. It describes the cozy Thai-dusk pixel-art look — square corners, layered solid-shadow depth, no blur, `Press Start 2P` for chrome + `Mali` for prose. Tokens mirror `src/styles.css` `:root`, which is the source of truth — when they diverge, fix `DESIGN.md` to match the CSS, then re-run `npm run design:lint`.

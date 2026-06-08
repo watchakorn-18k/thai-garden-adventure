@@ -1,5 +1,5 @@
 import { Volume2, VolumeX } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import PixelFarmer from "./PixelFarmer";
 import CosmeticPicker from "./CosmeticPicker";
 import CropIndexBook from "./CropIndexBook";
@@ -22,9 +22,11 @@ import {
 import { applyAction, facingTile } from "@/lib/game-logic";
 import {
   COLS,
+  CROP_COLOR,
   CROPS,
   MARKET_TILE_POS,
   ROWS,
+  SELLER_BASKET_CAPACITY,
   type Cargo,
   type CropId,
   type Direction,
@@ -74,6 +76,26 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
 };
 
 const TILE = 56;
+function playerCargoStack(player: PublicPlayer): Cargo[] {
+  if (player.cargoStack && player.cargoStack.length > 0) return player.cargoStack;
+  if (player.carryingCargo) return [player.carryingCargo];
+  return [];
+}
+
+// Market-rush mini-game: 5 customer faces, each craving one crop. Deliver the
+// top cargo to the customer whose icon matches it.
+const BUYER_FACES = ["👩‍🌾", "🧑‍🍳", "👵", "🧔", "🧑‍🦰", "👨‍🦱", "👳", "🧕"] as const;
+const PUZZLE_SLOTS = 5;
+const PUZZLE_TIME_MS = 5000;
+
+function pickN<T>(pool: readonly T[], n: number): T[] {
+  const copy = [...pool];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy.slice(0, n);
+}
 
 const STAGE_COPY: Record<RoomStage, { label: string; desc: string }> = {
   classic: { label: "สวนมาตรฐาน", desc: "สวนมาตรฐาน แข่งทำเหรียญไว" },
@@ -238,6 +260,29 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
           } else if (ev.kind === "insufficient_funds") {
             if (ev.playerId === selfId) {
               SFX.bad();
+            }
+          } else if (ev.kind === "cargo_picked_up") {
+            if (ev.playerId === selfId || matchRole === "spectator") SFX.harvest();
+          } else if (ev.kind === "cargo_sold") {
+            if (ev.playerId === selfId || matchRole === "spectator") {
+              const coinCount = Math.min(4, Math.ceil((ev.totalReward ?? ev.reward) / 15));
+              for (let i = 0; i < coinCount; i++) {
+                setTimeout(() => SFX.coin(), i * 80);
+              }
+            }
+            // Selling to the right customer builds the same combo meter as harvesting.
+            if (ev.playerId === selfId) {
+              if (ev.puzzleCorrect) {
+                setCombo((c) => {
+                  const n = c + 1;
+                  if (n >= 2) SFX.combo(n);
+                  if (comboTimerRef.current) clearTimeout(comboTimerRef.current);
+                  comboTimerRef.current = setTimeout(() => setCombo(0), 2200);
+                  return n;
+                });
+              } else if (ev.puzzleCorrect === false) {
+                setCombo(0);
+              }
             }
           }
         }
@@ -508,42 +553,50 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     actionTimerRef.current = setTimeout(() => setActing(false), 320);
     const local = localPlayerRef.current;
     if (local) {
-      const target = facingTile(local.pos, local.dir);
-      if (target) {
-        const tile = local.tiles[target.y]?.[target.x];
-        if (tile) {
-          if (tile.crop && tile.crop.stage >= 2) {
-            SFX.harvest();
-          } else if (local.tool === "hoe" && tile.type === "grass") {
-            SFX.hoe();
-          } else if (
-            local.tool === "watering_can" &&
-            (tile.type === "tilled" || (tile.crop && tile.type !== "watered"))
-          ) {
-            SFX.water();
-          } else if (
-            local.tool === "seed" &&
-            (tile.type === "tilled" || tile.type === "watered") &&
-            !tile.crop
-          ) {
-            const crop = CROPS[local.seedChoice];
-            if (local.coins >= crop.seedCost) {
-              SFX.plant();
-            } else {
-              SFX.bad();
+      const isSeller = selfRef.current?.role === "seller";
+
+      if (isSeller) {
+        // Seller pickup — play harvest SFX, skip farmer pending action
+        SFX.harvest();
+      } else {
+        const target = facingTile(local.pos, local.dir);
+        if (target) {
+          const tile = local.tiles[target.y]?.[target.x];
+          if (tile) {
+            if (tile.crop && tile.crop.stage >= 2) {
+              SFX.harvest();
+            } else if (local.tool === "hoe" && tile.type === "grass") {
+              SFX.hoe();
+            } else if (
+              local.tool === "watering_can" &&
+              (tile.type === "tilled" || (tile.crop && tile.type !== "watered"))
+            ) {
+              SFX.water();
+            } else if (
+              local.tool === "seed" &&
+              (tile.type === "tilled" || tile.type === "watered") &&
+              !tile.crop
+            ) {
+              const crop = CROPS[local.seedChoice];
+              if (local.coins >= crop.seedCost) {
+                SFX.plant();
+              } else {
+                SFX.bad();
+              }
             }
           }
         }
+
+        pendingActions.current.push({
+          time: Date.now(),
+          pos: { ...local.pos },
+          dir: local.dir,
+          tool: local.tool,
+          seedChoice: local.seedChoice,
+        });
+        recalculateLocalPlayer();
       }
 
-      pendingActions.current.push({
-        time: Date.now(),
-        pos: { ...local.pos },
-        dir: local.dir,
-        tool: local.tool,
-        seedChoice: local.seedChoice,
-      });
-      recalculateLocalPlayer();
       send({ t: "action", pos: local.pos, dir: local.dir });
     }
   }, [isSpectator, send, recalculateLocalPlayer]);
@@ -556,9 +609,11 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       if (["space", "arrowup", "arrowdown", "arrowleft", "arrowright"].includes(k)) {
         e.preventDefault();
       }
+      const selfPlayer = selfRef.current;
+      const puzzleActive = selfPlayer ? isSellerPuzzleReady(selfPlayer) : false;
       const dir = keyToDir(k);
-      if (dir) setMovement(keysToDir(keys.current, nextDiagonalAxis));
-      if ((k === "space" || k === "enter") && !e.repeat) sendAction();
+      if (dir && !puzzleActive) setMovement(keysToDir(keys.current, nextDiagonalAxis));
+      if ((k === "space" || k === "enter") && !e.repeat && !puzzleActive) sendAction();
       if (
         k === "keyr" &&
         (statusRef.current === "lobby" || statusRef.current === "crop_selection")
@@ -566,17 +621,21 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         SFX.click();
         send({ t: "ready" });
       }
-      if (k === "digit1") {
-        SFX.click();
-        send({ t: "tool", tool: "hoe" });
-      }
-      if (k === "digit2") {
-        SFX.click();
-        send({ t: "tool", tool: "watering_can" });
-      }
-      if (k === "digit3") {
-        SFX.click();
-        send({ t: "tool", tool: "seed" });
+      // Seller delivery keys (1-5) are handled inside SellerPuzzleOverlay, which
+      // owns the customer board — only farmers map digits to tools here.
+      if (selfPlayer?.role !== "seller") {
+        if (k === "digit1") {
+          SFX.click();
+          send({ t: "tool", tool: "hoe" });
+        }
+        if (k === "digit2") {
+          SFX.click();
+          send({ t: "tool", tool: "watering_can" });
+        }
+        if (k === "digit3") {
+          SFX.click();
+          send({ t: "tool", tool: "seed" });
+        }
       }
     };
     const stopAll = () => {
@@ -915,6 +974,10 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         />
       )}
 
+      {state.status === "playing" && self && !isSpectator && isSellerPuzzleReady(self) && (
+        <SellerPuzzleOverlay self={self} send={send} />
+      )}
+
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar
           self={self}
@@ -953,6 +1016,75 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
 
       {!isSpectator && <MultiplayerControlsGuide />}
     </div>
+  );
+}
+
+function PixelSproutIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 8 8"
+      fill="none"
+      style={{ imageRendering: "pixelated" }}
+    >
+      <rect x="3" y="4" width="2" height="4" fill="currentColor" />
+      <rect x="1" y="3" width="2" height="2" fill="currentColor" />
+      <rect x="2" y="2" width="2" height="2" fill="currentColor" />
+      <rect x="5" y="2" width="2" height="2" fill="currentColor" />
+      <rect x="4" y="1" width="2" height="2" fill="currentColor" />
+      <rect x="3" y="1" width="1" height="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function PixelCartIcon({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 8 8"
+      fill="none"
+      style={{ imageRendering: "pixelated" }}
+    >
+      <rect x="0" y="1" width="2" height="1" fill="currentColor" />
+      <rect x="2" y="2" width="1" height="2" fill="currentColor" />
+      <rect x="2" y="2" width="5" height="1" fill="currentColor" />
+      <rect x="3" y="3" width="4" height="2" fill="currentColor" />
+      <rect x="3" y="5" width="4" height="1" fill="currentColor" />
+      <rect x="3" y="6" width="2" height="2" fill="currentColor" />
+      <rect x="6" y="6" width="2" height="2" fill="currentColor" />
+    </svg>
+  );
+}
+
+function RoleBadge({ role }: { role: "farmer" | "seller" }) {
+  const isSeller = role === "seller";
+  return (
+    <span
+      className="font-pixel inline-flex items-center gap-1.5 px-2 py-1 text-[11px] leading-none"
+      style={{
+        background: "var(--gold)",
+        color: "var(--background)",
+        boxShadow:
+          "0 0 0 2px var(--background), 0 0 0 4px var(--border), inset 0 -3px 0 0 rgba(0,0,0,.22), inset 0 2px 0 0 rgba(255,255,255,.24)",
+        textShadow:
+          "1px 0 0 var(--foreground), -1px 0 0 var(--foreground), 0 1px 0 var(--foreground), 0 -1px 0 var(--foreground)",
+      }}
+    >
+      <span
+        className="grid size-[14px] place-items-center"
+        style={{
+          background: isSeller ? "var(--accent)" : "var(--grass-2)",
+          color: "var(--foreground)",
+          boxShadow: "0 0 0 1px var(--background)",
+          textShadow: "none",
+        }}
+      >
+        {isSeller ? <PixelCartIcon size={10} /> : <PixelSproutIcon size={10} />}
+      </span>
+      <span>{isSeller ? "คนขาย" : "ชาวสวน"}</span>
+    </span>
   );
 }
 
@@ -1777,6 +1909,8 @@ function CropSelectionView({
     .toString()
     .padStart(2, "0");
 
+  const is2v2Seller = state.settings.mode === "2v2" && self?.role === "seller";
+
   const toggleCrop = (id: CropId) => {
     if (isSpectator || isLocked || !self) return;
     if (bannedCrops.includes(id)) {
@@ -1804,11 +1938,15 @@ function CropSelectionView({
             {isLocked ? "เตรียมเริ่มเกม" : `${mm}:${ss}`}
           </span>
         </div>
-        <h2 className="font-pixel lobby-title">เลือกผัก 4 อย่าง</h2>
+        <h2 className="font-pixel lobby-title">
+          {is2v2Seller ? "รอชาวสวนเลือกผัก" : "เลือกผัก 4 อย่าง"}
+        </h2>
         <p className="lobby-subtitle">
           {isLocked
             ? "ล็อกผักแล้ว · เตรียมตัว 3, 2, 1"
-            : `เลือกของตัวเอง ${selected.length}/${SELECTED_CROP_COUNT} แล้วกด พร้อม`}
+            : is2v2Seller
+              ? "คนขายไม่ต้องเลือกเมล็ด · กด พร้อม เพื่อเริ่ม"
+              : `เลือกของตัวเอง ${selected.length}/${SELECTED_CROP_COUNT} แล้วกด พร้อม`}
         </p>
       </div>
 
@@ -1858,6 +1996,16 @@ function CropSelectionView({
                 </div>
               );
             })}
+          </div>
+        ) : is2v2Seller ? (
+          <div className="pixel-panel flex flex-col items-center gap-3 px-4 py-6 text-center">
+            <RoleBadge role="seller" />
+            <span className="font-pixel text-[10px] text-[var(--gold)]">
+              หน้าที่คุณคือวิ่งส่งของไปตลาด ไม่ต้องปลูกผัก
+            </span>
+            <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+              กด พร้อม ด้านล่างเพื่อเริ่มเกม
+            </span>
           </div>
         ) : (
           <div>
@@ -1942,8 +2090,15 @@ function CropSelectionView({
               className="pixel-chip font-pixel text-[8px]"
               data-gold={player.ready ? "true" : undefined}
             >
-              {player.name}: {player.selectedCrops.length}/{SELECTED_CROP_COUNT}{" "}
-              {player.ready ? "พร้อม" : "กำลังเลือก"}
+              {player.name}:{" "}
+              {state.settings.mode === "2v2" && player.role === "seller"
+                ? "คนขาย"
+                : `${player.selectedCrops.length}/${SELECTED_CROP_COUNT}`}{" "}
+              {player.ready
+                ? "พร้อม"
+                : state.settings.mode === "2v2" && player.role === "seller"
+                  ? "รอพร้อม"
+                  : "กำลังเลือก"}
             </span>
           ))}
         </div>
@@ -1956,7 +2111,7 @@ function CropSelectionView({
             }}
             className="pixel-btn lobby-ready-btn"
             data-accent={self?.ready ? undefined : "true"}
-            disabled={selected.length !== SELECTED_CROP_COUNT}
+            disabled={!is2v2Seller && selected.length !== SELECTED_CROP_COUNT}
           >
             <span className="font-pixel text-[12px]">{self?.ready ? "ยกเลิกพร้อม" : "พร้อม"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>
@@ -2099,7 +2254,7 @@ function TeamSlotColumn({
           <PlayerCard
             key={player?.id ?? idx}
             player={player}
-            label={player?.role === "seller" ? "🛒 คนขาย" : "🌱 ชาวสวน"}
+            label={<RoleBadge role={player?.role ?? (idx % 2 === 0 ? "farmer" : "seller")} />}
             side={side}
             hostId={hostId}
             canKick={kickable && Boolean(handler)}
@@ -2122,7 +2277,7 @@ function PlayerCard({
   kickLabel = "เตะ",
 }: {
   player?: PublicPlayer;
-  label: string;
+  label: ReactNode;
   side?: "left" | "right";
   hostId?: string;
   canKick?: boolean;
@@ -2138,7 +2293,7 @@ function PlayerCard({
     >
       <div className="lobby-player-sheen" />
       <div className="lobby-player-topline">
-        <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</span>
+        {label}
         <div className="flex items-center gap-2">
           {player?.isBot && (
             <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">บอท</span>
@@ -2708,12 +2863,15 @@ function SpectatorMatchView({
             <div key={field.key} className="flex flex-col items-center gap-2">
               {is2v2 ? (
                 <div className="flex flex-wrap justify-center gap-2">
-                  <OpponentStatusCard player={player} label={`${field.label} · 🌱`} />
+                  <OpponentStatusCard
+                    player={player}
+                    label={<RoleBadge role={player.role ?? "farmer"} />}
+                  />
                   {field.teammates.map((mate) => (
                     <OpponentStatusCard
                       key={mate.id}
                       player={mate}
-                      label={mate.role === "seller" ? "🛒 คนขาย" : "🌱 ชาวสวน"}
+                      label={<RoleBadge role={mate.role ?? "seller"} />}
                     />
                   ))}
                 </div>
@@ -2773,7 +2931,7 @@ function OpponentStatusCard({
   label = "คู่แข่ง",
 }: {
   player: PublicPlayer;
-  label?: string;
+  label?: ReactNode;
 }) {
   return (
     <div className="pixel-panel flex items-center gap-4 px-4 py-3 opacity-90">
@@ -2789,7 +2947,11 @@ function OpponentStatusCard({
         </div>
       </div>
       <div className="flex flex-col gap-1">
-        <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</div>
+        {typeof label === "string" ? (
+          <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">{label}</div>
+        ) : (
+          label
+        )}
         <div className="font-pixel text-[12px]">{player.name}</div>
       </div>
       <div className="mx-1 h-8 w-1" style={{ background: "#1a0f1f" }} />
@@ -2809,6 +2971,169 @@ function OpponentStatusCard({
 
 function OpponentField({ player }: { player: PublicPlayer }) {
   return <OpponentStatusCard player={player} />;
+}
+
+function isSellerPuzzleReady(player: PublicPlayer): boolean {
+  return (
+    player.role === "seller" &&
+    playerCargoStack(player).length > 0 &&
+    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5
+  );
+}
+
+// Build the 5-customer board for one cargo: PUZZLE_SLOTS faces, each wanting a
+// crop. Exactly one wants `targetCrop` (the cargo in hand); the rest want decoys
+// drawn from the other crops so the match is unambiguous.
+function buildCustomers(targetCrop: CropId): { face: string; want: CropId }[] {
+  const decoyPool = (Object.keys(CROPS) as CropId[]).filter((id) => id !== targetCrop);
+  const decoys = pickN(decoyPool, PUZZLE_SLOTS - 1);
+  const faces = pickN(BUYER_FACES, PUZZLE_SLOTS);
+  const wants = pickN([targetCrop, ...decoys], PUZZLE_SLOTS);
+  return wants.map((want, i) => ({ face: faces[i], want }));
+}
+
+function SellerPuzzleOverlay({
+  self,
+  send,
+}: {
+  self: PublicPlayer;
+  send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
+}) {
+  const stack = playerCargoStack(self);
+  const cargo = stack[0];
+  const cargoId = cargo?.id;
+  const targetCrop = cargo?.cropId;
+
+  // Regenerate the customer board whenever the top cargo changes.
+  const [customers, setCustomers] = useState<{ face: string; want: CropId }[]>([]);
+  const [deadline, setDeadline] = useState(0);
+  const [now, setNow] = useState(() => Date.now());
+  const [wrongIdx, setWrongIdx] = useState<number | null>(null);
+  const sentRef = useRef(false);
+
+  useEffect(() => {
+    if (!targetCrop) return;
+    setCustomers(buildCustomers(targetCrop));
+    setDeadline(Date.now() + PUZZLE_TIME_MS);
+    setWrongIdx(null);
+    sentRef.current = false;
+  }, [cargoId, targetCrop]);
+
+  // Tick the timer; auto-sell at base price when it runs out.
+  useEffect(() => {
+    if (!cargoId) return;
+    const t = setInterval(() => setNow(Date.now()), 80);
+    return () => clearInterval(t);
+  }, [cargoId]);
+
+  useEffect(() => {
+    if (!cargoId || !deadline || sentRef.current) return;
+    if (now >= deadline) {
+      sentRef.current = true;
+      SFX.bad();
+      send({ t: "sell_cargo", pos: self.pos });
+    }
+  }, [now, deadline, cargoId, self.pos, send]);
+
+  const deliver = useCallback(
+    (idx: number, want: CropId) => {
+      if (sentRef.current || !targetCrop) return;
+      if (want === targetCrop) {
+        sentRef.current = true;
+        SFX.coin();
+        send({ t: "seller_puzzle_sell", choice: targetCrop, pos: self.pos });
+      } else {
+        // Wrong customer: still sells but at a docked price.
+        sentRef.current = true;
+        SFX.bad();
+        setWrongIdx(idx);
+        send({ t: "seller_puzzle_sell", choice: want, pos: self.pos });
+      }
+    },
+    [targetCrop, self.pos, send],
+  );
+
+  // Keyboard delivery: 1-5 selects the matching customer slot.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const n = Number(e.key);
+      if (n >= 1 && n <= customers.length) {
+        e.preventDefault();
+        deliver(n - 1, customers[n - 1].want);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [customers, deliver]);
+
+  if (!cargo || !targetCrop) return null;
+
+  const TargetIcon = CROP_ICONS[targetCrop];
+  const remaining = Math.max(0, deadline - now);
+  const pct = Math.min(100, (remaining / PUZZLE_TIME_MS) * 100);
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(10,5,15,0.72)] p-4">
+      <div className="pixel-panel w-[min(620px,96vw)] p-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="pixel-chip" data-gold="true">
+              MARKET RUSH
+            </div>
+            <div className="font-pixel text-[10px] text-[var(--gold)]">
+              ส่งให้ลูกค้าที่อยากได้ · เหลือ {stack.length} ชิ้น
+            </div>
+          </div>
+          <div className="pixel-panel flex items-center gap-2 p-2">
+            <TargetIcon size={26} />
+            <span className="font-pixel text-[10px] text-[var(--foreground)]">
+              {CROPS[targetCrop].name}
+            </span>
+          </div>
+        </div>
+
+        {/* Timer bar — empties as the rush window closes */}
+        <div
+          className="mb-4 h-2 w-full overflow-hidden"
+          style={{ background: "#1a0f1f", boxShadow: "0 0 0 2px var(--border)" }}
+        >
+          <div
+            style={{
+              height: "100%",
+              width: `${pct}%`,
+              background: pct > 40 ? "linear-gradient(90deg,#86efac,#ffd24a)" : "#ff6b6b",
+              transition: "width 80ms linear",
+            }}
+          />
+        </div>
+
+        <div className="grid grid-cols-5 gap-2">
+          {customers.map((c, idx) => {
+            const WantIcon = CROP_ICONS[c.want];
+            return (
+              <button
+                key={idx}
+                onClick={() => deliver(idx, c.want)}
+                disabled={sentRef.current}
+                className="pixel-btn flex flex-col items-center gap-1 p-2"
+                style={wrongIdx === idx ? { boxShadow: "0 0 0 3px #ff6b6b" } : undefined}
+              >
+                <span className="text-2xl leading-none">{c.face}</span>
+                <span className="pixel-panel flex h-8 w-8 items-center justify-center p-1">
+                  <WantIcon size={20} />
+                </span>
+                <span className="pixel-key pixel-key-sm">{idx + 1}</span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 font-pixel text-[8px] text-[var(--muted-foreground)]">
+          ตรงคน +25% · ผิดคนโดนกดราคา −10% · หมดเวลาขายราคาปกติ
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function Toolbar({
@@ -2831,6 +3156,8 @@ function Toolbar({
     );
     const nearMarket =
       Math.hypot(MARKET_TILE_POS.x - self.pos.x, MARKET_TILE_POS.y - self.pos.y) <= 1.5;
+    const stack = playerCargoStack(self);
+    const basketFull = stack.length >= SELLER_BASKET_CAPACITY;
     return (
       <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
         <div className="farm-toolbar-section farm-toolbar-tools">
@@ -2842,39 +3169,71 @@ function Toolbar({
                 send({ t: "pick_up", pos: self.pos });
               }}
               className="farm-tool-btn pixel-btn"
-              disabled={!nearbyCargo || Boolean(self.carryingCargo)}
+              disabled={!nearbyCargo || basketFull}
             >
               <span>📦</span>
               <span>หยิบของ</span>
               <span className="farm-key-hint">SPACE</span>
             </button>
             <button
-              onClick={() => {
-                SFX.click();
-                send({ t: "sell_cargo", pos: self.pos });
-              }}
               className="farm-tool-btn pixel-btn"
-              data-active={nearMarket && Boolean(self.carryingCargo)}
-              disabled={!nearMarket || !self.carryingCargo}
+              data-active={nearMarket && stack.length > 0 ? "true" : undefined}
+              disabled
             >
               <CoinIcon size={20} />
-              <span>ขายตลาด</span>
-              <span className="farm-key-hint">SPACE</span>
+              <span>{nearMarket && stack.length > 0 ? "ส่งให้ลูกค้า" : "ไปตลาด"}</span>
+              <span className="farm-key-hint">1-5</span>
             </button>
           </div>
         </div>
         <div className="farm-toolbar-section farm-toolbar-crops">
           <span className="farm-toolbar-label">สถานะ</span>
-          <div
-            className="pixel-chip font-pixel text-[10px]"
-            data-gold={self.carryingCargo ? "true" : undefined}
-          >
-            {self.carryingCargo
-              ? `กำลังแบก ${CROPS[self.carryingCargo.cropId].name}`
-              : "มือว่าง · หา cargo จากชาวสวน"}
+          {/* Basket capacity bar — one segment per slot, colored by the crop in it */}
+          <div className="flex items-center gap-2">
+            <div className="relative flex h-4 w-full gap-px" style={{ background: "var(--muted)" }}>
+              {Array.from({ length: SELLER_BASKET_CAPACITY }, (_, i) => {
+                const slotCargo = stack[i];
+                return (
+                  <div
+                    key={i}
+                    className="h-full flex-1"
+                    style={{
+                      background: slotCargo ? CROP_COLOR[slotCargo.cropId] : "transparent",
+                      transition: "background 0.15s",
+                    }}
+                  />
+                );
+              })}
+              <div
+                className="pointer-events-none absolute inset-0 flex items-center justify-center font-pixel text-[7px]"
+                style={{ color: "var(--foreground)" }}
+              >
+                🧺 {stack.length}/{SELLER_BASKET_CAPACITY}
+              </div>
+            </div>
           </div>
+          {stack.length > 0 && (
+            <div className="flex flex-wrap gap-1">
+              {stack.map((cargo) => {
+                const Icon = CROP_ICONS[cargo.cropId];
+                return (
+                  <div
+                    key={cargo.id}
+                    className="flex h-6 w-6 items-center justify-center"
+                    style={{ background: "var(--card)", outline: "2px solid var(--border)" }}
+                  >
+                    <Icon size={16} />
+                  </div>
+                );
+              })}
+            </div>
+          )}
           <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-            ตลาดอยู่ช่อง {MARKET_TILE_POS.x},{MARKET_TILE_POS.y}
+            {stack.length > 0
+              ? nearMarket
+                ? "เลือกคนซื้อให้ถูก ได้โบนัส"
+                : `ตลาดอยู่ช่อง ${MARKET_TILE_POS.x},${MARKET_TILE_POS.y}`
+              : `ตลาดอยู่ช่อง ${MARKET_TILE_POS.x},${MARKET_TILE_POS.y}`}
           </div>
         </div>
       </div>
