@@ -1,19 +1,24 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { makeRoomCode, ROOM_CODE_RE } from "@/lib/match-protocol";
+import { makeRoomCode, ROOM_CODE_RE, type MatchModeSetting } from "@/lib/match-protocol";
 import QuickMatchButton from "@/components/QuickMatchButton";
 import { SpeakerOffIcon, SpeakerOnIcon } from "@/components/PixelIcons";
 import { SFX, setMuted, startBgm, stopBgm } from "@/lib/sfx";
 
 export const Route = createFileRoute("/lobby")({
+  validateSearch: (search: Record<string, unknown>): { mode: MatchModeSetting } => ({
+    mode: search.mode === "2v2" ? "2v2" : "1v1",
+  }),
   head: () => ({
-    meta: [{ title: "1v1 Lobby — สวนผักไทย" }],
+    meta: [{ title: "Lobby — สวนผักไทย" }],
   }),
   component: LobbyPage,
 });
 
 function LobbyPage() {
   const navigate = useNavigate();
+  const { mode } = Route.useSearch();
+  const is2v2 = mode === "2v2";
   const [name, setName] = useState(() =>
     typeof window !== "undefined" ? (localStorage.getItem("tg.name") ?? "") : "",
   );
@@ -61,7 +66,7 @@ function LobbyPage() {
     navigate({
       to: "/match/$code",
       params: { code },
-      search: { role: "spectator" },
+      search: { role: "spectator", mode },
     });
   };
 
@@ -84,26 +89,44 @@ function LobbyPage() {
           className="font-pixel text-[28px] text-[var(--gold)]"
           style={{ textShadow: "3px 3px 0 #1a0f1f, 0 0 24px rgba(255,210,74,0.4)" }}
         >
-          โหมดแข่ง 1v1
+          {is2v2 ? "โหมดแข่ง 2v2" : "โหมดแข่ง 1v1"}
         </h1>
         <p className="font-pixel text-[9px] text-[var(--muted-foreground)]">
-          คนสร้างห้องตั้งค่าด่าน เป้าหมาย เวลา และเตะผู้เล่นได้ก่อนเริ่ม
+          {is2v2
+            ? "ทีม 4 คน · ชาวสวนปลูก คนขายวิ่งส่งตลาด · คนสร้างห้องตั้งค่าได้"
+            : "คนสร้างห้องตั้งค่าด่าน เป้าหมาย เวลา และเตะผู้เล่นได้ก่อนเริ่ม"}
         </p>
       </header>
 
       <div className="relative z-10 pixel-panel p-6 flex flex-col gap-5 min-w-[360px]">
-        <div className="flex flex-col gap-2 items-center">
-          <QuickMatchButton label="จับคู่ด่วน" className="pixel-btn w-full justify-center py-3" />
-          <span className="font-pixel text-[8px] text-[var(--muted-foreground)] text-center">
-            กดปุ่มเดียว จับคู่อัตโนมัติ ไม่ต้องสร้างห้อง
-          </span>
-        </div>
+        {is2v2 ? (
+          <div className="flex flex-col gap-2 items-center">
+            <span className="pixel-chip font-pixel text-[10px]" data-gold="true">
+              2v2 · ทีมละ 2 คน
+            </span>
+            <span className="font-pixel text-[8px] text-[var(--muted-foreground)] text-center">
+              สร้างห้องแล้วส่งรหัสให้เพื่อนครบ 4 คน · ห้องตั้งเป็น 2v2 อัตโนมัติ
+            </span>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-col gap-2 items-center">
+              <QuickMatchButton
+                label="จับคู่ด่วน"
+                className="pixel-btn w-full justify-center py-3"
+              />
+              <span className="font-pixel text-[8px] text-[var(--muted-foreground)] text-center">
+                กดปุ่มเดียว จับคู่อัตโนมัติ ไม่ต้องสร้างห้อง
+              </span>
+            </div>
 
-        <div className="flex items-center gap-3">
-          <span className="h-0.5 flex-1 bg-background" />
-          <span className="font-pixel text-[8px] text-muted-foreground">หรือ</span>
-          <span className="h-0.5 flex-1 bg-background" />
-        </div>
+            <div className="flex items-center gap-3">
+              <span className="h-0.5 flex-1 bg-background" />
+              <span className="font-pixel text-[8px] text-muted-foreground">หรือ</span>
+              <span className="h-0.5 flex-1 bg-background" />
+            </div>
+          </>
+        )}
 
         <label className="flex flex-col gap-2">
           <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">ชื่อผู้เล่น</span>

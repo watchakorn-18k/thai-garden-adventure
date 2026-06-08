@@ -1,11 +1,23 @@
 import { z } from "zod";
-import type { CropId, Direction, Tile, Tool } from "./game-types";
+import type {
+  Cargo,
+  CropId,
+  Direction,
+  MarketOrder,
+  MatchMode,
+  MatchTeam,
+  PlayerRole,
+  TeamId,
+  Tile,
+  Tool,
+} from "./game-types";
 import { DEFAULT_COSMETICS, type PlayerCosmetics } from "./player-cosmetics";
 
 export const ROOM_CODE_LEN = 6;
 export const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
 
 export const TARGET_COINS = 500;
+export const TWO_V_TWO_TARGET_COINS = 800;
 export const MATCH_DURATION_MS = 5 * 60 * 1000;
 export const COUNTDOWN_MS = 3000;
 export const CROP_BAN_MS = 30 * 1000;
@@ -21,7 +33,7 @@ export const DEFAULT_SELECTED_CROPS = [
 export const ROOM_SETTING_LIMITS = {
   targetCoins: { min: 200, max: 10000 },
   durationMs: { min: 2 * 60 * 1000, max: 10 * 60 * 1000 },
-  maxPlayers: { min: 2, max: 2 },
+  maxPlayers: { min: 2, max: 4 },
 } as const;
 
 const directionSchema = z.enum(["up", "down", "left", "right"]);
@@ -37,8 +49,10 @@ const cropIdSchema = z.enum([
   "basil",
 ]);
 const matchRoleSchema = z.enum(["player", "spectator"]);
+const matchModeSchema = z.enum(["1v1", "2v2"]);
 const roomStageSchema = z.enum(["classic", "water", "festival"]);
 export const roomSettingsSchema = z.object({
+  mode: matchModeSchema.default("1v1"),
   stage: roomStageSchema,
   targetCoins: z
     .number()
@@ -56,9 +70,11 @@ export const roomSettingsSchema = z.object({
     .min(ROOM_SETTING_LIMITS.maxPlayers.min)
     .max(ROOM_SETTING_LIMITS.maxPlayers.max),
 });
+export type MatchModeSetting = z.infer<typeof matchModeSchema>;
 export type RoomStage = z.infer<typeof roomStageSchema>;
 export type RoomSettings = z.infer<typeof roomSettingsSchema>;
 export const DEFAULT_ROOM_SETTINGS = {
+  mode: "1v1",
   stage: "classic",
   targetCoins: TARGET_COINS,
   durationMs: MATCH_DURATION_MS,
@@ -94,6 +110,15 @@ export const clientMsg = z.discriminatedUnion("t", [
     pos: z.object({ x: z.number(), y: z.number() }).optional(),
     dir: directionSchema.optional(),
   }),
+  z.object({
+    t: z.literal("pick_up"),
+    pos: z.object({ x: z.number(), y: z.number() }).optional(),
+  }),
+  z.object({
+    t: z.literal("sell_cargo"),
+    pos: z.object({ x: z.number(), y: z.number() }).optional(),
+  }),
+  z.object({ t: z.literal("swap_role"), targetTeammateId: z.string().min(1) }),
   z.object({ t: z.literal("tool"), tool: toolSchema }),
   z.object({ t: z.literal("seed"), id: cropIdSchema }),
   z.object({ t: z.literal("ban_crop"), id: cropIdSchema }),
@@ -133,6 +158,9 @@ export interface PublicPlayer {
   id: string;
   name: string;
   coins: number;
+  teamId?: TeamId;
+  role?: PlayerRole;
+  carryingCargo?: Cargo;
   pos: { x: number; y: number };
   dir: Direction;
   tool: Tool;
@@ -173,9 +201,12 @@ export interface PublicMatchState {
   startedAt?: number;
   endsAt?: number;
   winnerId?: string;
+  winnerTeamId?: TeamId;
   endedReason?: "race" | "timeout" | "forfeit" | "kick";
   recap?: MatchRecap;
   players: PublicPlayer[];
+  teams?: MatchTeam[];
+  fieldCargo?: Cargo[];
   marketPrices?: Record<CropId, number>;
   banTurnPlayerId?: string;
   spectatorCount?: number;
@@ -187,7 +218,19 @@ export type ServerEvent =
   | { kind: "water"; playerId: string; x: number; y: number }
   | { kind: "plant"; playerId: string; x: number; y: number; cropId: CropId }
   | { kind: "harvest"; playerId: string; x: number; y: number; cropId: CropId; reward: number }
-  | { kind: "insufficient_funds"; playerId: string; x: number; y: number };
+  | { kind: "insufficient_funds"; playerId: string; x: number; y: number }
+  | { kind: "cargo_created"; playerId: string; cargo: Cargo }
+  | { kind: "cargo_picked_up"; playerId: string; cargoId: string }
+  | {
+      kind: "cargo_sold";
+      playerId: string;
+      teamId: TeamId;
+      cargoId: string;
+      reward: number;
+      distance: number;
+    }
+  | { kind: "cargo_spoiled"; playerId: string; cargoId: string; x: number; y: number }
+  | { kind: "role_swapped"; playerId: string; playerId1: string; playerId2: string };
 
 export type ServerMsg =
   | {

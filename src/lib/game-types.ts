@@ -10,6 +10,35 @@ export type CropId =
   | "papaya"
   | "basil";
 export type Tool = "hoe" | "watering_can" | "seed";
+export type MatchMode = "1v1" | "2v2";
+export type TeamId = "A" | "B";
+export type PlayerRole = "farmer" | "seller";
+
+export interface Cargo {
+  id: string;
+  cropId: CropId;
+  position: { x: number; y: number };
+  ownerPlayerId: string;
+  teamId: TeamId;
+  baseReward: number;
+  createdAt: number;
+}
+
+export interface MatchTeam {
+  id: TeamId;
+  name: string;
+  playerIds: string[];
+  coins: number;
+}
+
+export interface MarketOrder {
+  cropId: CropId;
+  multiplier: number;
+  updatedAt: number;
+}
+
+export const MARKET_TILE_POS = { x: 11, y: 7 } as const;
+export const CARGO_TTL_MS = 10_000;
 
 export interface Crop {
   id: CropId;

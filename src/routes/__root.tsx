@@ -16,9 +16,7 @@ function NotFoundComponent() {
       <div className="max-w-md text-center">
         <h1 className="text-7xl font-bold text-foreground">404</h1>
         <h2 className="mt-4 text-xl font-semibold text-foreground">ไม่พบหน้านี้</h2>
-        <p className="mt-2 text-sm text-muted-foreground">
-          หน้าที่คุณกำลังหาไม่มีหรือถูกย้ายแล้ว
-        </p>
+        <p className="mt-2 text-sm text-muted-foreground">หน้าที่คุณกำลังหาไม่มีหรือถูกย้ายแล้ว</p>
         <div className="mt-6">
           <Link
             to="/"
@@ -39,9 +37,7 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
-        <h1 className="text-xl font-semibold tracking-tight text-foreground">
-          โหลดหน้านี้ไม่ได้
-        </h1>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">โหลดหน้านี้ไม่ได้</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           เกิดข้อผิดพลาดภายใน ลองรีเฟรชหรือกลับหน้าหลัก
         </p>
@@ -78,8 +74,23 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:title", content: "สวนผักไทย — Thai Farm Game" },
       { property: "og:description", content: "แข่งปลูกผักกัน" },
       { property: "og:type", content: "website" },
-      { name: "twitter:card", content: "summary" },
+      { property: "og:url", content: "https://garden-game.wk18k.qzz.io" },
+      {
+        property: "og:image",
+        content: "https://garden-game.wk18k.qzz.io/og-image.png",
+      },
+      { property: "og:image:width", content: "1195" },
+      { property: "og:image:height", content: "937" },
+      {
+        property: "og:image:alt",
+        content: "สวนผักไทย — Thai Farm Game",
+      },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "twitter:site", content: "@watchakorn-18k" },
+      {
+        name: "twitter:image",
+        content: "https://garden-game.wk18k.qzz.io/og-image.png",
+      },
     ],
     links: [
       {

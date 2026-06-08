@@ -16,6 +16,7 @@ export interface ActionInput {
   seedChoice: CropId;
   now: number;
   marketPrices?: Record<CropId, number>;
+  harvestCreditsCoins?: boolean;
 }
 
 export interface ActionResult {
@@ -56,7 +57,8 @@ export function updateComboAndGetBonus(
   }
 
   // 1. Combo bonus: multiplier * baseReward * min(combo, 6)
-  const comboBonus = nextCombo >= 2 ? Math.floor(baseReward * comboMultiplier * Math.min(nextCombo, 6)) : 0;
+  const comboBonus =
+    nextCombo >= 2 ? Math.floor(baseReward * comboMultiplier * Math.min(nextCombo, 6)) : 0;
 
   // 2. Crop Rotation (variety) bonus: 15% * baseReward * (variety - 1)
   const variety = nextCrops.length;
@@ -105,7 +107,7 @@ export function applyAction(input: ActionInput): ActionResult {
     const baseReward =
       typeof rawPrice === "number" && Number.isFinite(rawPrice) ? rawPrice : crop.sellPrice;
     const reward = tile.crop.stage === 3 ? 0 : Math.round(baseReward);
-    coins += reward;
+    if (input.harvestCreditsCoins !== false) coins += reward;
     events.push({
       kind: "harvest",
       x: target.x,

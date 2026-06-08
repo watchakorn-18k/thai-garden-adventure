@@ -20,8 +20,24 @@ import {
   EyeIcon,
 } from "./PixelIcons";
 import { applyAction, facingTile } from "@/lib/game-logic";
-import { COLS, CROPS, ROWS, type CropId, type Direction, type Tool } from "@/lib/game-types";
-import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
+import {
+  COLS,
+  CROPS,
+  MARKET_TILE_POS,
+  ROWS,
+  type Cargo,
+  type CropId,
+  type Direction,
+  type MatchTeam,
+  type TeamId,
+  type Tool,
+} from "@/lib/game-types";
+import {
+  DEFAULT_COSMETICS,
+  readCosmetics,
+  writeCosmetics,
+  type PlayerCosmetics,
+} from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
 import { SFX, setMuted } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
@@ -34,6 +50,9 @@ import {
   DEFAULT_SELECTED_CROPS,
   ROOM_SETTING_LIMITS,
   SELECTED_CROP_COUNT,
+  TARGET_COINS,
+  TWO_V_TWO_TARGET_COINS,
+  type MatchModeSetting,
   type MatchRecap,
   type MatchRole,
   type PublicMatchState,
@@ -65,9 +84,10 @@ const STAGE_COPY: Record<RoomStage, { label: string; desc: string }> = {
 interface Props {
   code: string;
   role?: MatchRole;
+  desiredMode?: MatchModeSetting;
 }
 
-export default function MultiplayerGame({ code, role = "player" }: Props) {
+export default function MultiplayerGame({ code, role = "player", desiredMode }: Props) {
   const name = useMemo(() => {
     if (typeof window === "undefined") return "Player";
     return localStorage.getItem("tg.name")?.trim() || "ผู้เล่น";
@@ -431,11 +451,37 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
   const self = isSpectator ? undefined : state?.players.find((p) => p.id === selfId);
   const renderedSelf = localPlayer ?? self;
   const hasHostControls = isHost || Boolean(state?.hostId && state.hostId === selfId);
-  const opp = state?.players.find((p) => p.id !== selfId);
+  const is2v2 = state?.settings.mode === "2v2";
+  const selfTeam = self?.teamId ? state?.teams?.find((team) => team.id === self.teamId) : undefined;
+  const opp = state?.players.find((p) => p.id !== selfId && (!is2v2 || p.teamId !== self?.teamId));
   useEffect(() => {
     selfRef.current = self;
     statusRef.current = state?.status;
   }, [self, state?.status]);
+
+  // Honor a ?mode= request from the entry CTA: the host pushes the desired room
+  // mode once, while still in the lobby. Sent only once per page load so the host
+  // can freely change it afterward via Settings.
+  const appliedModeRef = useRef(false);
+  useEffect(() => {
+    if (appliedModeRef.current) return;
+    if (!desiredMode || !state) return;
+    if (!hasHostControls || state.status !== "lobby") return;
+    if (state.settings.mode === desiredMode) {
+      appliedModeRef.current = true;
+      return;
+    }
+    appliedModeRef.current = true;
+    send({
+      t: "settings",
+      settings: {
+        ...state.settings,
+        mode: desiredMode,
+        maxPlayers: desiredMode === "2v2" ? 4 : 2,
+        targetCoins: desiredMode === "2v2" ? TWO_V_TWO_TARGET_COINS : TARGET_COINS,
+      },
+    });
+  }, [desiredMode, state, hasHostControls, send]);
 
   useEffect(() => {
     recalculateLocalPlayer();
@@ -678,6 +724,8 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
         opp={isSpectator ? state.players[1] : opp}
         state={state}
         settings={state.settings}
+        selfTeam={selfTeam}
+        teams={state.teams}
         status={status}
         role={matchRole}
         combo={combo}
@@ -790,23 +838,51 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
             events={events}
             spectatorCount={state.spectatorCount}
             marketPrices={state.marketPrices}
+            fieldCargo={is2v2 ? state.fieldCargo : undefined}
+            is2v2={is2v2}
           />
         ) : (
           self && (
             <div className="relative z-10 flex flex-col items-center gap-3">
-              {opp &&
+              {is2v2 ? (
+                <div className="flex flex-wrap justify-center gap-3">
+                  {state.players
+                    .filter((p) => p.teamId !== self.teamId)
+                    .map((p) => (
+                      <OpponentStatusCard key={p.id} player={p} />
+                    ))}
+                </div>
+              ) : (
+                opp &&
                 (state.status === "playing" ? (
                   <OpponentStatusCard player={opp} />
                 ) : (
                   <OpponentField player={opp} />
-                ))}
+                ))
+              )}
               <SelfField
                 player={renderedSelf ?? self}
-                events={events.filter((e) => e.ev.playerId === self.id)}
+                events={events.filter(
+                  (e) =>
+                    e.ev.playerId === self.id ||
+                    (is2v2 &&
+                      state.players.some(
+                        (p) => p.id === e.ev.playerId && p.teamId === self.teamId,
+                      )),
+                )}
                 actionFlash={actionFlash}
                 acting={acting}
                 predictedDir={predictedDir}
                 isSelf={true}
+                cargo={
+                  is2v2 ? state.fieldCargo?.filter((c) => c.teamId === self.teamId) : undefined
+                }
+                showMarket={is2v2}
+                teammates={
+                  is2v2
+                    ? state.players.filter((p) => p.teamId === self.teamId && p.id !== self.id)
+                    : undefined
+                }
               />
             </div>
           )
@@ -815,9 +891,11 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       {state.status === "ended" && (
         <EndOverlay
           winnerId={state.winnerId}
+          winnerTeamId={state.winnerTeamId}
           reason={state.endedReason}
           selfId={selfId}
           players={state.players}
+          teams={state.teams}
           recap={state.recap}
           onRematch={() => send({ t: "rematch" })}
           self={self}
@@ -838,7 +916,12 @@ export default function MultiplayerGame({ code, role = "player" }: Props) {
       )}
 
       {state.status === "playing" && self && !isSpectator && (
-        <Toolbar self={self} send={send} marketPrices={state.marketPrices} />
+        <Toolbar
+          self={self}
+          send={send}
+          marketPrices={state.marketPrices}
+          cargo={state.fieldCargo}
+        />
       )}
       {isSpectator &&
         state.status !== "crop_ban" &&
@@ -1012,6 +1095,8 @@ function MatchHUD({
   opp,
   state,
   settings,
+  selfTeam,
+  teams,
   status,
   role,
   combo,
@@ -1029,6 +1114,8 @@ function MatchHUD({
     spectatorCount?: number;
   };
   settings: RoomSettings;
+  selfTeam?: MatchTeam;
+  teams?: MatchTeam[];
   status: string;
   role: MatchRole;
   combo: number;
@@ -1112,9 +1199,27 @@ function MatchHUD({
           </button>
 
           <div className="flex min-w-0 items-center gap-4">
-            <PlayerBar player={self} side="left" targetCoins={settings.targetCoins} />
-            <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
-            <PlayerBar player={opp} side="right" targetCoins={settings.targetCoins} />
+            {settings.mode === "2v2" && teams?.length ? (
+              <>
+                <TeamBar
+                  team={teams[0]}
+                  active={selfTeam?.id === teams[0]?.id}
+                  targetCoins={settings.targetCoins}
+                />
+                <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
+                <TeamBar
+                  team={teams[1]}
+                  active={selfTeam?.id === teams[1]?.id}
+                  targetCoins={settings.targetCoins}
+                />
+              </>
+            ) : (
+              <>
+                <PlayerBar player={self} side="left" targetCoins={settings.targetCoins} />
+                <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
+                <PlayerBar player={opp} side="right" targetCoins={settings.targetCoins} />
+              </>
+            )}
           </div>
 
           <div className="flex items-center justify-end gap-4">
@@ -1214,6 +1319,42 @@ function HeaderOutfitMenu({
   );
 }
 
+function TeamBar({
+  team,
+  active,
+  targetCoins,
+}: {
+  team?: MatchTeam;
+  active?: boolean;
+  targetCoins: number;
+}) {
+  const pct = team ? Math.min(100, (team.coins / targetCoins) * 100) : 0;
+  return (
+    <div className="flex-1 flex flex-col gap-1">
+      <div className="flex items-center gap-2">
+        <span className="font-pixel text-[10px]">{team?.name ?? "รอทีม..."}</span>
+        {active && <span className="pixel-chip font-pixel text-[7px]">ทีมคุณ</span>}
+        {team && (
+          <span className="font-pixel text-[10px] text-[var(--gold)] flex items-center gap-1">
+            <CoinIcon size={12} />
+            {team.coins}/{targetCoins}
+          </span>
+        )}
+      </div>
+      <div className="w-full h-[8px] bg-[#1a0f1f]" style={{ border: "2px solid #1a0f1f" }}>
+        <div
+          style={{
+            width: `${pct}%`,
+            height: "100%",
+            background: pct >= 100 ? "#ffd24a" : team?.id === "A" ? "#7fd8ff" : "#ff8fb1",
+            transition: "width 0.2s ease-out",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
 function PlayerBar({
   player,
   side,
@@ -1279,10 +1420,15 @@ function LobbyView({
   onAddBot: () => void;
   onRemoveBot: (playerId: string) => void;
 }) {
-  const waitingForOpponent = !opp;
-  const canAddBot = isHost && state.status === "lobby" && !opp;
+  const is2v2 = state.settings.mode === "2v2";
+  const waitingForOpponent = is2v2 ? state.players.length < state.settings.maxPlayers : !opp;
+  const hasOpenSlot = state.players.length < state.settings.maxPlayers;
+  const canAddBot = isHost && state.status === "lobby" && (is2v2 ? hasOpenSlot : !opp);
   const oppBotId = opp?.isBot ? opp.id : undefined;
-  const readyCount = [self, opp].filter((p) => p?.ready).length;
+  const readyCount = is2v2
+    ? state.players.filter((p) => p.ready).length
+    : [self, opp].filter((p) => p?.ready).length;
+  const allReady = readyCount === state.settings.maxPlayers && !waitingForOpponent;
   const settings = state.settings ?? DEFAULT_ROOM_SETTINGS;
   return (
     <section className="lobby-stage relative z-10 w-full max-w-5xl">
@@ -1316,29 +1462,40 @@ function LobbyView({
         <p className="lobby-subtitle">
           {waitingForOpponent
             ? "ส่งลิงก์ให้เพื่อน แล้วตั้งกติกาห้องก่อนเริ่ม"
-            : self?.ready && opp?.ready
-              ? "ทั้งสองฝั่งพร้อมแล้ว · กำลังนับถอยหลัง"
+            : allReady
+              ? "ทุกคนพร้อมแล้ว · กำลังนับถอยหลัง"
               : `พร้อมแล้ว ${readyCount}/${settings.maxPlayers} · กด พร้อม เพื่อเข้ารอบ`}
         </p>
       </div>
 
       <RoomSettingsSummary settings={settings} isHost={isHost} onOpenSettings={onOpenSettings} />
 
-      <div className="lobby-versus-grid">
-        <PlayerCard player={self} label="คุณ" side="left" hostId={state.hostId} />
-        <div className="lobby-vs-core" aria-hidden>
-          <span>VS</span>
-        </div>
-        <PlayerCard
-          player={opp}
-          label="คู่แข่ง"
-          side="right"
+      {state.settings.mode === "2v2" ? (
+        <TeamSlots
+          players={state.players}
           hostId={state.hostId}
-          canKick={isHost && Boolean(opp)}
-          onKick={(id) => (oppBotId ? onRemoveBot(id) : onKick(id))}
-          kickLabel={oppBotId ? "ลบบอท" : "เตะ"}
+          isHost={isHost && state.status === "lobby"}
+          canManage={isHost && state.status === "lobby"}
+          onKick={onKick}
+          onRemoveBot={onRemoveBot}
         />
-      </div>
+      ) : (
+        <div className="lobby-versus-grid">
+          <PlayerCard player={self} label="คุณ" side="left" hostId={state.hostId} />
+          <div className="lobby-vs-core" aria-hidden>
+            <span>VS</span>
+          </div>
+          <PlayerCard
+            player={opp}
+            label="คู่แข่ง"
+            side="right"
+            hostId={state.hostId}
+            canKick={isHost && Boolean(opp)}
+            onKick={(id) => (oppBotId ? onRemoveBot(id) : onKick(id))}
+            kickLabel={oppBotId ? "ลบบอท" : "เตะ"}
+          />
+        </div>
+      )}
 
       <div className="lobby-ready-row">
         <div className="lobby-ruleline" />
@@ -1366,7 +1523,7 @@ function LobbyView({
               <span className="font-pixel text-[8px] opacity-70">เจ้าของห้อง</span>
             </button>
           )}
-          {isHost && opp && (
+          {isHost && state.players.length === state.settings.maxPlayers && (
             <button
               onClick={() => {
                 SFX.click();
@@ -1860,6 +2017,101 @@ function RoomSettingsSummary({
   );
 }
 
+function TeamSlots({
+  players,
+  hostId,
+  isHost,
+  canManage = false,
+  onKick,
+  onRemoveBot,
+}: {
+  players: PublicPlayer[];
+  hostId?: string;
+  isHost: boolean;
+  canManage?: boolean;
+  onKick?: (playerId: string) => void;
+  onRemoveBot?: (playerId: string) => void;
+}) {
+  const teamA = players.filter((p) => p.teamId === "A");
+  const teamB = players.filter((p) => p.teamId === "B");
+  return (
+    <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr]">
+      <TeamSlotColumn
+        title="TEAM A"
+        players={teamA}
+        side="left"
+        hostId={hostId}
+        isHost={isHost}
+        canManage={canManage}
+        onKick={onKick}
+        onRemoveBot={onRemoveBot}
+      />
+      <div className="lobby-vs-core self-center justify-self-center" aria-hidden>
+        <span>VS</span>
+      </div>
+      <TeamSlotColumn
+        title="TEAM B"
+        players={teamB}
+        side="right"
+        hostId={hostId}
+        isHost={isHost}
+        canManage={canManage}
+        onKick={onKick}
+        onRemoveBot={onRemoveBot}
+      />
+    </div>
+  );
+}
+
+function TeamSlotColumn({
+  title,
+  players,
+  side,
+  hostId,
+  isHost,
+  canManage = false,
+  onKick,
+  onRemoveBot,
+}: {
+  title: string;
+  players: PublicPlayer[];
+  side: "left" | "right";
+  hostId?: string;
+  isHost: boolean;
+  canManage?: boolean;
+  onKick?: (playerId: string) => void;
+  onRemoveBot?: (playerId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="pixel-chip text-center font-pixel text-[9px]" data-gold="true">
+        {title}
+      </div>
+      {[0, 1].map((idx) => {
+        const player = players[idx];
+        const isBot = Boolean(player?.isBot);
+        // Real players are kickable only by a host who owns the room (isHost).
+        // Bots are removable by anyone with room-management rights (canManage),
+        // which includes a spectator-host who added them.
+        const kickable = Boolean(player) && (isBot ? canManage || isHost : isHost);
+        const handler = isBot ? onRemoveBot : onKick;
+        return (
+          <PlayerCard
+            key={player?.id ?? idx}
+            player={player}
+            label={player?.role === "seller" ? "🛒 คนขาย" : "🌱 ชาวสวน"}
+            side={side}
+            hostId={hostId}
+            canKick={kickable && Boolean(handler)}
+            onKick={handler}
+            kickLabel={isBot ? "ลบบอท" : "เตะ"}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
 function PlayerCard({
   player,
   label,
@@ -1946,6 +2198,14 @@ function SettingsModal({
   onSave: (settings: RoomSettings) => void;
 }) {
   const [draft, setDraft] = useState<RoomSettings>(settings);
+  const setMode = (mode: RoomSettings["mode"]) => {
+    setDraft((current) => ({
+      ...current,
+      mode,
+      maxPlayers: mode === "2v2" ? 4 : 2,
+      targetCoins: mode === "2v2" ? 800 : 500,
+    }));
+  };
   const setNumber = (
     key: "targetCoins" | "durationMs",
     value: number,
@@ -1983,6 +2243,28 @@ function SettingsModal({
           >
             <span className="font-pixel text-[10px]">ปิด</span>
           </button>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {(["1v1", "2v2"] as const).map((mode) => (
+            <button
+              key={mode}
+              onClick={() => {
+                SFX.click();
+                setMode(mode);
+              }}
+              className="pixel-panel p-4 text-left transition-transform active:translate-y-[1px]"
+              data-ready={draft.mode === mode ? "true" : undefined}
+              style={{ background: draft.mode === mode ? "#4a2b58" : "#2b1836" }}
+            >
+              <div className="font-pixel text-[12px] text-[var(--gold)] leading-relaxed">
+                {mode === "2v2" ? "2v2" : "1v1"}
+              </div>
+              <div className="font-pixel text-[13px] text-[#fff1d6] mt-3 leading-[1.8]">
+                {mode === "2v2" ? "ทีม 4 คน · ชาวสวน + คนขาย" : "ดวล 2 คนแบบเดิม"}
+              </div>
+            </button>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -2046,12 +2328,12 @@ function SettingsModal({
               }
             />
           </SettingField>
-          <SettingField label="สล็อต" helper="ตอนนี้ล็อก 2 คน" value={draft.maxPlayers}>
+          <SettingField label="สล็อต" helper="ปรับตามโหมด" value={draft.maxPlayers}>
             <input
               className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3 opacity-80"
               type="number"
               min={2}
-              max={2}
+              max={4}
               value={draft.maxPlayers}
               readOnly
             />
@@ -2160,29 +2442,39 @@ function SpectatorLobbyView({
         </div>
       )}
 
-      <div className="lobby-versus-grid">
-        <PlayerCard
-          player={players[0]}
-          label="ผู้เล่น 1"
-          side="left"
+      {state.settings.mode === "2v2" ? (
+        <TeamSlots
+          players={players}
           hostId={state.hostId}
-          canKick={isHost && state.status === "lobby" && Boolean(players[0]?.isBot)}
-          onKick={onRemoveBot}
-          kickLabel="ลบบอท"
+          isHost={false}
+          canManage={isHost && state.status === "lobby"}
+          onRemoveBot={onRemoveBot}
         />
-        <div className="lobby-vs-core" aria-hidden>
-          <span>VS</span>
+      ) : (
+        <div className="lobby-versus-grid">
+          <PlayerCard
+            player={players[0]}
+            label="ผู้เล่น 1"
+            side="left"
+            hostId={state.hostId}
+            canKick={isHost && state.status === "lobby" && Boolean(players[0]?.isBot)}
+            onKick={onRemoveBot}
+            kickLabel="ลบบอท"
+          />
+          <div className="lobby-vs-core" aria-hidden>
+            <span>VS</span>
+          </div>
+          <PlayerCard
+            player={players[1]}
+            label="ผู้เล่น 2"
+            side="right"
+            hostId={state.hostId}
+            canKick={isHost && state.status === "lobby" && Boolean(players[1]?.isBot)}
+            onKick={onRemoveBot}
+            kickLabel="ลบบอท"
+          />
         </div>
-        <PlayerCard
-          player={players[1]}
-          label="ผู้เล่น 2"
-          side="right"
-          hostId={state.hostId}
-          canKick={isHost && state.status === "lobby" && Boolean(players[1]?.isBot)}
-          onKick={onRemoveBot}
-          kickLabel="ลบบอท"
-        />
-      </div>
+      )}
 
       <div className="lobby-ready-row">
         <div className="lobby-ruleline" />
@@ -2284,6 +2576,9 @@ function SelfField({
   acting,
   predictedDir,
   isSelf = false,
+  cargo,
+  showMarket = false,
+  teammates,
 }: {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
@@ -2291,6 +2586,9 @@ function SelfField({
   acting: boolean;
   predictedDir?: Direction | null;
   isSelf?: boolean;
+  cargo?: Cargo[];
+  showMarket?: boolean;
+  teammates?: PublicPlayer[];
 }) {
   return (
     <PhaserField
@@ -2299,6 +2597,9 @@ function SelfField({
       acting={acting}
       predictedDir={predictedDir}
       isSelf={isSelf}
+      cargo={cargo}
+      showMarket={showMarket}
+      teammates={teammates}
     />
   );
 }
@@ -2308,11 +2609,15 @@ function SpectatorMatchView({
   events,
   spectatorCount,
   marketPrices,
+  fieldCargo,
+  is2v2 = false,
 }: {
   players: PublicPlayer[];
   events: { id: number; ev: ServerEvent }[];
   spectatorCount?: number;
   marketPrices?: Record<CropId, number>;
+  fieldCargo?: Cargo[];
+  is2v2?: boolean;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -2322,6 +2627,35 @@ function SpectatorMatchView({
   }, []);
 
   const watching = Math.max(1, spectatorCount ?? 1);
+
+  // 2v2 spectating shows one shared plot per team (the farmer owns the tiles, the
+  // seller rides along as a teammate sprite). 1v1 keeps one field per player.
+  const fields: Array<{
+    key: string;
+    owner: PublicPlayer;
+    teammates: PublicPlayer[];
+    label: string;
+  }> = is2v2
+    ? (["A", "B"] as const)
+        .map((teamId) => {
+          const members = players.filter((p) => p.teamId === teamId);
+          if (!members.length) return null;
+          const owner = members.find((p) => p.role === "farmer") ?? members[0];
+          return {
+            key: teamId,
+            owner,
+            teammates: members.filter((p) => p.id !== owner.id),
+            label: `Team ${teamId}`,
+          };
+        })
+        .filter((f): f is NonNullable<typeof f> => f !== null)
+    : players.map((player, i) => ({
+        key: player.id,
+        owner: player,
+        teammates: [],
+        label: `ผู้เล่น ${i + 1}`,
+      }));
+
   return (
     <div className="relative z-10 mt-2 flex flex-col items-center gap-4 sm:mt-3">
       <div className="pixel-panel flex flex-wrap items-center justify-center gap-3 px-5 py-3">
@@ -2333,7 +2667,9 @@ function SpectatorMatchView({
         </span>
         <span className="h-4 w-[2px] bg-[#1a0f1f]" aria-hidden />
         <span className="font-pixel text-[10px] text-[var(--gold)]">มุมผู้ตัดสิน</span>
-        <span className="pixel-chip font-pixel text-[8px]">{players.length}/2 PLAYERS</span>
+        <span className="pixel-chip font-pixel text-[8px]">
+          {players.length}/{is2v2 ? 4 : 2} PLAYERS
+        </span>
         <span
           className="pixel-chip flex items-center gap-1.5 font-pixel text-[8px]"
           data-gold="true"
@@ -2344,7 +2680,8 @@ function SpectatorMatchView({
         </span>
       </div>
       <div className="flex flex-col xl:flex-row items-center gap-4 xl:gap-6">
-        {players.map((player, i) => {
+        {fields.map((field) => {
+          const player = field.owner;
           const overlays: Array<{
             x: number;
             y: number;
@@ -2365,16 +2702,33 @@ function SpectatorMatchView({
               overlays.push({ x, y, id, progress, price });
             }
           }
+          const teamPlayerIds = new Set([player.id, ...field.teammates.map((t) => t.id)]);
 
           return (
-            <div key={player.id} className="flex flex-col items-center gap-2">
-              <OpponentStatusCard player={player} label={`ผู้เล่น ${i + 1}`} />
+            <div key={field.key} className="flex flex-col items-center gap-2">
+              {is2v2 ? (
+                <div className="flex flex-wrap justify-center gap-2">
+                  <OpponentStatusCard player={player} label={`${field.label} · 🌱`} />
+                  {field.teammates.map((mate) => (
+                    <OpponentStatusCard
+                      key={mate.id}
+                      player={mate}
+                      label={mate.role === "seller" ? "🛒 คนขาย" : "🌱 ชาวสวน"}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <OpponentStatusCard player={player} label={field.label} />
+              )}
               <div className="relative" style={{ width: COLS * TILE, height: ROWS * TILE }}>
                 <SelfField
                   player={player}
-                  events={events.filter((e) => e.ev.playerId === player.id)}
+                  events={events.filter((e) => teamPlayerIds.has(e.ev.playerId))}
                   actionFlash={0}
                   acting={false}
+                  cargo={is2v2 ? fieldCargo?.filter((c) => c.teamId === player.teamId) : undefined}
+                  showMarket={is2v2}
+                  teammates={field.teammates}
                 />
                 <div className="absolute inset-0 pointer-events-none">
                   {overlays.map((c) => {
@@ -2461,12 +2815,71 @@ function Toolbar({
   self,
   send,
   marketPrices,
+  cargo,
 }: {
   self: PublicPlayer;
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
   marketPrices?: Record<CropId, number>;
+  cargo?: Cargo[];
 }) {
   const cropPool = selectedCropPool(self.selectedCrops);
+  if (self.role === "seller") {
+    const nearbyCargo = cargo?.find(
+      (item) =>
+        item.teamId === self.teamId &&
+        Math.hypot(item.position.x - self.pos.x, item.position.y - self.pos.y) <= 1.5,
+    );
+    const nearMarket =
+      Math.hypot(MARKET_TILE_POS.x - self.pos.x, MARKET_TILE_POS.y - self.pos.y) <= 1.5;
+    return (
+      <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
+        <div className="farm-toolbar-section farm-toolbar-tools">
+          <span className="farm-toolbar-label">คนขาย</span>
+          <div className="farm-tool-grid">
+            <button
+              onClick={() => {
+                SFX.click();
+                send({ t: "pick_up", pos: self.pos });
+              }}
+              className="farm-tool-btn pixel-btn"
+              disabled={!nearbyCargo || Boolean(self.carryingCargo)}
+            >
+              <span>📦</span>
+              <span>หยิบของ</span>
+              <span className="farm-key-hint">SPACE</span>
+            </button>
+            <button
+              onClick={() => {
+                SFX.click();
+                send({ t: "sell_cargo", pos: self.pos });
+              }}
+              className="farm-tool-btn pixel-btn"
+              data-active={nearMarket && Boolean(self.carryingCargo)}
+              disabled={!nearMarket || !self.carryingCargo}
+            >
+              <CoinIcon size={20} />
+              <span>ขายตลาด</span>
+              <span className="farm-key-hint">SPACE</span>
+            </button>
+          </div>
+        </div>
+        <div className="farm-toolbar-section farm-toolbar-crops">
+          <span className="farm-toolbar-label">สถานะ</span>
+          <div
+            className="pixel-chip font-pixel text-[10px]"
+            data-gold={self.carryingCargo ? "true" : undefined}
+          >
+            {self.carryingCargo
+              ? `กำลังแบก ${CROPS[self.carryingCargo.cropId].name}`
+              : "มือว่าง · หา cargo จากชาวสวน"}
+          </div>
+          <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+            ตลาดอยู่ช่อง {MARKET_TILE_POS.x},{MARKET_TILE_POS.y}
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="farm-toolbar relative z-10 w-full max-w-5xl pixel-panel">
@@ -2795,9 +3208,11 @@ function WinnerChampion({ cosmetics }: { cosmetics: PlayerCosmetics }) {
 
 function EndOverlay({
   winnerId,
+  winnerTeamId,
   reason,
   selfId,
   players,
+  teams,
   recap,
   onRematch,
   self,
@@ -2805,23 +3220,36 @@ function EndOverlay({
   roomClosesAt,
 }: {
   winnerId?: string;
+  winnerTeamId?: TeamId;
   reason?: "race" | "timeout" | "forfeit" | "kick";
   selfId: string | null;
   players: PublicPlayer[];
+  teams?: MatchTeam[];
   recap?: MatchRecap;
   onRematch: () => void;
   self?: PublicPlayer;
   spectator?: boolean;
   roomClosesAt?: number;
 }) {
-  const won = winnerId && winnerId === selfId;
-  const tied = !winnerId;
-  const winner = winnerId ? players.find((p) => p.id === winnerId) : undefined;
+  // In 2v2 the winner is a team; in 1v1 it's a single player. Normalize both
+  // into one champion (name + cosmetics) so the trophy stage stays shared.
+  const is2v2 = Boolean(teams && teams.length);
+  const winnerPlayer = winnerId ? players.find((p) => p.id === winnerId) : undefined;
+  const winnerTeam = is2v2 && winnerTeamId ? teams?.find((t) => t.id === winnerTeamId) : undefined;
+  const hasWinner = is2v2 ? Boolean(winnerTeam) : Boolean(winnerPlayer);
+  const tied = !hasWinner;
+  const won = is2v2
+    ? Boolean(self?.teamId && self.teamId === winnerTeamId)
+    : Boolean(winnerId && winnerId === selfId);
+  // Avatar cosmetics: in 2v2 borrow the winning team's first player.
+  const championAvatar = is2v2 ? players.find((p) => p.teamId === winnerTeamId) : winnerPlayer;
+  const championName = is2v2 ? (winnerTeam?.name ?? "") : (winnerPlayer?.name ?? "");
+  const championIsSelf = is2v2 ? won : winnerId === selfId;
   // Defeated player sees their own farmer kneeling; spectators/winner see the champion.
-  const lost = Boolean(winner && !spectator && !won && self);
+  const lost = Boolean(hasWinner && !spectator && !won && self);
   const reasonText =
     reason === "race"
-      ? "ถึง 500 กอน"
+      ? "ทำเหรียญถึงเป้า"
       : reason === "timeout"
         ? "หมดเวลา"
         : reason === "kick"
@@ -2829,6 +3257,11 @@ function EndOverlay({
           : "ตัดการเชื่อมต่อ";
   const subText = won ? "ยอดเยี่ยม! คุณคือผู้ชนะ" : "ผู้ชนะรอบนี้";
   const sortedPlayers = [...players].sort((a, b) => b.coins - a.coins);
+  const sortedTeams = teams ? [...teams].sort((a, b) => b.coins - a.coins) : [];
+  const winnerTeamMembers =
+    is2v2 && winnerTeamId ? players.filter((p) => p.teamId === winnerTeamId) : [];
+  const loserTeamMembers =
+    is2v2 && self?.teamId ? players.filter((p) => p.teamId === self.teamId) : [];
 
   const [closeCountdown, setCloseCountdown] = useState(() =>
     roomClosesAt ? Math.max(0, Math.ceil((roomClosesAt - Date.now()) / 1000)) : 0,
@@ -2847,7 +3280,7 @@ function EndOverlay({
       style={{ background: "rgba(10,5,15,0.85)" }}
     >
       <div className="pixel-panel p-8 flex flex-col items-center gap-5 w-[min(420px,92vw)]">
-        {tied || !winner ? (
+        {tied ? (
           <>
             <div
               className="font-pixel text-[32px]"
@@ -2862,21 +3295,29 @@ function EndOverlay({
         ) : lost && self ? (
           <div className="loser-stage">
             <div className="loser-title font-thai">แพ้แล้ว</div>
-            <div className="loser-kneel-zone">
-              <span className="loser-frustration loser-frustration-a" aria-hidden />
-              <span className="loser-frustration loser-frustration-b" aria-hidden />
-              <div className="loser-avatar">
-                <LoserKneel cosmetics={self.cosmetics} />
-              </div>
+            <div style={{ display: "flex", justifyContent: "center", gap: "4px" }}>
+              {(is2v2 ? loserTeamMembers : [self]).map((m) => (
+                <div className="loser-kneel-zone" key={m.id}>
+                  <span className="loser-frustration loser-frustration-a" aria-hidden />
+                  <span className="loser-frustration loser-frustration-b" aria-hidden />
+                  <div className="loser-avatar">
+                    <LoserKneel cosmetics={m.cosmetics} />
+                  </div>
+                </div>
+              ))}
             </div>
             <div
               className="winner-name font-pixel"
               style={{ color: "#ff6b6b", textShadow: "3px 3px 0 #1a0f1f" }}
             >
-              {self.name} (YOU)
+              {is2v2
+                ? loserTeamMembers
+                    .map((m) => m.name + (m.id === selfId ? " (YOU)" : ""))
+                    .join(" · ")
+                : `${self.name} (YOU)`}
             </div>
             <div className="winner-sub font-pixel text-[var(--muted-foreground)]">
-              เจ็บใจรอบนี้ · ชนะโดย {winner.name}
+              เจ็บใจรอบนี้ · ชนะโดย {championName}
             </div>
           </div>
         ) : (
@@ -2901,21 +3342,31 @@ function EndOverlay({
               ))}
             </div>
             <div className="winner-award font-thai">ผู้ชนะ</div>
-            <div className="winner-trophy-zone">
-              <span className="winner-spark winner-spark-a" aria-hidden />
-              <span className="winner-spark winner-spark-b" aria-hidden />
-              <span className="winner-spark winner-spark-c" aria-hidden />
-              <div className="winner-avatar">
-                <WinnerChampion cosmetics={winner.cosmetics} />
-              </div>
-              <div className="winner-podium font-pixel">1</div>
+            <div style={{ display: "flex", justifyContent: "center", gap: "4px" }}>
+              {(is2v2
+                ? winnerTeamMembers
+                : [championAvatar ?? { id: "_", cosmetics: DEFAULT_COSMETICS }]
+              ).map((m) => (
+                <div className="winner-trophy-zone" key={m.id}>
+                  <span className="winner-spark winner-spark-a" aria-hidden />
+                  <span className="winner-spark winner-spark-b" aria-hidden />
+                  <span className="winner-spark winner-spark-c" aria-hidden />
+                  <div className="winner-avatar">
+                    <WinnerChampion cosmetics={m.cosmetics ?? DEFAULT_COSMETICS} />
+                  </div>
+                  <div className="winner-podium font-pixel">1</div>
+                </div>
+              ))}
             </div>
             <div
               className="winner-name font-pixel"
               style={{ color: "#ffd24a", textShadow: "3px 3px 0 #1a0f1f" }}
             >
-              {winner.name}
-              {winner.id === selfId ? " (YOU)" : ""}
+              {is2v2
+                ? winnerTeamMembers
+                    .map((m) => m.name + (m.id === selfId ? " (YOU)" : ""))
+                    .join(" · ")
+                : `${championName}${championIsSelf ? " (YOU)" : ""}`}
             </div>
             <div className="winner-sub font-pixel text-[var(--muted-foreground)]">
               {spectator ? "ผู้ชนะ" : subText} · {reasonText}
@@ -2923,30 +3374,56 @@ function EndOverlay({
           </div>
         )}
         <div className="flex flex-col gap-2 w-full">
-          {sortedPlayers.map((p) => {
-            const stat = recap?.players.find((entry) => entry.id === p.id);
-            return (
-              <div key={p.id} className="flex flex-col gap-1 font-pixel text-[10px]">
-                <div className="flex items-center justify-between gap-3">
-                  <span>
-                    {p.name}
-                    {p.id === selfId ? " (YOU)" : ""}
-                  </span>
-                  <span className="text-[var(--gold)] flex items-center gap-1">
-                    <CoinIcon size={12} />
-                    {p.coins}
-                  </span>
-                </div>
-                {stat && (
-                  <div className="flex items-center justify-between gap-3 text-[8px] text-[var(--muted-foreground)]">
-                    <span>เก็บเกี่ยว {stat.harvests}</span>
-                    <span>ไดรรับ {stat.coinsEarned}</span>
-                    <span>ท็อป {stat.topCrop ? CROPS[stat.topCrop].name : "-"}</span>
+          {is2v2
+            ? sortedTeams.map((team) => {
+                const members = players.filter((p) => p.teamId === team.id);
+                const isMyTeam = self?.teamId === team.id;
+                return (
+                  <div key={team.id} className="flex flex-col gap-1 font-pixel text-[10px]">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>
+                        {team.name}
+                        {isMyTeam ? " (YOU)" : ""}
+                      </span>
+                      <span className="text-[var(--gold)] flex items-center gap-1">
+                        <CoinIcon size={12} />
+                        {team.coins}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between gap-3 text-[8px] text-[var(--muted-foreground)]">
+                      {members.map((m) => (
+                        <span key={m.id}>
+                          {m.role === "seller" ? "🛒" : "🌱"} {m.name}
+                        </span>
+                      ))}
+                    </div>
                   </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })
+            : sortedPlayers.map((p) => {
+                const stat = recap?.players.find((entry) => entry.id === p.id);
+                return (
+                  <div key={p.id} className="flex flex-col gap-1 font-pixel text-[10px]">
+                    <div className="flex items-center justify-between gap-3">
+                      <span>
+                        {p.name}
+                        {p.id === selfId ? " (YOU)" : ""}
+                      </span>
+                      <span className="text-[var(--gold)] flex items-center gap-1">
+                        <CoinIcon size={12} />
+                        {p.coins}
+                      </span>
+                    </div>
+                    {stat && (
+                      <div className="flex items-center justify-between gap-3 text-[8px] text-[var(--muted-foreground)]">
+                        <span>เก็บเกี่ยว {stat.harvests}</span>
+                        <span>ไดรรับ {stat.coinsEarned}</span>
+                        <span>ท็อป {stat.topCrop ? CROPS[stat.topCrop].name : "-"}</span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
         </div>
         {recap && (
           <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">

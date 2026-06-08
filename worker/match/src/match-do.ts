@@ -1,11 +1,17 @@
 import { applyAction, tickGrowth, updateComboAndGetBonus } from "../../../src/lib/game-logic";
 import {
+  CARGO_TTL_MS,
   COLS,
   CROPS,
+  MARKET_TILE_POS,
   makeEmptyField,
   ROWS,
+  type Cargo,
   type CropId,
   type Direction,
+  type MatchTeam,
+  type PlayerRole,
+  type TeamId,
   type Tile,
   type Tool,
 } from "../../../src/lib/game-types";
@@ -35,6 +41,9 @@ interface PlayerState {
   name: string;
   cosmetics: PlayerCosmetics;
   coins: number;
+  teamId?: TeamId;
+  role?: PlayerRole;
+  carryingCargo?: Cargo;
   pos: { x: number; y: number };
   dir: Direction;
   tool: Tool;
@@ -66,6 +75,7 @@ interface StoredRoomState {
   startedAt?: number;
   endsAt?: number;
   winnerId?: string;
+  winnerTeamId?: TeamId;
   endedReason?: "race" | "timeout" | "forfeit" | "kick";
   recap?: MatchRecap;
   hostId?: string;
@@ -75,6 +85,8 @@ interface StoredRoomState {
     PlayerState,
     "connected" | "inputDir" | "lastMovementAt" | "lastActionAt" | "botNextActAt"
   >[];
+  teams?: MatchTeam[];
+  fieldCargo?: Cargo[];
   marketPrices?: Record<CropId, number>;
   banTurnPlayerId?: string;
   roomClosesAt?: number;
@@ -109,12 +121,15 @@ export class MatchRoom implements DurableObject {
   private startedAt?: number;
   private endsAt?: number;
   private winnerId?: string;
+  private winnerTeamId?: TeamId;
   private endedReason?: "race" | "timeout" | "forfeit" | "kick";
   private recap?: MatchRecap;
   private hostId?: string;
   private hostSessionId?: string;
   private settings: RoomSettings = DEFAULT_ROOM_SETTINGS;
   private players = new Map<string, PlayerState>();
+  private teams: MatchTeam[] = [];
+  private fieldCargo: Cargo[] = [];
   private marketPrices: Record<CropId, number> = makeMarketPrices();
   private banTurnPlayerId?: string;
   private roomClosesAt?: number;
@@ -309,6 +324,10 @@ export class MatchRoom implements DurableObject {
       if (this.status !== "ended") return;
       player.ready = true;
       this.markBotsReady();
+      // Auto-ready disconnected players — they can't click the button themselves
+      for (const p of this.players.values()) {
+        if (!p.connected && !p.isBot) p.ready = true;
+      }
       const allReady = [...this.players.values()].every((p) => p.ready);
       if (this.players.size === this.settings.maxPlayers && allReady) this.resetForRematch();
       this.persist();
@@ -380,17 +399,40 @@ export class MatchRoom implements DurableObject {
       this.broadcastSnapshot();
       return;
     }
+    if (msg.t === "pick_up") {
+      if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
+      this.advanceMovement(now);
+      if (msg.pos) player.pos = clampPos(msg.pos);
+      this.pickUpCargo(player, now);
+      return;
+    }
+    if (msg.t === "sell_cargo") {
+      if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
+      this.advanceMovement(now);
+      if (msg.pos) player.pos = clampPos(msg.pos);
+      this.sellCargo(player, now);
+      return;
+    }
     if (msg.t === "action") {
       if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
       this.advanceMovement(now);
       if (msg.pos) player.pos = clampPos(msg.pos);
       if (msg.dir) player.dir = msg.dir;
-      this.resolvePlayerAction(player, now);
+      if (this.settings.mode === "2v2" && player.role === "seller") {
+        if (player.carryingCargo) this.sellCargo(player, now);
+        else this.pickUpCargo(player, now);
+      } else {
+        this.resolvePlayerAction(player, now);
+      }
       return;
     }
   }
 
   private resolvePlayerAction(player: PlayerState, now: number): void {
+    if (this.settings.mode === "2v2") {
+      this.resolveTeamPlayerAction(player, now);
+      return;
+    }
     const playerId = player.id;
     player.lastActionAt = now;
     if (player.tool === "seed" && !isSelectedCrop(player.seedChoice, player.selectedCrops)) {
@@ -475,6 +517,199 @@ export class MatchRoom implements DurableObject {
       this.broadcast({ t: "events", events: this.pendingEvents });
       this.pendingEvents = [];
     }
+  }
+
+  private resolveTeamPlayerAction(player: PlayerState, now: number): void {
+    player.lastActionAt = now;
+    if (player.role !== "farmer") return;
+    const team = player.teamId ? this.teams.find((t) => t.id === player.teamId) : undefined;
+    if (!team) return;
+    if (player.tool === "seed" && !isSelectedCrop(player.seedChoice, player.selectedCrops)) {
+      player.seedChoice = normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds())[0];
+    }
+    const result = applyAction({
+      tiles: player.tiles,
+      coins: team.coins,
+      pos: player.pos,
+      dir: player.dir,
+      tool: player.tool,
+      seedChoice: player.seedChoice,
+      marketPrices: this.marketPrices,
+      harvestCreditsCoins: false,
+      now,
+    });
+    player.tiles = result.tiles;
+    team.coins = result.coins;
+    const changed = result.events.length > 0;
+    for (const teammate of this.players.values()) {
+      if (teammate.teamId === player.teamId && teammate.id !== player.id) {
+        teammate.tiles = player.tiles;
+      }
+    }
+    for (const ev of result.events) {
+      if (ev.kind === "harvest") {
+        player.stats.harvests += 1;
+        player.stats.cropHarvests[ev.cropId] += 1;
+        const cargo: Cargo = {
+          id: crypto.randomUUID(),
+          cropId: ev.cropId,
+          position: { x: ev.x, y: ev.y },
+          ownerPlayerId: player.id,
+          teamId: team.id,
+          baseReward: ev.reward,
+          createdAt: now,
+        };
+        this.fieldCargo.push(cargo);
+        this.pendingEvents.push({ kind: "cargo_created", playerId: player.id, cargo });
+        this.updateMarketAfterHarvest(ev.cropId);
+      } else {
+        this.pendingEvents.push({ ...ev, playerId: player.id });
+      }
+    }
+    this.mirrorTeamCoinsToPlayers();
+    this.checkTeamRaceWin();
+    if (this.status !== "ended") {
+      if (changed) this.persist();
+      this.broadcastSnapshot();
+    }
+    this.flushEvents();
+  }
+
+  private pickUpCargo(player: PlayerState, now: number): void {
+    player.lastActionAt = now;
+    if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
+    if (player.carryingCargo) return;
+    const idx = this.fieldCargo.findIndex(
+      (cargo) =>
+        cargo.teamId === player.teamId &&
+        Math.hypot(cargo.position.x - player.pos.x, cargo.position.y - player.pos.y) <= 1.5,
+    );
+    if (idx < 0) return;
+    const [cargo] = this.fieldCargo.splice(idx, 1);
+    player.carryingCargo = cargo;
+    this.pendingEvents.push({ kind: "cargo_picked_up", playerId: player.id, cargoId: cargo.id });
+    this.persist();
+    this.broadcastSnapshot();
+    this.flushEvents();
+  }
+
+  private sellCargo(player: PlayerState, now: number): void {
+    player.lastActionAt = now;
+    if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
+    const cargo = player.carryingCargo;
+    if (!cargo) return;
+    if (Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) > 1.5)
+      return;
+    const team = this.teams.find((t) => t.id === player.teamId);
+    if (!team) return;
+    const distance = Math.hypot(
+      cargo.position.x - MARKET_TILE_POS.x,
+      cargo.position.y - MARKET_TILE_POS.y,
+    );
+    const reward = Math.round(cargo.baseReward * (1 + 0.1 * distance));
+    team.coins += reward;
+    player.stats.coinsEarned += reward;
+    player.carryingCargo = undefined;
+    this.mirrorTeamCoinsToPlayers();
+    this.pendingEvents.push({
+      kind: "cargo_sold",
+      playerId: player.id,
+      teamId: team.id,
+      cargoId: cargo.id,
+      reward,
+      distance,
+    });
+    this.checkTeamRaceWin();
+    if (this.status !== "ended") {
+      this.persist();
+      this.broadcastSnapshot();
+    }
+    this.flushEvents();
+  }
+
+  private flushEvents(): void {
+    if (!this.pendingEvents.length) return;
+    this.broadcast({ t: "events", events: this.pendingEvents });
+    this.pendingEvents = [];
+  }
+
+  private updateMarketAfterHarvest(cropId: CropId): void {
+    const basePrice = CROPS[cropId].sellPrice;
+    const currentPrice = this.marketPrices[cropId];
+    const safeCurrentPrice =
+      typeof currentPrice === "number" && Number.isFinite(currentPrice) ? currentPrice : basePrice;
+    this.marketPrices[cropId] = Math.max(basePrice * 0.5, safeCurrentPrice - basePrice * 0.1);
+    for (const cId of Object.keys(this.marketPrices) as CropId[]) {
+      if (cId === cropId) continue;
+      const otherBase = CROPS[cId].sellPrice;
+      const otherCurrent = this.marketPrices[cId];
+      const safeOtherCurrent =
+        typeof otherCurrent === "number" && Number.isFinite(otherCurrent)
+          ? otherCurrent
+          : otherBase;
+      this.marketPrices[cId] = Math.min(otherBase * 1.2, safeOtherCurrent + otherBase * 0.03);
+    }
+  }
+
+  private syncTeamsAndRoles(resetCoins = false): void {
+    if (this.settings.mode !== "2v2") {
+      this.teams = [];
+      this.fieldCargo = [];
+      for (const player of this.players.values()) {
+        player.teamId = undefined;
+        player.role = undefined;
+        player.carryingCargo = undefined;
+      }
+      return;
+    }
+
+    const players = [...this.players.values()];
+    const existingCoins = new Map(this.teams.map((team) => [team.id, team.coins]));
+    this.teams = [
+      {
+        id: "A",
+        name: "Team A",
+        playerIds: players.slice(0, 2).map((p) => p.id),
+        coins: resetCoins ? 50 : (existingCoins.get("A") ?? 50),
+      },
+      {
+        id: "B",
+        name: "Team B",
+        playerIds: players.slice(2, 4).map((p) => p.id),
+        coins: resetCoins ? 50 : (existingCoins.get("B") ?? 50),
+      },
+    ];
+    for (const [idx, player] of players.entries()) {
+      player.teamId = idx < 2 ? "A" : "B";
+      player.role = idx % 2 === 0 ? "farmer" : "seller";
+      if (player.role !== "seller") player.carryingCargo = undefined;
+    }
+    this.mirrorTeamCoinsToPlayers();
+  }
+
+  private mirrorTeamCoinsToPlayers(): void {
+    if (this.settings.mode !== "2v2") return;
+    for (const player of this.players.values()) {
+      const team = player.teamId ? this.teams.find((t) => t.id === player.teamId) : undefined;
+      if (team) player.coins = team.coins;
+    }
+  }
+
+  private checkTeamRaceWin(): void {
+    if (this.settings.mode !== "2v2") return;
+    const winner = this.teams.find((team) => team.coins >= this.settings.targetCoins);
+    if (winner) this.endMatchTeam(winner.id, "race");
+  }
+
+  private spawnPosForSlot(slot: number): { x: number; y: number } {
+    if (this.settings.mode !== "2v2") return { x: slot === 0 ? 3 : 8, y: 4 };
+    const spots = [
+      { x: 3, y: 3 },
+      { x: 4, y: 4 },
+      { x: 8, y: 3 },
+      { x: 9, y: 4 },
+    ];
+    return spots[slot] ?? { x: 6, y: 4 };
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {
@@ -573,6 +808,7 @@ export class MatchRoom implements DurableObject {
     this.startedAt = stored.startedAt;
     this.endsAt = stored.endsAt;
     this.winnerId = stored.winnerId;
+    this.winnerTeamId = stored.winnerTeamId;
     this.endedReason = stored.endedReason;
     this.recap = stored.recap;
     this.hostId = stored.hostId;
@@ -606,7 +842,10 @@ export class MatchRoom implements DurableObject {
         },
       ]),
     );
+    this.teams = normalizeTeams(stored.teams);
+    this.fieldCargo = normalizeCargo(stored.fieldCargo);
     this.marketPrices = normalizeMarketPrices(stored.marketPrices);
+    if (this.settings.mode === "2v2") this.syncTeamsAndRoles(false);
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
       this.wsToRole.set(ws, att?.role ?? "player");
@@ -650,12 +889,15 @@ export class MatchRoom implements DurableObject {
         startedAt: this.startedAt,
         endsAt: this.endsAt,
         winnerId: this.winnerId,
+        winnerTeamId: this.winnerTeamId,
         endedReason: this.endedReason,
         recap: this.recap,
         hostId: this.hostId,
         hostSessionId: this.hostSessionId,
         settings: this.settings,
         players,
+        teams: this.teams,
+        fieldCargo: this.fieldCargo,
         marketPrices: this.marketPrices,
         banTurnPlayerId: this.banTurnPlayerId,
         roomClosesAt: this.roomClosesAt,
@@ -713,10 +955,11 @@ export class MatchRoom implements DurableObject {
   }
 
   private dropDisconnectedWaitingPlayers(): void {
-    if (this.status === "playing") return;
+    if (this.status === "playing" || this.status === "ended") return;
     for (const [id, player] of this.players) {
       if (!player.connected) this.players.delete(id);
     }
+    this.syncTeamsAndRoles();
     this.ensureHost();
   }
 
@@ -758,6 +1001,7 @@ export class MatchRoom implements DurableObject {
       }
     }
     this.ensureHost();
+    this.syncTeamsAndRoles();
     for (const player of this.players.values()) player.ready = false;
     this.persist();
     this.broadcastSnapshot();
@@ -778,7 +1022,7 @@ export class MatchRoom implements DurableObject {
     }
     const playerId = crypto.randomUUID();
     const sessionId = `bot:${crypto.randomUUID()}`;
-    const startX = this.players.size === 0 ? 3 : 8;
+    const spawn = this.spawnPosForSlot(this.players.size);
     const used = new Set([...this.players.values()].filter((p) => p.isBot).map((p) => p.name));
     const name = BOT_NAMES.find((n) => !used.has(n)) ?? "บอท";
     this.players.set(playerId, {
@@ -787,7 +1031,7 @@ export class MatchRoom implements DurableObject {
       name,
       cosmetics: BOT_COSMETICS,
       coins: 50,
-      pos: { x: startX, y: 4 },
+      pos: spawn,
       dir: "down",
       tool: "hoe",
       seedChoice: DEFAULT_SELECTED_CROPS[0],
@@ -807,6 +1051,7 @@ export class MatchRoom implements DurableObject {
       isBot: true,
       botSeedRotation: 0,
     });
+    this.syncTeamsAndRoles();
     for (const p of this.players.values()) p.ready = false;
     this.persist();
     this.broadcastSnapshot();
@@ -823,6 +1068,7 @@ export class MatchRoom implements DurableObject {
       return;
     }
     this.players.delete(targetId);
+    this.syncTeamsAndRoles();
     for (const p of this.players.values()) p.ready = false;
     this.persist();
     this.broadcastSnapshot();
@@ -848,6 +1094,7 @@ export class MatchRoom implements DurableObject {
       return;
     }
     this.settings = settings.data;
+    this.syncTeamsAndRoles();
     for (const p of this.players.values()) p.ready = false;
     this.persist();
     this.broadcastSnapshot();
@@ -878,7 +1125,7 @@ export class MatchRoom implements DurableObject {
     const att = ws.deserializeAttachment() as SocketAttachment | null;
     const playerId = crypto.randomUUID();
     const sessionId = att?.sessionId ?? crypto.randomUUID();
-    const startX = this.players.size === 0 ? 3 : 8;
+    const spawn = this.spawnPosForSlot(this.players.size);
     const cosmetics = cosmeticsSchema.parse(att?.cosmetics ?? DEFAULT_COSMETICS);
     if (!this.hostSessionId) this.hostSessionId = sessionId;
     if (this.hostSessionId === sessionId) this.hostId = playerId;
@@ -888,7 +1135,7 @@ export class MatchRoom implements DurableObject {
       name: att?.name ?? "Player",
       cosmetics,
       coins: 50,
-      pos: { x: startX, y: 4 },
+      pos: spawn,
       dir: "down",
       tool: "hoe",
       seedChoice: DEFAULT_SELECTED_CROPS[0],
@@ -906,6 +1153,7 @@ export class MatchRoom implements DurableObject {
       lastHarvestAt: 0,
       comboCrops: [],
     });
+    this.syncTeamsAndRoles();
     ws.serializeAttachment({
       playerId,
       sessionId,
@@ -949,6 +1197,7 @@ export class MatchRoom implements DurableObject {
     const name = player?.name ?? "Player";
     const cosmetics = cosmeticsSchema.parse(player?.cosmetics ?? DEFAULT_COSMETICS);
     this.players.delete(playerId);
+    this.syncTeamsAndRoles();
     this.wsToPlayer.set(ws, spectatorId);
     this.wsToRole.set(ws, "spectator");
     ws.serializeAttachment({
@@ -1053,7 +1302,7 @@ export class MatchRoom implements DurableObject {
     } else if (this.players.size < this.settings.maxPlayers) {
       playerId = crypto.randomUUID();
       sessionId = crypto.randomUUID();
-      const startX = this.players.size === 0 ? 3 : 8;
+      const spawn = this.spawnPosForSlot(this.players.size);
       if (!this.hostSessionId) this.hostSessionId = sessionId;
       if (this.hostSessionId === sessionId) this.hostId = playerId;
       this.players.set(playerId, {
@@ -1062,7 +1311,7 @@ export class MatchRoom implements DurableObject {
         name,
         cosmetics: cosmeticsSchema.parse(cosmetics),
         coins: 50,
-        pos: { x: startX, y: 4 },
+        pos: spawn,
         dir: "down",
         tool: "hoe",
         seedChoice: DEFAULT_SELECTED_CROPS[0],
@@ -1090,6 +1339,7 @@ export class MatchRoom implements DurableObject {
       return;
     }
 
+    this.syncTeamsAndRoles();
     ws.serializeAttachment({ playerId, sessionId, role });
     this.wsToPlayer.set(ws, playerId);
     this.wsToRole.set(ws, role);
@@ -1174,8 +1424,8 @@ export class MatchRoom implements DurableObject {
         p.bannedCrop = undefined;
       }
     }
-    const nextPlayer = [...this.players.values()].find((p) => p.id !== player.id);
-    if (nextPlayer && !nextPlayer.ready) {
+    const nextPlayer = this.nextUnreadyBanPlayer(player.id);
+    if (nextPlayer) {
       this.banTurnPlayerId = nextPlayer.id;
       this.banEndsAt = Date.now() + CROP_BAN_MS;
       this.scheduleAlarm();
@@ -1184,6 +1434,20 @@ export class MatchRoom implements DurableObject {
     } else {
       this.maybeFastForwardCropBan();
     }
+  }
+
+  private nextUnreadyBanPlayer(afterPlayerId: string): PlayerState | undefined {
+    const players = [...this.players.values()];
+    if (!players.length) return undefined;
+    const start = Math.max(
+      0,
+      players.findIndex((p) => p.id === afterPlayerId),
+    );
+    for (let i = 1; i <= players.length; i++) {
+      const player = players[(start + i) % players.length];
+      if (!player.ready) return player;
+    }
+    return undefined;
   }
 
   private maybeFastForwardCropBan(): void {
@@ -1222,8 +1486,8 @@ export class MatchRoom implements DurableObject {
         }
       }
 
-      const nextPlayer = [...this.players.values()].find((p) => p.id !== activePlayer.id);
-      if (nextPlayer && !nextPlayer.ready) {
+      const nextPlayer = this.nextUnreadyBanPlayer(activePlayer.id);
+      if (nextPlayer) {
         this.banTurnPlayerId = nextPlayer.id;
         this.banEndsAt = Date.now() + CROP_BAN_MS;
         this.scheduleAlarm();
@@ -1296,14 +1560,19 @@ export class MatchRoom implements DurableObject {
     this.selectionEndsAt = undefined;
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = now;
-    for (const p of this.players.values()) {
-      p.coins = 50;
+    this.fieldCargo = [];
+    this.syncTeamsAndRoles(true);
+    for (const [idx, p] of [...this.players.values()].entries()) {
+      p.coins =
+        this.settings.mode === "2v2" && p.teamId
+          ? (this.teams.find((team) => team.id === p.teamId)?.coins ?? 50)
+          : 50;
       p.tiles = makeEmptyField();
       p.tool = "hoe";
       p.selectedCrops = fillSelectedCrops(p.selectedCrops, this.bannedCropIds());
       p.seedChoice = p.selectedCrops[0];
       p.dir = "down";
-      p.pos = { x: Math.round(p.pos.x), y: 4 };
+      p.pos = this.spawnPosForSlot(idx);
       p.disconnectedAt = undefined;
       p.stats = emptyStats();
       p.inputDir = undefined;
@@ -1405,6 +1674,11 @@ export class MatchRoom implements DurableObject {
     let moved = false;
     for (const bot of this.players.values()) {
       if (!bot.isBot) continue;
+      // 2v2 sellers run cargo logistics instead of farming.
+      if (this.settings.mode === "2v2" && bot.role === "seller") {
+        if (this.botSellerStep(bot, now)) moved = true;
+        continue;
+      }
       let plan = this.botPlans.get(bot.id);
       if (!plan || !isPlanValid(bot, plan)) {
         const next = chooseBotPlan(bot);
@@ -1439,6 +1713,50 @@ export class MatchRoom implements DurableObject {
     if (moved) this.dirty = true;
   }
 
+  /**
+   * Seller-bot logistics for 2v2: carry cargo to the market and sell it,
+   * otherwise hunt down the nearest team cargo crate and pick it up.
+   * Returns true if the bot moved this tick (so the caller marks state dirty).
+   */
+  private botSellerStep(bot: PlayerState, now: number): boolean {
+    const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+
+    // Pick a target: the market when carrying, else the nearest team cargo.
+    let target: { x: number; y: number } | undefined;
+    if (bot.carryingCargo) {
+      target = MARKET_TILE_POS;
+    } else {
+      let best: Cargo | undefined;
+      let bestDist = Infinity;
+      for (const cargo of this.fieldCargo) {
+        if (cargo.teamId !== bot.teamId) continue;
+        const d = Math.hypot(cargo.position.x - bot.pos.x, cargo.position.y - bot.pos.y);
+        if (d < bestDist) {
+          best = cargo;
+          bestDist = d;
+        }
+      }
+      target = best?.position;
+    }
+    if (!target) return false; // nothing to do — wait for the farmer to harvest
+
+    const dx = target.x - bot.pos.x;
+    const dy = target.y - bot.pos.y;
+    const dist = Math.hypot(dx, dy);
+    if (dist > 1.0) {
+      bot.pos.x += Math.max(-step, Math.min(step, dx));
+      bot.pos.y += Math.max(-step, Math.min(step, dy));
+      bot.dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? "right" : "left") : dy > 0 ? "down" : "up";
+      return true;
+    }
+
+    // Within reach: act. pick_up/sell_cargo validate role+distance themselves.
+    if (now - bot.lastActionAt < ACTION_COOLDOWN_MS) return false;
+    if (bot.carryingCargo) this.sellCargo(bot, now);
+    else this.pickUpCargo(bot, now);
+    return false;
+  }
+
   private tickSnapshot(): void {
     if (this.status !== "playing") return;
     const now = Date.now();
@@ -1460,11 +1778,33 @@ export class MatchRoom implements DurableObject {
     const now = Date.now();
     let changed = false;
     for (const p of this.players.values()) {
+      if (this.settings.mode === "2v2" && p.role === "seller") continue;
       const res = tickGrowth(p.tiles, now);
       if (res.changed) {
         p.tiles = res.tiles;
         changed = true;
+        if (this.settings.mode === "2v2") {
+          for (const teammate of this.players.values()) {
+            if (teammate.teamId === p.teamId && teammate.id !== p.id) teammate.tiles = p.tiles;
+          }
+        }
       }
+    }
+    const freshCargo = this.fieldCargo.filter((cargo) => now - cargo.createdAt <= CARGO_TTL_MS);
+    if (freshCargo.length !== this.fieldCargo.length) {
+      for (const cargo of this.fieldCargo) {
+        if (now - cargo.createdAt > CARGO_TTL_MS) {
+          this.pendingEvents.push({
+            kind: "cargo_spoiled",
+            playerId: cargo.ownerPlayerId,
+            cargoId: cargo.id,
+            x: cargo.position.x,
+            y: cargo.position.y,
+          });
+        }
+      }
+      this.fieldCargo = freshCargo;
+      changed = true;
     }
 
     // Market price recovery runs every 1 second
@@ -1493,6 +1833,12 @@ export class MatchRoom implements DurableObject {
   }
 
   private endByTimeout(): void {
+    if (this.settings.mode === "2v2") {
+      const bestCoins = Math.max(...this.teams.map((team) => team.coins));
+      const winners = this.teams.filter((team) => team.coins === bestCoins);
+      this.endMatchTeam(winners.length === 1 ? winners[0].id : undefined, "timeout");
+      return;
+    }
     const players = [...this.players.values()];
     const bestCoins = Math.max(...players.map((p) => p.coins));
     const winners = players.filter((p) => p.coins === bestCoins);
@@ -1504,6 +1850,17 @@ export class MatchRoom implements DurableObject {
       (p) => !p.connected && p.disconnectedAt && now - p.disconnectedAt >= RECONNECT_GRACE_MS,
     );
     if (!expired.length) return false;
+    if (this.settings.mode === "2v2") {
+      const expiredTeams = new Set(expired.map((p) => p.teamId).filter(Boolean));
+      for (const teamId of expiredTeams) {
+        const teamPlayers = [...this.players.values()].filter((p) => p.teamId === teamId);
+        if (teamPlayers.length && teamPlayers.every((p) => !p.connected)) {
+          this.endMatchTeam(teamId === "A" ? "B" : "A", "forfeit");
+          return true;
+        }
+      }
+      return false;
+    }
     const connected = [...this.players.values()].filter((p) => p.connected);
     this.endMatch(connected.length === 1 ? connected[0].id : undefined, "forfeit");
     return true;
@@ -1526,6 +1883,15 @@ export class MatchRoom implements DurableObject {
     };
   }
 
+  private endMatchTeam(
+    winnerTeamId: TeamId | undefined,
+    reason: "race" | "timeout" | "forfeit" | "kick",
+  ): void {
+    if (this.status === "ended") return;
+    this.winnerTeamId = winnerTeamId;
+    this.endMatch(undefined, reason);
+  }
+
   private endMatch(
     winnerId: string | undefined,
     reason: "race" | "timeout" | "forfeit" | "kick",
@@ -1533,6 +1899,7 @@ export class MatchRoom implements DurableObject {
     if (this.status === "ended") return;
     this.status = "ended";
     this.winnerId = winnerId;
+    if (this.settings.mode !== "2v2") this.winnerTeamId = undefined;
     this.endedReason = reason;
     this.recap = this.buildRecap(Date.now());
     if (this.snapshotTimer) {
@@ -1575,6 +1942,7 @@ export class MatchRoom implements DurableObject {
   private resetForRematch(): void {
     this.status = "lobby";
     this.winnerId = undefined;
+    this.winnerTeamId = undefined;
     this.endedReason = undefined;
     this.recap = undefined;
     this.startedAt = undefined;
@@ -1586,6 +1954,8 @@ export class MatchRoom implements DurableObject {
     this.roomClosesAt = undefined;
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = 0;
+    this.fieldCargo = [];
+    this.syncTeamsAndRoles(true);
     for (const p of this.players.values()) {
       p.ready = false;
       p.coins = 50;
@@ -1610,6 +1980,9 @@ export class MatchRoom implements DurableObject {
       id: p.id,
       name: p.name,
       coins: p.coins,
+      teamId: p.teamId,
+      role: p.role,
+      carryingCargo: p.carryingCargo,
       pos: p.pos,
       dir: p.dir,
       tool: p.tool,
@@ -1635,9 +2008,12 @@ export class MatchRoom implements DurableObject {
       startedAt: this.startedAt,
       endsAt: this.endsAt,
       winnerId: this.winnerId,
+      winnerTeamId: this.winnerTeamId,
       endedReason: this.endedReason,
       recap: this.recap,
       players,
+      teams: this.settings.mode === "2v2" ? this.teams : undefined,
+      fieldCargo: this.settings.mode === "2v2" ? this.fieldCargo : undefined,
       marketPrices: this.marketPrices,
       banTurnPlayerId: this.banTurnPlayerId,
       spectatorCount: this.spectatorCount(),
@@ -1664,7 +2040,7 @@ export class MatchRoom implements DurableObject {
           }
         } else if (baseState.status === "crop_selection") {
           opponent.selectedCrops = [];
-          opponent.seedChoice = undefined as any;
+          opponent.seedChoice = firstAllowedCrop(this.bannedCropIds());
         }
         return opponent;
       }),
@@ -1898,6 +2274,36 @@ function normalizeMarketPrices(raw?: Partial<Record<CropId, number>>): Record<Cr
     if (typeof price === "number" && Number.isFinite(price)) fallback[id] = price;
   }
   return fallback;
+}
+
+function normalizeTeams(raw?: MatchTeam[]): MatchTeam[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((team) => (team.id === "A" || team.id === "B") && Number.isFinite(team.coins))
+    .map((team) => ({
+      id: team.id,
+      name: team.name || `Team ${team.id}`,
+      playerIds: Array.isArray(team.playerIds) ? team.playerIds.filter(Boolean) : [],
+      coins: team.coins,
+    }));
+}
+
+function normalizeCargo(raw?: Cargo[]): Cargo[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter(
+    (cargo) =>
+      cargo &&
+      isCropId(cargo.cropId) &&
+      (cargo.teamId === "A" || cargo.teamId === "B") &&
+      typeof cargo.id === "string" &&
+      typeof cargo.ownerPlayerId === "string" &&
+      typeof cargo.baseReward === "number" &&
+      Number.isFinite(cargo.baseReward) &&
+      typeof cargo.createdAt === "number" &&
+      Number.isFinite(cargo.createdAt) &&
+      typeof cargo.position?.x === "number" &&
+      typeof cargo.position?.y === "number",
+  );
 }
 
 function isCropId(id: unknown): id is CropId {

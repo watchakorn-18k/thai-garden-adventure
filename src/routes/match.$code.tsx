@@ -1,10 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import MultiplayerGame from "@/components/MultiplayerGame";
-import type { MatchRole } from "@/lib/match-protocol";
+import type { MatchModeSetting, MatchRole } from "@/lib/match-protocol";
 
 export const Route = createFileRoute("/match/$code")({
-  validateSearch: (search: Record<string, unknown>): { role: MatchRole } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { role: MatchRole; mode?: MatchModeSetting } => ({
     role: search.role === "player" ? "player" : "spectator",
+    mode: search.mode === "2v2" ? "2v2" : search.mode === "1v1" ? "1v1" : undefined,
   }),
   head: ({ params }) => {
     const title = `ห้องแข่ง ${params.code} — สวนผักไทย 1v1`;
@@ -31,6 +34,6 @@ export const Route = createFileRoute("/match/$code")({
 
 function MatchPage() {
   const { code } = Route.useParams();
-  const { role } = Route.useSearch();
-  return <MultiplayerGame code={code} role={role} />;
+  const { role, mode } = Route.useSearch();
+  return <MultiplayerGame code={code} role={role} desiredMode={mode} />;
 }

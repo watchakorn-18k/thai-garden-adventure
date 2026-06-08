@@ -996,8 +996,13 @@ export default function FarmGame() {
               <QuickMatchButton label="จับคู่ด่วน" className="pixel-btn cta-quick-match" />
             </span>
             <span className="cta-btn-bob" data-delay="true">
-              <a href="/lobby" className="pixel-btn cta-1v1-link">
+              <a href="/lobby?mode=1v1" className="pixel-btn cta-1v1-link">
                 1V1
+              </a>
+            </span>
+            <span className="cta-btn-bob" data-delay="true">
+              <a href="/lobby?mode=2v2" className="pixel-btn cta-1v1-link">
+                2V2
               </a>
             </span>
           </div>

@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type Phaser from "phaser";
-import { COLS, CROPS, ROWS, type Direction } from "@/lib/game-types";
+import { COLS, CROPS, MARKET_TILE_POS, ROWS, type Cargo, type Direction } from "@/lib/game-types";
 import type { PublicPlayer, ServerEvent } from "@/lib/match-protocol";
 import {
   ART_GRID,
@@ -41,6 +41,10 @@ interface Props {
   acting: boolean;
   predictedDir?: Direction | null;
   isSelf?: boolean;
+  cargo?: Cargo[];
+  showMarket?: boolean;
+  /** 2v2: other players sharing this plot, drawn as secondary sprites. */
+  teammates?: PublicPlayer[];
 }
 
 function hexNum(hex: string): number {
@@ -66,6 +70,9 @@ export default function PhaserField({
   acting,
   predictedDir,
   isSelf = false,
+  cargo,
+  showMarket = false,
+  teammates,
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<FieldScene | null>(null);
@@ -76,10 +83,16 @@ export default function PhaserField({
   const actingRef = useRef(acting);
   const predictedDirRef = useRef<Direction | null>(predictedDir ?? null);
   const isSelfRef = useRef(isSelf);
+  const cargoRef = useRef<Cargo[]>(cargo ?? []);
+  const showMarketRef = useRef(showMarket);
+  const teammatesRef = useRef<PublicPlayer[]>(teammates ?? []);
   playerRef.current = player;
   actingRef.current = acting;
   predictedDirRef.current = predictedDir ?? null;
   isSelfRef.current = isSelf;
+  cargoRef.current = cargo ?? [];
+  showMarketRef.current = showMarket;
+  teammatesRef.current = teammates ?? [];
 
   useEffect(() => {
     let game: Phaser.Game | null = null;
@@ -92,9 +105,17 @@ export default function PhaserField({
       class Scene extends PhaserLib.Scene {
         private tileG!: Phaser.GameObjects.Graphics;
         private cropG!: Phaser.GameObjects.Graphics;
+        private marketG!: Phaser.GameObjects.Graphics;
+        private cargoG!: Phaser.GameObjects.Graphics;
         private markerG!: Phaser.GameObjects.Graphics;
+        private teammateG!: Phaser.GameObjects.Graphics;
+        private teammateNameG: Phaser.GameObjects.Text[] = [];
+        // teammate display positions, smoothed toward their server position
+        private teammateDisp = new Map<string, { x: number; y: number }>();
         private farmerG!: Phaser.GameObjects.Graphics;
         private toolG!: Phaser.GameObjects.Graphics;
+        // signature of the last drawn cargo layout; skip redraw when unchanged
+        private lastCargoSig = "";
         private sparkles: Phaser.GameObjects.Arc[] = [];
         // farmer display position in tile units (float for interpolation)
         private disp = { x: 0, y: 0 };
@@ -124,7 +145,10 @@ export default function PhaserField({
         create() {
           this.tileG = this.add.graphics();
           this.cropG = this.add.graphics();
+          this.marketG = this.add.graphics();
+          this.cargoG = this.add.graphics();
           this.markerG = this.add.graphics();
+          this.teammateG = this.add.graphics();
           this.farmerG = this.add.graphics();
           this.toolG = this.add.graphics();
 
@@ -155,9 +179,132 @@ export default function PhaserField({
           this.target = { x: p.pos.x, y: p.pos.y };
           this.lastSig = this.tileSignature();
           this.redrawTiles();
+          this.drawMarket();
+          this.drawCargo();
           this.drawMarker();
+          this.drawTeammates();
           this.drawFarmer();
           sceneRef.current = this as unknown as FieldScene;
+        }
+
+        /** Market stall — only shown in 2v2; the seller delivers cargo here. */
+        drawMarket() {
+          this.marketG.clear();
+          if (!showMarketRef.current) return;
+          const px = MARKET_TILE_POS.x * TILE;
+          const py = MARKET_TILE_POS.y * TILE;
+          const g = this.marketG;
+          // stall pad
+          g.fillStyle(0x3a2418, 1);
+          g.fillRect(px + 4, py + 4, TILE - 8, TILE - 8);
+          g.fillStyle(0x5a2f17, 1);
+          g.fillRect(px + 6, py + TILE - 16, TILE - 12, 10);
+          // striped awning
+          for (let i = 0; i < 4; i++) {
+            g.fillStyle(i % 2 === 0 ? 0xff8fb1 : 0xfff1d6, 1);
+            g.fillRect(px + 6 + i * 11, py + 8, 11, 8);
+          }
+          g.fillStyle(0x1a0f1f, 1);
+          g.fillRect(px + 6, py + 16, TILE - 12, 2);
+          // coin marker
+          g.fillStyle(0xffd24a, 1);
+          g.fillRect(px + TILE / 2 - 5, py + 24, 10, 10);
+          g.fillStyle(0xd99b1f, 1);
+          g.fillRect(px + TILE / 2 - 2, py + 27, 4, 4);
+          // pulsing outline so sellers can spot it
+          g.lineStyle(2, 0xffd24a, 0.8);
+          g.strokeRect(px + 2.5, py + 2.5, TILE - 5, TILE - 5);
+        }
+
+        cargoSignature(): string {
+          return cargoRef.current.map((c) => `${c.id}:${c.position.x},${c.position.y}`).join("|");
+        }
+
+        /** Harvested-but-unsold crates sitting on the field, waiting for a seller. */
+        drawCargo() {
+          this.cargoG.clear();
+          this.lastCargoSig = this.cargoSignature();
+          for (const c of cargoRef.current) {
+            const px = c.position.x * TILE;
+            const py = c.position.y * TILE;
+            const g = this.cargoG;
+            // crate body
+            g.fillStyle(0x8a5a2b, 1);
+            g.fillRect(px + 16, py + 22, 24, 20);
+            g.fillStyle(0x6b421d, 1);
+            g.fillRect(px + 16, py + 36, 24, 6);
+            // slats
+            g.lineStyle(2, 0x3a2410, 1);
+            g.strokeRect(px + 16.5, py + 22.5, 23, 19);
+            g.lineBetween(px + 28, py + 22, px + 28, py + 42);
+            g.lineBetween(px + 16, py + 32, px + 40, py + 32);
+            // crop tuft on top
+            drawRects(this.cargoG, cropRects(c.cropId, 2), px, py - 14);
+          }
+        }
+
+        /**
+         * Draw the teammates sharing this plot. Their positions are smoothed each
+         * frame toward the latest server position so they glide instead of snap.
+         */
+        drawTeammates() {
+          const mates = teammatesRef.current;
+          this.teammateG.clear();
+          // Recycle name labels: ensure one Text per teammate.
+          while (this.teammateNameG.length < mates.length) {
+            this.teammateNameG.push(
+              this.add
+                .text(0, 0, "", {
+                  fontFamily: PIXEL_FONT,
+                  fontSize: "7px",
+                  color: "#f4e4c1",
+                  stroke: "#000000",
+                  strokeThickness: 3,
+                })
+                .setOrigin(0.5, 1)
+                .setDepth(12),
+            );
+          }
+          for (let i = mates.length; i < this.teammateNameG.length; i++) {
+            this.teammateNameG[i].setVisible(false);
+          }
+
+          const liveIds = new Set(mates.map((m) => m.id));
+          for (const id of [...this.teammateDisp.keys()]) {
+            if (!liveIds.has(id)) this.teammateDisp.delete(id);
+          }
+
+          mates.forEach((mate, idx) => {
+            const disp = this.teammateDisp.get(mate.id) ?? { x: mate.pos.x, y: mate.pos.y };
+            this.teammateDisp.set(mate.id, disp);
+
+            const baseX = disp.x * TILE;
+            const baseY = disp.y * TILE - 10;
+            const flip = mate.dir === "left";
+            const rects = farmerRects({
+              direction: mate.dir,
+              swing: 0,
+              acting: false,
+              tool: mate.tool,
+              cosmetics: mate.cosmetics,
+            });
+            const s = TILE / ART_GRID;
+            for (const [rx, ry, rw, rh, color] of rects) {
+              this.teammateG.fillStyle(hexNum(color), 1);
+              const mx = flip ? ART_GRID - rx - rw : rx;
+              this.teammateG.fillRect(baseX + mx * s, baseY + ry * s, rw * s, rh * s);
+            }
+            // Cargo a seller is carrying rides above their head.
+            if (mate.carryingCargo) {
+              drawRects(this.teammateG, cropRects(mate.carryingCargo.cropId, 2), baseX, baseY - 16);
+            }
+
+            const label = this.teammateNameG[idx];
+            const roleIcon = mate.role === "seller" ? "🛒" : "🌱";
+            label.setText(`${roleIcon}${mate.name}`);
+            label.setPosition(baseX + TILE / 2, baseY);
+            label.setVisible(true);
+          });
         }
 
         /** Cheap rolling hash of the tile/crop layout to detect changes. */
@@ -385,6 +532,7 @@ export default function PhaserField({
             this.lastSig = sig;
             this.redrawTiles();
           }
+          if (this.cargoSignature() !== this.lastCargoSig) this.drawCargo();
           this.target = { x: p.pos.x, y: p.pos.y };
           // Snap on large desync (reconnect / teleport) instead of a long glide.
           if (Math.abs(this.disp.x - p.pos.x) > 1.5 || Math.abs(this.disp.y - p.pos.y) > 1.5) {
@@ -397,6 +545,11 @@ export default function PhaserField({
         /** Redraw just the farmer (e.g. tool/acting pose changed without a snapshot). */
         refreshFarmer() {
           this.drawFarmer();
+        }
+
+        /** Force a teammate redraw when their props (tool/role/cargo) change. */
+        applyTeammates() {
+          this.drawTeammates();
         }
 
         setPredictedDir(dir: Direction | null) {
@@ -446,7 +599,35 @@ export default function PhaserField({
           });
         }
 
+        /** Glide each teammate sprite toward its latest server position. */
+        updateTeammates(delta: number) {
+          const mates = teammatesRef.current;
+          if (!mates.length && !this.teammateDisp.size) return;
+          const k = 1 - Math.exp(-delta / MOVE_TAU);
+          let moved = false;
+          for (const mate of mates) {
+            const disp = this.teammateDisp.get(mate.id);
+            if (!disp) {
+              moved = true;
+              continue;
+            }
+            const dx = mate.pos.x - disp.x;
+            const dy = mate.pos.y - disp.y;
+            if (Math.abs(dx) > 1.5 || Math.abs(dy) > 1.5) {
+              disp.x = mate.pos.x;
+              disp.y = mate.pos.y;
+              moved = true;
+            } else if (Math.abs(dx) > 0.002 || Math.abs(dy) > 0.002) {
+              disp.x += dx * k;
+              disp.y += dy * k;
+              moved = true;
+            }
+          }
+          if (moved) this.drawTeammates();
+        }
+
         override update(time: number, delta: number) {
+          this.updateTeammates(delta);
           const predictedDir = predictedDirRef.current;
           const p = playerRef.current;
           if (predictedDir) p.dir = predictedDir;
@@ -534,6 +715,11 @@ export default function PhaserField({
     sceneRef.current?.applyPlayer();
   }, [player]);
 
+  // Redraw teammate sprites when their props change (tool, role, cargo, roster).
+  useEffect(() => {
+    sceneRef.current?.applyTeammates();
+  }, [teammates]);
+
   // Apply local movement direction immediately for the controlled player.
   useEffect(() => {
     sceneRef.current?.setPredictedDir(predictedDir ?? null);
@@ -577,6 +763,7 @@ export default function PhaserField({
 // Minimal structural type for the scene methods React calls.
 interface FieldScene {
   applyPlayer(): void;
+  applyTeammates(): void;
   refreshFarmer(): void;
   setPredictedDir(dir: Direction | null): void;
   spawnEvent(ev: ServerEvent): void;
