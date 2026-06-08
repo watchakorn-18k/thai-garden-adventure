@@ -77,10 +77,8 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:url", content: "https://garden-game.wk18k.qzz.io" },
       {
         property: "og:image",
-        content: "https://garden-game.wk18k.qzz.io/og-image.png",
+        content: "https://garden-game.wk18k.qzz.io/og-image.gif",
       },
-      { property: "og:image:width", content: "1195" },
-      { property: "og:image:height", content: "937" },
       {
         property: "og:image:alt",
         content: "สวนผักไทย — Thai Farm Game",
@@ -89,7 +87,7 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { name: "twitter:site", content: "@watchakorn-18k" },
       {
         name: "twitter:image",
-        content: "https://garden-game.wk18k.qzz.io/og-image.png",
+        content: "https://garden-game.wk18k.qzz.io/og-image.gif",
       },
     ],
     links: [
