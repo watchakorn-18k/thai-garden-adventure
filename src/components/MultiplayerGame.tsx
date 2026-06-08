@@ -616,7 +616,9 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       if ((k === "space" || k === "enter") && !e.repeat && !puzzleActive) sendAction();
       if (
         k === "keyr" &&
-        (statusRef.current === "lobby" || statusRef.current === "crop_selection")
+        (statusRef.current === "lobby" ||
+          // Sellers are auto-ready in 2v2 crop selection — R does nothing for them.
+          (statusRef.current === "crop_selection" && selfPlayer?.role !== "seller"))
       ) {
         SFX.click();
         send({ t: "ready" });
@@ -1912,7 +1914,7 @@ function CropSelectionView({
   const is2v2Seller = state.settings.mode === "2v2" && self?.role === "seller";
 
   const toggleCrop = (id: CropId) => {
-    if (isSpectator || isLocked || !self) return;
+    if (isSpectator || isLocked || !self || is2v2Seller) return;
     if (bannedCrops.includes(id)) {
       SFX.bad();
       return;
@@ -1945,7 +1947,7 @@ function CropSelectionView({
           {isLocked
             ? "ล็อกผักแล้ว · เตรียมตัว 3, 2, 1"
             : is2v2Seller
-              ? "คนขายไม่ต้องเลือกเมล็ด · กด พร้อม เพื่อเริ่ม"
+              ? "คนขายพร้อมอัตโนมัติ · รอชาวสวนเลือกผักได้เลย"
               : `เลือกของตัวเอง ${selected.length}/${SELECTED_CROP_COUNT} แล้วกด พร้อม`}
         </p>
       </div>
@@ -2004,7 +2006,7 @@ function CropSelectionView({
               หน้าที่คุณคือวิ่งส่งของไปตลาด ไม่ต้องปลูกผัก
             </span>
             <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-              กด พร้อม ด้านล่างเพื่อเริ่มเกม
+              พร้อมอัตโนมัติแล้ว · รอชาวสวนเลือกผัก
             </span>
           </div>
         ) : (
@@ -2060,7 +2062,7 @@ function CropSelectionView({
                 key={crop.id}
                 type="button"
                 onClick={() => toggleCrop(crop.id)}
-                disabled={isSpectator || isLocked || banned}
+                disabled={isSpectator || isLocked || banned || is2v2Seller}
                 className="farm-crop-card pixel-btn text-left"
                 data-active={active ? "true" : undefined}
                 title={`${crop.name} · ซื้อ ${crop.seedCost} · ขาย ${crop.sellPrice}`}
@@ -2102,7 +2104,7 @@ function CropSelectionView({
             </span>
           ))}
         </div>
-        {!isSpectator && !isLocked && (
+        {!isSpectator && !isLocked && !is2v2Seller && (
           <button
             type="button"
             onClick={() => {
@@ -2111,7 +2113,7 @@ function CropSelectionView({
             }}
             className="pixel-btn lobby-ready-btn"
             data-accent={self?.ready ? undefined : "true"}
-            disabled={!is2v2Seller && selected.length !== SELECTED_CROP_COUNT}
+            disabled={selected.length !== SELECTED_CROP_COUNT}
           >
             <span className="font-pixel text-[12px]">{self?.ready ? "ยกเลิกพร้อม" : "พร้อม"}</span>
             <span className="font-pixel text-[8px] opacity-70">R</span>

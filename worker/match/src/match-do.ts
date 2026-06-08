@@ -313,10 +313,11 @@ export class MatchRoom implements DurableObject {
         return;
       }
       if (this.status === "crop_selection") {
+        // Sellers are auto-ready in 2v2 — ignore any ready toggle from them.
+        if (!this.requiresCropSelection(player)) return;
         if (
-          this.requiresCropSelection(player) &&
           normalizeSelectedCrops(player.selectedCrops, this.bannedCropIds()).length !==
-            DEFAULT_SELECTED_CROPS.length
+          DEFAULT_SELECTED_CROPS.length
         )
           return;
         player.ready = !player.ready;
@@ -368,6 +369,8 @@ export class MatchRoom implements DurableObject {
 
     if (msg.t === "select_crops") {
       if (this.status !== "crop_selection") return;
+      // Sellers don't pick crops in 2v2 — ignore so their auto-ready isn't cleared.
+      if (!this.requiresCropSelection(player)) return;
       const selected = normalizeSelectedCrops(msg.ids, this.bannedCropIds());
       if (selected.length > DEFAULT_SELECTED_CROPS.length) return;
       player.selectedCrops = selected;
@@ -1551,7 +1554,8 @@ export class MatchRoom implements DurableObject {
     this.selectionEndsAt = Date.now() + CROP_SELECTION_MS;
     const banned = this.bannedCropIds();
     for (const p of this.players.values()) {
-      p.ready = false;
+      // 2v2 sellers don't pick crops — auto-ready them so they need no input here.
+      p.ready = !this.requiresCropSelection(p);
       p.selectedCrops = [];
       p.seedChoice = firstAllowedCrop(banned);
       p.botNextActAt = undefined;
