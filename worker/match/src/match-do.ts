@@ -1278,6 +1278,20 @@ export class MatchRoom implements DurableObject {
     this.code = code;
     this.dropDisconnectedWaitingPlayers();
 
+    // A reconnecting client (page reload) re-sends the role from its URL. The
+    // lobby seeds that URL with role=spectator and claiming a seat never rewrites
+    // it, so a mid-match reload would request spectator even though the stored
+    // sessionId still owns a live player slot. Reclaim the slot instead of
+    // demoting the user (e.g. a 2v2 seller) to a spectator and stranding their
+    // slot as a disconnected ghost.
+    if (
+      role === "spectator" &&
+      sessionId !== undefined &&
+      [...this.players.values()].some((p) => p.sessionId === sessionId)
+    ) {
+      role = "player";
+    }
+
     if (role === "spectator") {
       if (this.spectatorCount() >= MAX_SPECTATORS) {
         this.sendTo(ws, {
