@@ -206,7 +206,15 @@ export class MatchRoom implements DurableObject {
     const msg = parsed.data;
 
     if (msg.t === "join") {
-      this.handleJoin(ws, msg.code, msg.name, msg.sessionId, msg.role ?? "player", msg.cosmetics, msg.userId);
+      this.handleJoin(
+        ws,
+        msg.code,
+        msg.name,
+        msg.sessionId,
+        msg.role ?? "player",
+        msg.cosmetics,
+        msg.userId,
+      );
       return;
     }
 
@@ -280,7 +288,15 @@ export class MatchRoom implements DurableObject {
 
     if (msg.t === "ready") {
       if (this.status === "lobby") {
-        if (this.isHostSocket(ws) && this.players.size === this.settings.maxPlayers) {
+        if (this.players.size < this.settings.maxPlayers) {
+          // If room not full, un-ready everyone
+          for (const p of this.players.values()) p.ready = false;
+          this.sendTo(ws, {
+            t: "error",
+            code: "room_not_full",
+            message: "ต้องมีผู้เล่นครบก่อนจึงจะกดพร้อมได้",
+          });
+        } else if (this.isHostSocket(ws)) {
           for (const p of this.players.values()) p.ready = true;
         } else {
           player.ready = !player.ready;
@@ -419,14 +435,12 @@ export class MatchRoom implements DurableObject {
       return;
     }
     if (msg.t === "sell_cargo") {
-      if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
       this.advanceMovement(now);
       if (msg.pos) player.pos = clampPos(msg.pos);
       this.sellCargo(player, now);
       return;
     }
     if (msg.t === "seller_puzzle_sell") {
-      if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
       this.advanceMovement(now);
       if (msg.pos) player.pos = clampPos(msg.pos);
       this.sellCargo(player, now, msg.choice);
@@ -641,7 +655,7 @@ export class MatchRoom implements DurableObject {
     if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
     const stack = playerCargoStack(player);
     if (stack.length === 0) return;
-    if (Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) > 1.5)
+    if (Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) > 1.8)
       return;
     const team = this.teams.find((t) => t.id === player.teamId);
     if (!team) return;

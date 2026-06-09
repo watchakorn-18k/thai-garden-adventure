@@ -125,6 +125,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outfitOpen, setOutfitOpen] = useState(false);
   const [bugHuntOpen, setBugHuntOpen] = useState(false);
+  const [puzzleDismissed, setPuzzleDismissed] = useState(false);
   const [spectatorBookOpen, setSpectatorBookOpen] = useState(true);
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
   const [musicEnabled, setMusicEnabled] = useState(() => {
@@ -573,6 +574,13 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   useEffect(() => {
     if (bugHuntOpen && !(self && isSellerBugReady(self))) setBugHuntOpen(false);
   }, [bugHuntOpen, self]);
+
+  // Clear puzzle dismissal state when seller leaves market or loses cargo
+  useEffect(() => {
+    if (puzzleDismissed && !(self && isSellerPuzzleReady(self))) {
+      setPuzzleDismissed(false);
+    }
+  }, [puzzleDismissed, self]);
 
   const setMovement = useCallback(
     (dir: Direction | null) => {
@@ -1053,9 +1061,13 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         />
       )}
 
-      {state.status === "playing" && self && !isSpectator && isSellerPuzzleReady(self) && (
-        <SellerPuzzleOverlay self={self} send={send} />
-      )}
+      {state.status === "playing" &&
+        self &&
+        !isSpectator &&
+        !puzzleDismissed &&
+        isSellerPuzzleReady(self) && (
+          <SellerPuzzleOverlay self={self} send={send} onClose={() => setPuzzleDismissed(true)} />
+        )}
 
       {state.status === "playing" &&
         self &&
@@ -3093,7 +3105,7 @@ function isSellerPuzzleReady(player: PublicPlayer): boolean {
   return (
     player.role === "seller" &&
     playerCargoStack(player).length > 0 &&
-    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5
+    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.8
   );
 }
 
@@ -3137,12 +3149,11 @@ function BugCatchingOverlay({
     setGrid((g) => g.map((_, i) => (i === idx ? species : null)));
   }, []);
 
-  // The bug skitters to a new random cell on a timer (and on every hit).
+  // The bug moves to a new random cell only when hit.
+  // We removed the automatic timer to make it easier and more predictable.
   useEffect(() => {
     if (!infested) return;
     spawnAt(Math.floor(Math.random() * 9));
-    const interval = setInterval(() => spawnAt(Math.floor(Math.random() * 9)), 850);
-    return () => clearInterval(interval);
   }, [infested, spawnAt]);
 
   // Close automatically once the server confirms the bug is gone, or on Escape.
@@ -3229,12 +3240,15 @@ function BugCatchingOverlay({
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-2">
-          <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-            ตีแมลงให้ครบ {BUG_HUNT_TARGET} ตัว ปลดล็อกช่องให้ชาวสวน
+          <span className="font-pixel text-[8px] text-[var(--gold)] animate-bounce">
+            👉 จิ้มตัวแมลงให้โดน!
           </span>
           <span className="font-pixel text-[9px] text-[var(--gold)]">
             {hits}/{BUG_HUNT_TARGET}
           </span>
+        </div>
+        <div className="mt-1 font-pixel text-[7px] text-[var(--muted-foreground)]">
+          ตีแมลงให้ครบ {BUG_HUNT_TARGET} ตัว เพื่อปลดล็อกช่องให้ชาวสวน
         </div>
       </div>
     </div>
@@ -3255,9 +3269,11 @@ function buildCustomers(targetCrop: CropId): { face: string; want: CropId }[] {
 function SellerPuzzleOverlay({
   self,
   send,
+  onClose,
 }: {
   self: PublicPlayer;
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
+  onClose: () => void;
 }) {
   const stack = playerCargoStack(self);
   const cargo = stack[0];
@@ -3316,6 +3332,10 @@ function SellerPuzzleOverlay({
   // Keyboard delivery: 1-5 selects the matching customer slot.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
       const n = Number(e.key);
       if (n >= 1 && n <= customers.length) {
         e.preventDefault();
@@ -3324,7 +3344,7 @@ function SellerPuzzleOverlay({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [customers, deliver]);
+  }, [customers, deliver, onClose]);
 
   if (!cargo || !targetCrop) return null;
 
@@ -3334,7 +3354,14 @@ function SellerPuzzleOverlay({
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(10,5,15,0.72)] p-4">
-      <div className="pixel-panel w-[min(620px,96vw)] p-5">
+      <div className="pixel-panel relative w-[min(620px,96vw)] p-5">
+        {sentRef.current && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-[rgba(10,5,15,0.4)] backdrop-blur-[1px]">
+            <div className="pixel-chip font-pixel text-[12px] animate-pulse" data-gold="true">
+              กำลังส่ง...
+            </div>
+          </div>
+        )}
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="pixel-chip" data-gold="true">
@@ -3344,11 +3371,21 @@ function SellerPuzzleOverlay({
               ส่งให้ลูกค้าที่อยากได้ · เหลือ {stack.length} ชิ้น
             </div>
           </div>
-          <div className="pixel-panel flex items-center gap-2 p-2">
-            <TargetIcon size={26} />
-            <span className="font-pixel text-[10px] text-[var(--foreground)]">
-              {CROPS[targetCrop].name}
-            </span>
+          <div className="flex items-center gap-2">
+            <div className="pixel-panel flex items-center gap-2 p-2">
+              <TargetIcon size={26} />
+              <span className="font-pixel text-[10px] text-[var(--foreground)]">
+                {CROPS[targetCrop].name}
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="pixel-btn shrink-0 px-2 py-1 font-pixel text-[8px]"
+              title="ปิด (เดินใหม่เพื่อเปิดใหม่)"
+            >
+              ESC
+            </button>
           </div>
         </div>
 
