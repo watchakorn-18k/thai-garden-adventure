@@ -553,6 +553,7 @@ export class MatchRoom implements DurableObject {
       seedChoice: player.seedChoice,
       marketPrices: this.marketPrices,
       harvestCreditsCoins: false,
+      blockedTile: MARKET_TILE_POS,
       now,
     });
     player.tiles = result.tiles;
@@ -1743,8 +1744,9 @@ export class MatchRoom implements DurableObject {
         continue;
       }
       let plan = this.botPlans.get(bot.id);
+      const blocked = this.settings.mode === "2v2" ? MARKET_TILE_POS : undefined;
       if (!plan || !isPlanValid(bot, plan)) {
-        const next = chooseBotPlan(bot);
+        const next = chooseBotPlan(bot, blocked);
         if (!next) {
           this.botPlans.delete(bot.id);
           continue;
@@ -2255,19 +2257,23 @@ function neighborStand(
   return cands[0];
 }
 
-function chooseBotPlan(bot: {
-  pos: { x: number; y: number };
-  coins: number;
-  selectedCrops: CropId[];
-  botSeedRotation?: number;
-  tiles: Tile[][];
-}): BotPlan | null {
+function chooseBotPlan(
+  bot: {
+    pos: { x: number; y: number };
+    coins: number;
+    selectedCrops: CropId[];
+    botSeedRotation?: number;
+    tiles: Tile[][];
+  },
+  blockedTile?: { x: number; y: number },
+): BotPlan | null {
   const rotation = bot.botSeedRotation ?? 0;
   let best: { x: number; y: number; tool: Tool; seed?: CropId } | null = null;
   let bestPri = 99;
   let bestDist = Infinity;
   for (let y = 0; y < ROWS; y++) {
     for (let x = 0; x < COLS; x++) {
+      if (blockedTile && x === blockedTile.x && y === blockedTile.y) continue;
       const tile = bot.tiles[y][x];
       const needs = tileNeeds(tile, bot.selectedCrops, bot.coins, rotation);
       if (!needs) continue;

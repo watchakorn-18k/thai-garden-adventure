@@ -133,6 +133,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
 
   const selfRef = useRef<PublicPlayer | undefined>(undefined);
   const statusRef = useRef<string | undefined>(undefined);
+  const is2v2Ref = useRef(false);
   const localPlayerRef = useRef<PublicPlayer | undefined>(undefined);
   const [localPlayer, setLocalPlayer] = useState<PublicPlayer | undefined>(undefined);
 
@@ -175,6 +176,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         dir: act.dir,
         tool: act.tool,
         seedChoice: act.seedChoice,
+        blockedTile: is2v2Ref.current ? MARKET_TILE_POS : undefined,
         now: act.time,
       });
       predictedTiles = res.tiles;
@@ -502,7 +504,8 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   useEffect(() => {
     selfRef.current = self;
     statusRef.current = state?.status;
-  }, [self, state?.status]);
+    is2v2Ref.current = is2v2;
+  }, [self, state?.status, is2v2]);
 
   // Honor a ?mode= request from the entry CTA: the host pushes the desired room
   // mode once, while still in the lobby. Sent only once per page load so the host
@@ -560,7 +563,9 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         SFX.harvest();
       } else {
         const target = facingTile(local.pos, local.dir);
-        if (target) {
+        const blockedTarget =
+          is2v2Ref.current && target?.x === MARKET_TILE_POS.x && target?.y === MARKET_TILE_POS.y;
+        if (target && !blockedTarget) {
           const tile = local.tiles[target.y]?.[target.x];
           if (tile) {
             if (tile.crop && tile.crop.stage >= 2) {

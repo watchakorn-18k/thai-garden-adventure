@@ -37,6 +37,7 @@ import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from
 import { chooseFarmBotPlan, isFarmBotPlanValid, type FarmBotPlan } from "@/lib/farm-bot";
 import { SFX, setMuted, isMuted, startBgm, stopBgm } from "@/lib/sfx";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
+import { loadPlayerName, savePlayerName } from "@/lib/player-name";
 
 function isAutoBotPauseKey(key: string): boolean {
   return [
@@ -106,6 +107,8 @@ export default function FarmGame() {
     crops: [],
   });
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
+  const [playerName, setPlayerName] = useState("");
+  const [nameOpen, setNameOpen] = useState(false);
   const [outfitOpen, setOutfitOpen] = useState(false);
   const [ledgerOpen, setLedgerOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -185,6 +188,10 @@ export default function FarmGame() {
   useEffect(() => {
     helpOpenRef.current = helpOpen;
   }, [helpOpen]);
+  // Load (or generate + persist a random veggie) name on the client to avoid SSR mismatch.
+  useEffect(() => {
+    setPlayerName(loadPlayerName());
+  }, []);
 
   const facingTile = useCallback(() => {
     let x = Math.round(pos.x);
@@ -463,6 +470,10 @@ export default function FarmGame() {
 
   useEffect(() => {
     const onDown = (e: KeyboardEvent) => {
+      // Let text inputs (e.g. the name editor) own the keyboard while focused.
+      const t = e.target as HTMLElement | null;
+      if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+
       if (helpOpen) {
         if (e.key === "Escape") setHelpOpen(false);
         e.preventDefault();
@@ -1016,6 +1027,18 @@ export default function FarmGame() {
           >
             {muted ? <SpeakerOffIcon size={22} /> : <SpeakerOnIcon size={22} />}
           </button>
+          <button
+            onClick={() => {
+              setNameOpen(true);
+              SFX.click();
+            }}
+            className="pixel-btn flex h-[34px] items-center gap-1.5 px-2 font-pixel text-[8px]"
+            title="เปลี่ยนชื่อผู้เล่น"
+            aria-label="เปลี่ยนชื่อผู้เล่น"
+          >
+            <PencilIcon size={16} />
+            <span className="max-w-[88px] truncate">{playerName || "ตั้งชื่อ"}</span>
+          </button>
         </div>
       </header>
 
@@ -1384,6 +1407,20 @@ export default function FarmGame() {
         </div>
       </div>
 
+      {/* Player name modal */}
+      {nameOpen && (
+        <NameModal
+          name={playerName}
+          onClose={() => setNameOpen(false)}
+          onSave={(next) => {
+            setPlayerName(next);
+            savePlayerName(next);
+            setNameOpen(false);
+            SFX.click();
+          }}
+        />
+      )}
+
       {/* Controls / how-to-play modal */}
       {helpOpen && (
         <div
@@ -1549,6 +1586,144 @@ function HeaderOutfitMenu({
           />
         </div>
       )}
+    </div>
+  );
+}
+
+function PencilIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated" }}
+    >
+      <rect x="10" y="2" width="3" height="3" fill="#ffd24a" />
+      <rect x="7" y="5" width="3" height="3" fill="#f0a05b" />
+      <rect x="4" y="8" width="3" height="3" fill="#f0a05b" />
+      <rect x="2" y="11" width="3" height="3" fill="#c8a878" />
+      <rect x="2" y="13" width="2" height="1" fill="#1a0f1f" />
+      <rect x="11" y="3" width="2" height="2" fill="#fff5b8" />
+    </svg>
+  );
+}
+
+function CheckIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated" }}
+    >
+      <rect x="2" y="8" width="2" height="2" fill="#6ab04c" />
+      <rect x="4" y="10" width="2" height="2" fill="#6ab04c" />
+      <rect x="6" y="12" width="2" height="2" fill="#6ab04c" />
+      <rect x="8" y="8" width="2" height="4" fill="#8bc967" />
+      <rect x="10" y="5" width="2" height="3" fill="#8bc967" />
+      <rect x="12" y="2" width="2" height="3" fill="#8bc967" />
+    </svg>
+  );
+}
+
+function CloseXIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated" }}
+    >
+      <rect x="3" y="3" width="2" height="2" fill="#ff6b6b" />
+      <rect x="5" y="5" width="2" height="2" fill="#ff6b6b" />
+      <rect x="7" y="7" width="2" height="2" fill="#ff8fb1" />
+      <rect x="9" y="9" width="2" height="2" fill="#ff6b6b" />
+      <rect x="11" y="11" width="2" height="2" fill="#ff6b6b" />
+      <rect x="11" y="3" width="2" height="2" fill="#ff6b6b" />
+      <rect x="9" y="5" width="2" height="2" fill="#ff6b6b" />
+      <rect x="5" y="9" width="2" height="2" fill="#ff6b6b" />
+      <rect x="3" y="11" width="2" height="2" fill="#ff6b6b" />
+    </svg>
+  );
+}
+
+function NameModal({
+  name,
+  onSave,
+  onClose,
+}: {
+  name: string;
+  onSave: (next: string) => void;
+  onClose: () => void;
+}) {
+  const [draft, setDraft] = useState(name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const save = () => onSave(draft.trim().slice(0, 16));
+
+  return (
+    <div
+      className="fixed inset-0 z-100 flex items-center justify-center p-4"
+      style={{ background: "rgba(10,5,15,0.85)" }}
+      onClick={onClose}
+    >
+      <div
+        className="relative w-full max-w-sm pixel-panel px-6 py-5 help-modal-pop"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="เปลี่ยนชื่อผู้เล่น"
+      >
+        <div className="flex items-center gap-3 mb-5">
+          <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">ตั้งชื่อ</span>
+          <span className="flex-1 h-[3px] bg-[#1a0f1f]" />
+        </div>
+
+        <label className="flex flex-col gap-2">
+          <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">ชื่อผู้เล่น</span>
+          <input
+            ref={inputRef}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value.slice(0, 16))}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") save();
+              else if (e.key === "Escape") onClose();
+            }}
+            placeholder="พิมพ์ชื่อ"
+            className="pixel-chip font-pixel text-[12px] px-3 py-2 outline-none"
+          />
+        </label>
+
+        <div className="mt-6 flex items-center justify-end gap-3">
+          <button
+            type="button"
+            onClick={onClose}
+            className="pixel-btn flex h-10 w-10 items-center justify-center p-0"
+            title="ยกเลิก"
+            aria-label="ยกเลิก"
+          >
+            <CloseXIcon size={20} />
+          </button>
+          <button
+            type="button"
+            onClick={save}
+            className="pixel-btn flex h-10 w-10 items-center justify-center p-0"
+            data-accent="true"
+            title="ตกลง"
+            aria-label="ตกลง"
+          >
+            <CheckIcon size={20} />
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

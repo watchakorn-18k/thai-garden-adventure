@@ -4,6 +4,7 @@ import { makeRoomCode, ROOM_CODE_RE, type MatchModeSetting } from "@/lib/match-p
 import QuickMatchButton from "@/components/QuickMatchButton";
 import { SpeakerOffIcon, SpeakerOnIcon } from "@/components/PixelIcons";
 import { SFX, setMuted, startBgm, stopBgm } from "@/lib/sfx";
+import { loadPlayerName, savePlayerName } from "@/lib/player-name";
 
 export const Route = createFileRoute("/lobby")({
   validateSearch: (search: Record<string, unknown>): { mode: MatchModeSetting } => ({
@@ -19,9 +20,7 @@ function LobbyPage() {
   const navigate = useNavigate();
   const { mode } = Route.useSearch();
   const is2v2 = mode === "2v2";
-  const [name, setName] = useState(() =>
-    typeof window !== "undefined" ? (localStorage.getItem("tg.name") ?? "") : "",
-  );
+  const [name, setName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [musicEnabled, setMusicEnabled] = useState(true);
@@ -53,9 +52,13 @@ function LobbyPage() {
     setMusicEnabled((current) => !current);
   };
 
+  useEffect(() => {
+    setName(loadPlayerName());
+  }, []);
+
   const saveName = (n: string) => {
     setName(n);
-    if (typeof window !== "undefined") localStorage.setItem("tg.name", n);
+    savePlayerName(n);
   };
 
   const join = () => {

@@ -17,6 +17,8 @@ export interface ActionInput {
   now: number;
   marketPrices?: Record<CropId, number>;
   harvestCreditsCoins?: boolean;
+  /** Tile that can't be farmed (e.g. the 2v2 market stall). Actions facing it are ignored. */
+  blockedTile?: { x: number; y: number };
 }
 
 export interface ActionResult {
@@ -95,6 +97,8 @@ function cloneTiles(tiles: Tile[][]): Tile[][] {
 export function applyAction(input: ActionInput): ActionResult {
   const target = facingTile(input.pos, input.dir);
   if (!target) return { tiles: input.tiles, coins: input.coins, events: [] };
+  if (input.blockedTile && target.x === input.blockedTile.x && target.y === input.blockedTile.y)
+    return { tiles: input.tiles, coins: input.coins, events: [] };
 
   const next = cloneTiles(input.tiles);
   const tile = next[target.y][target.x];
