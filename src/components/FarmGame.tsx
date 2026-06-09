@@ -34,6 +34,7 @@ import {
   type Tool,
 } from "@/lib/game-types";
 import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from "@/lib/game-logic";
+import { toolDurationMs } from "@/lib/tool-animation";
 import { chooseFarmBotPlan, isFarmBotPlanValid, type FarmBotPlan } from "@/lib/farm-bot";
 import { SFX, setMuted, isMuted, startBgm, stopBgm } from "@/lib/sfx";
 import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
@@ -116,6 +117,8 @@ export default function FarmGame() {
     { id: number; x: number; y: number; text: string; tone: "good" | "bad" | "info" }[]
   >([]);
   const [acting, setActing] = useState(false);
+  const actingRef = useRef(false);
+  const actingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [walkFrame, setWalkFrame] = useState(0);
   const [particles, setParticles] = useState<
     {
@@ -303,7 +306,12 @@ export default function FarmGame() {
       if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return;
 
       setActing(true);
-      setTimeout(() => setActing(false), 320);
+      actingRef.current = true;
+      if (actingTimerRef.current) clearTimeout(actingTimerRef.current);
+      actingTimerRef.current = setTimeout(() => {
+        setActing(false);
+        actingRef.current = false;
+      }, toolDurationMs(actionTool));
 
       setTiles((grid) => {
         const result = applyAction({
@@ -662,6 +670,7 @@ export default function FarmGame() {
       window.removeEventListener("keydown", onFirstGesture);
       // Leaving the single-player home (e.g. into the lobby) stops the home music.
       stopBgm();
+      if (actingTimerRef.current) clearTimeout(actingTimerRef.current);
     };
   }, []);
 
@@ -685,7 +694,12 @@ export default function FarmGame() {
 
       // Bot movement is handled in its own setInterval (immune to RAF pause).
       // RAF only drives manual keyboard movement.
-      const moving = dx !== 0 || dy !== 0;
+      // Freeze the player in place while the dig/use animation plays.
+      const moving = (dx !== 0 || dy !== 0) && !actingRef.current;
+      if (actingRef.current && walkingRef.current) {
+        walkingRef.current = false;
+        setWalking(false);
+      }
       if (moving) {
         // diagonal normalize
         const len = Math.hypot(dx, dy) || 1;

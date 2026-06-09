@@ -762,34 +762,8 @@
     opacity: 0;
   }
 }
-@keyframes tool-hoe-side {
-  0% {
-    transform: translate(-1px, -2px) rotate(-62deg);
-  }
-  42% {
-    transform: translate(1px, 2px) rotate(28deg);
-  }
-  68% {
-    transform: translate(0, 1px) rotate(16deg);
-  }
-  100% {
-    transform: translate(0, 0) rotate(0deg);
-  }
-}
-@keyframes tool-hoe-vertical {
-  0% {
-    transform: translateY(-5px) scaleY(0.9);
-  }
-  42% {
-    transform: translateY(3px) scaleY(1.08);
-  }
-  68% {
-    transform: translateY(1px) scaleY(1.02);
-  }
-  100% {
-    transform: translateY(0) scaleY(1);
-  }
-}
+/* Hoe swing keyframes now live in src/lib/tool-animation.ts (shared SP + MP);
+   PixelFarmer drives the hoe <g> via the Web Animations API. */
 @keyframes tool-water-side {
   0%,
   100% {
@@ -1249,12 +1223,6 @@
   }
 }
 
-.tool-hoe-side {
-  animation: tool-hoe-side 0.34s cubic-bezier(0.2, 0.85, 0.2, 1) forwards;
-}
-.tool-hoe-vertical {
-  animation: tool-hoe-vertical 0.34s cubic-bezier(0.2, 0.85, 0.2, 1) forwards;
-}
 .tool-water-side {
   animation: tool-water-side 0.5s ease-in-out;
 }

@@ -43,6 +43,7 @@ import {
   type PlayerCosmetics,
 } from "@/lib/player-cosmetics";
 import { useMatch } from "@/lib/match-client";
+import { toolDurationMs } from "@/lib/tool-animation";
 import { SFX, setMuted } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
 import gamePlayMusicUrl from "../../game_play.wav";
@@ -581,6 +582,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     if (isSpectator) return;
     if (statusRef.current !== "playing") return;
     const isSeller = selfRef.current?.role === "seller";
+    const actDur = toolDurationMs(selfRef.current?.tool ?? "hoe");
     setActionFlash((n) => n + 1);
     setActing(true);
     if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
@@ -599,9 +601,9 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         // Resume walking if a movement key is still held after the animation.
         const dir = keysToDir(keys.current, nextDiagonalAxis);
         if (dir) setMovement(dir);
-      }, 320);
+      }, actDur);
     } else {
-      actionTimerRef.current = setTimeout(() => setActing(false), 320);
+      actionTimerRef.current = setTimeout(() => setActing(false), actDur);
     }
     const local = localPlayerRef.current;
     if (local) {

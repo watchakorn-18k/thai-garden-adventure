@@ -26,6 +26,7 @@ import {
   verticalToolOverlay,
   type Rect,
 } from "@/lib/pixel-art";
+import { sampleToolPose, toolDurationMs } from "@/lib/tool-animation";
 
 const TILE = 56;
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -231,7 +232,8 @@ export default function PhaserField({
         triggerAction() {
           this.acting = true;
           if (this.actingTimer) this.actingTimer.remove();
-          this.actingTimer = this.time.delayedCall(320, () => {
+          const dur = toolDurationMs(playerRef.current.tool);
+          this.actingTimer = this.time.delayedCall(dur, () => {
             this.acting = false;
             this.drawFarmer();
           });
@@ -573,66 +575,14 @@ export default function PhaserField({
               ? verticalToolOverlay(p.tool, palette)
               : sideToolOverlay(p.tool, palette);
 
-            let toolAngle = 0;
-            let toolOffsetX = 0;
-            let toolOffsetY = 0;
-
-            const elapsed = this.actingTimer ? this.actingTimer.getElapsed() : 160;
-            const progress = Math.min(1, Math.max(0, elapsed / 320));
-
-            if (p.tool === "hoe") {
-              if (!isVertical) {
-                if (progress < 0.42) {
-                  const t = progress / 0.42;
-                  toolAngle = -62 + (28 - -62) * t;
-                  toolOffsetX = -1 + (1 - -1) * t;
-                  toolOffsetY = -2 + (2 - -2) * t;
-                } else if (progress < 0.68) {
-                  const t = (progress - 0.42) / (0.68 - 0.42);
-                  toolAngle = 28 + (16 - 28) * t;
-                  toolOffsetX = 1 + (0 - 1) * t;
-                  toolOffsetY = 2 + (1 - 2) * t;
-                } else {
-                  const t = (progress - 0.68) / (1 - 0.68);
-                  toolAngle = 16 + (0 - 16) * t;
-                  toolOffsetX = 0;
-                  toolOffsetY = 1 + (0 - 1) * t;
-                }
-              } else {
-                if (progress < 0.42) {
-                  const t = progress / 0.42;
-                  toolOffsetY = -5 + (3 - -5) * t;
-                } else if (progress < 0.68) {
-                  const t = (progress - 0.42) / (0.68 - 0.42);
-                  toolOffsetY = 3 + (1 - 3) * t;
-                } else {
-                  const t = (progress - 0.68) / (1 - 0.68);
-                  toolOffsetY = 1 + (0 - 1) * t;
-                }
-              }
-            } else if (p.tool === "watering_can") {
-              if (!isVertical) {
-                if (progress < 0.45) {
-                  const t = progress / 0.45;
-                  toolAngle = t * -28;
-                  toolOffsetY = t * 1;
-                } else {
-                  const t = (progress - 0.45) / 0.55;
-                  toolAngle = -28 + t * 28;
-                  toolOffsetY = 1 - t * 1;
-                }
-              } else {
-                if (progress < 0.45) {
-                  const t = progress / 0.45;
-                  toolAngle = t * 18;
-                  toolOffsetY = t * 1;
-                } else {
-                  const t = (progress - 0.45) / 0.55;
-                  toolAngle = 18 - t * 18;
-                  toolOffsetY = 1 - t * 1;
-                }
-              }
-            }
+            // Shared swing curve (single source for SP + MP); see tool-animation.ts.
+            const dur = toolDurationMs(p.tool);
+            const elapsed = this.actingTimer ? this.actingTimer.getElapsed() : dur / 2;
+            const progress = Math.min(1, Math.max(0, elapsed / dur));
+            const pose = sampleToolPose(p.tool, isVertical, progress);
+            const toolAngle = pose.angle;
+            const toolOffsetX = pose.dx;
+            const toolOffsetY = pose.dy;
 
             const pivotX = isVertical ? 8 : 10;
             const pivotY = 11;

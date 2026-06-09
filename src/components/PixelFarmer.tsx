@@ -1,4 +1,6 @@
+import { useEffect, useRef } from "react";
 import { DEFAULT_COSMETICS, type PlayerCosmetics } from "@/lib/player-cosmetics";
+import { toolDurationMs, toolWaapiKeyframes } from "@/lib/tool-animation";
 
 type Direction = "up" | "down" | "left" | "right";
 
@@ -136,11 +138,26 @@ export default function PixelFarmer({
     pantsDark: shade(cosmetics.pants, -70),
   };
 
+  // Drive the hoe swing from the shared motion module (single source for SP+MP)
+  // via the Web Animations API, so the wind-up curve stays in sync with Phaser.
+  const hoeRef = useRef<SVGGElement>(null);
+  useEffect(() => {
+    if (!acting || tool !== "hoe") return;
+    const el = hoeRef.current;
+    if (!el) return;
+    const anim = el.animate(toolWaapiKeyframes("hoe", isVertical), {
+      duration: toolDurationMs("hoe"),
+      easing: "linear",
+      fill: "forwards",
+    });
+    return () => anim.cancel();
+  }, [acting, tool, isVertical]);
+
   const sideToolOverlay = () => {
     if (!acting) return null;
     if (tool === "hoe") {
       return (
-        <g className="tool-hoe-side" style={{ transformOrigin: "10px 11px" }}>
+        <g ref={hoeRef} style={{ transformOrigin: "10px 11px" }}>
           <rect x="11" y="6" width="1" height="8" fill={palette.tool} />
           <rect x="12" y="7" width="1" height="7" fill={palette.tool} />
           <rect x="12" y="3" width="4" height="2" fill={palette.toolMetal} />
@@ -172,7 +189,7 @@ export default function PixelFarmer({
     if (!acting) return null;
     if (tool === "hoe") {
       return (
-        <g style={{ transformOrigin: "8px 11px" }} className="tool-hoe-vertical">
+        <g ref={hoeRef} style={{ transformOrigin: "8px 11px" }}>
           <rect x="7" y="6" width="2" height="8" fill={palette.tool} />
           <rect x="6" y="2" width="4" height="2" fill={palette.toolMetal} />
           <rect x="6" y="4" width="4" height="1" fill={palette.toolMetalDark} />
