@@ -696,9 +696,8 @@ export class MatchRoom implements DurableObject {
 
   private sellerClearBug(player: PlayerState, x: number, y: number, now: number): void {
     if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
-    // Seller must be at the market stall to clear bugs
-    if (Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) > 1.5)
-      return;
+    // Seller must be near the infested tile to clear the bug
+    if (Math.hypot(x - player.pos.x, y - player.pos.y) > 1.5) return;
 
     const team = this.teams.find((t) => t.id === player.teamId);
     if (!team) return;

@@ -358,3 +358,81 @@ export function EyeIcon({ size = 16 }: IconProps) {
     </>,
   );
 }
+
+// === Garden pests (16x16) ====================================================
+// Vector pixel bugs used by the Bug Hunt mini-game. Each is a distinct species
+// so an infested field shows variety instead of one repeated emoji.
+
+/** Caterpillar — green segmented grub with antennae. */
+export function CaterpillarIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* body segments */}
+      <rect x="3" y="9" width="3" height="3" fill="#6ab04c" />
+      <rect x="6" y="8" width="3" height="3" fill="#7bc35a" />
+      <rect x="9" y="8" width="3" height="3" fill="#6ab04c" />
+      <rect x="11" y="7" width="3" height="3" fill="#7bc35a" />
+      {/* shading */}
+      <rect x="3" y="11" width="11" height="1" fill="#4e8c3a" />
+      {/* head */}
+      <rect x="12" y="6" width="3" height="3" fill="#8bc967" />
+      <rect x="13" y="7" width="1" height="1" fill="#1a0f1f" />
+      {/* antennae */}
+      <rect x="13" y="4" width="1" height="2" fill="#3a6b2a" />
+      <rect x="15" y="4" width="1" height="2" fill="#3a6b2a" />
+      {/* feet */}
+      <rect x="4" y="12" width="1" height="1" fill="#3a6b2a" />
+      <rect x="7" y="11" width="1" height="2" fill="#3a6b2a" />
+      <rect x="10" y="11" width="1" height="2" fill="#3a6b2a" />
+    </>,
+  );
+}
+
+/** Beetle — round purple shell with a center seam and six legs. */
+export function BeetleIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* legs */}
+      <rect x="2" y="7" width="2" height="1" fill="#1a0f1f" />
+      <rect x="2" y="10" width="2" height="1" fill="#1a0f1f" />
+      <rect x="12" y="7" width="2" height="1" fill="#1a0f1f" />
+      <rect x="12" y="10" width="2" height="1" fill="#1a0f1f" />
+      {/* shell */}
+      <rect x="5" y="4" width="6" height="9" fill="#7b3fa0" />
+      <rect x="4" y="5" width="8" height="7" fill="#7b3fa0" />
+      <rect x="5" y="4" width="6" height="2" fill="#9b59c4" />
+      {/* center seam */}
+      <rect x="7" y="5" width="2" height="8" fill="#4a1e6b" />
+      {/* head */}
+      <rect x="6" y="2" width="4" height="2" fill="#4a1e6b" />
+      <rect x="6" y="1" width="1" height="1" fill="#3a6b2a" />
+      <rect x="9" y="1" width="1" height="1" fill="#3a6b2a" />
+    </>,
+  );
+}
+
+/** Fly — gray body with translucent wings and red eyes. */
+export function FlyIcon({ size = 24 }: IconProps) {
+  return wrap(
+    size,
+    <>
+      {/* wings */}
+      <rect x="2" y="4" width="4" height="3" fill="#b89dd1" />
+      <rect x="10" y="4" width="4" height="3" fill="#b89dd1" />
+      <rect x="2" y="4" width="4" height="1" fill="#d9c6ef" />
+      <rect x="10" y="4" width="4" height="1" fill="#d9c6ef" />
+      {/* body */}
+      <rect x="6" y="6" width="4" height="6" fill="#4a4a52" />
+      <rect x="6" y="6" width="4" height="2" fill="#6a6a72" />
+      <rect x="6" y="9" width="4" height="1" fill="#2a2a30" />
+      {/* eyes */}
+      <rect x="6" y="4" width="1" height="2" fill="#e84444" />
+      <rect x="9" y="4" width="1" height="2" fill="#e84444" />
+      {/* legs */}
+      <rect x="6" y="12" width="1" height="2" fill="#1a0f1f" />
+      <rect x="9" y="12" width="1" height="2" fill="#1a0f1f" />
+    </>,
+  );
+}

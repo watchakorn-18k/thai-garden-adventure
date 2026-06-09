@@ -295,6 +295,7 @@ export default function FarmGame() {
       seedChoice?: CropId;
       now?: number;
     }) => {
+      if (actingRef.current) return;
       const actionPos = override?.pos ?? posRef.current;
       const actionDir = override?.dir ?? dirRef.current;
       const actionTool = override?.tool ?? toolRef.current;

@@ -19,6 +19,9 @@ import {
   PapayaIcon,
   BasilIcon,
   EyeIcon,
+  CaterpillarIcon,
+  BeetleIcon,
+  FlyIcon,
 } from "./PixelIcons";
 import { applyAction, facingTile } from "@/lib/game-logic";
 import {
@@ -121,6 +124,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [outfitOpen, setOutfitOpen] = useState(false);
+  const [bugHuntOpen, setBugHuntOpen] = useState(false);
   const [spectatorBookOpen, setSpectatorBookOpen] = useState(true);
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
   const [musicEnabled, setMusicEnabled] = useState(() => {
@@ -564,6 +568,12 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     recalculateLocalPlayer();
   }, [self, state?.status, recalculateLocalPlayer]);
 
+  // Drop the bug-hunt intent the moment it's no longer offerable (bug cleared,
+  // seller left the market) so returning later requires an explicit re-open.
+  useEffect(() => {
+    if (bugHuntOpen && !(self && isSellerBugReady(self))) setBugHuntOpen(false);
+  }, [bugHuntOpen, self]);
+
   const setMovement = useCallback(
     (dir: Direction | null) => {
       if (isSpectator) return;
@@ -582,6 +592,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     if (isSpectator) return;
     if (statusRef.current !== "playing") return;
     const isSeller = selfRef.current?.role === "seller";
+    if (!isSeller && actingRef.current) return;
     const actDur = toolDurationMs(selfRef.current?.tool ?? "hoe");
     setActionFlash((n) => n + 1);
     setActing(true);
@@ -722,6 +733,12 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     keys.current.clear();
     lastInputDir.current = null;
     setPredictedDir(null);
+    setActing(false);
+    actingRef.current = false;
+    if (actionTimerRef.current) {
+      clearTimeout(actionTimerRef.current);
+      actionTimerRef.current = null;
+    }
   }, [state?.status]);
 
   useEffect(() => {
@@ -1040,9 +1057,13 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         <SellerPuzzleOverlay self={self} send={send} />
       )}
 
-      {state.status === "playing" && self && !isSpectator && isSellerBugReady(self) && (
-        <BugCatchingOverlay self={self} send={send} />
-      )}
+      {state.status === "playing" &&
+        self &&
+        !isSpectator &&
+        bugHuntOpen &&
+        isSellerBugReady(self) && (
+          <BugCatchingOverlay self={self} send={send} onClose={() => setBugHuntOpen(false)} />
+        )}
 
       {state.status === "playing" && self && !isSpectator && (
         <Toolbar
@@ -1050,6 +1071,11 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
           send={send}
           marketPrices={state.marketPrices}
           cargo={state.fieldCargo}
+          bugHuntReady={isSellerBugReady(self)}
+          onBugHunt={() => {
+            SFX.click();
+            setBugHuntOpen(true);
+          }}
         />
       )}
       {isSpectator &&
@@ -1527,13 +1553,37 @@ function TeamBar({
   targetCoins: number;
 }) {
   const pct = team ? Math.min(100, (team.coins / targetCoins) * 100) : 0;
+  const teamColor = team?.id === "A" ? "#7fd8ff" : "#ff8fb1";
+  const won = pct >= 100;
   return (
-    <div className="flex-1 flex flex-col gap-1">
+    <div
+      className="flex-1 flex flex-col gap-1.5 px-2 py-1.5"
+      style={
+        active
+          ? {
+              background: "rgba(255,210,74,.07)",
+              boxShadow: "0 0 0 2px var(--gold), 0 0 12px rgba(255,210,74,.35)",
+            }
+          : undefined
+      }
+    >
       <div className="flex items-center gap-2">
-        <span className="font-pixel text-[10px]">{team?.name ?? "รอทีม..."}</span>
-        {active && <span className="pixel-chip font-pixel text-[7px]">ทีมคุณ</span>}
+        {/* Team-color pixel dot — square, ink-outlined */}
+        <span
+          className="inline-block size-[10px] shrink-0"
+          style={{ background: teamColor, boxShadow: "0 0 0 2px #1a0f1f" }}
+        />
+        <span className="font-pixel text-[10px] truncate">{team?.name ?? "รอทีม..."}</span>
+        {active && (
+          <span
+            className="pixel-chip font-pixel text-[7px] whitespace-nowrap shrink-0"
+            data-gold="true"
+          >
+            ทีมคุณ
+          </span>
+        )}
         {team && (
-          <span className="font-pixel text-[10px] text-[var(--gold)] flex items-center gap-1">
+          <span className="ml-auto flex items-center gap-1 whitespace-nowrap font-pixel text-[10px] text-[var(--gold)]">
             <CoinIcon size={12} />
             {team.coins}/{targetCoins}
           </span>
@@ -1544,7 +1594,7 @@ function TeamBar({
           style={{
             width: `${pct}%`,
             height: "100%",
-            background: pct >= 100 ? "#ffd24a" : team?.id === "A" ? "#7fd8ff" : "#ff8fb1",
+            background: won ? "#ffd24a" : teamColor,
             transition: "width 0.2s ease-out",
           }}
         />
@@ -3043,27 +3093,15 @@ function isSellerPuzzleReady(player: PublicPlayer): boolean {
   return (
     player.role === "seller" &&
     playerCargoStack(player).length > 0 &&
-    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5 &&
-    !hasInfestedTile(player.tiles)
+    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5
   );
 }
 
 function isSellerBugReady(player: PublicPlayer): boolean {
-  return (
-    player.role === "seller" &&
-    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5 &&
-    hasInfestedTile(player.tiles)
-  );
-}
-
-function hasInfestedTile(tiles?: Tile[][]): boolean {
-  if (!tiles) return false;
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      if (tiles[y]?.[x]?.bug) return true;
-    }
-  }
-  return false;
+  if (player.role !== "seller") return false;
+  const infested = getInfestedTileCoords(player.tiles);
+  if (!infested) return false;
+  return Math.hypot(infested.x - player.pos.x, infested.y - player.pos.y) <= 1.5;
 }
 
 function getInfestedTileCoords(tiles?: Tile[][]): { x: number; y: number } | null {
@@ -3076,86 +3114,127 @@ function getInfestedTileCoords(tiles?: Tile[][]): { x: number; y: number } | nul
   return null;
 }
 
+const BUG_ICONS = [CaterpillarIcon, BeetleIcon, FlyIcon] as const;
+const BUG_HUNT_TARGET = 5;
+
 function BugCatchingOverlay({
   self,
   send,
+  onClose,
 }: {
   self: PublicPlayer;
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
+  onClose: () => void;
 }) {
   const infested = getInfestedTileCoords(self.tiles);
-  const [grid, setGrid] = useState<boolean[]>(Array(9).fill(false));
+  // Each cell holds either null (empty) or the bug-species index sitting there.
+  const [grid, setGrid] = useState<(number | null)[]>(() => Array(9).fill(null));
   const [hits, setHits] = useState(0);
-  const [targetHits] = useState(5);
   const sentRef = useRef(false);
 
-  // Randomly move the bug every 800ms
+  const spawnAt = useCallback((idx: number) => {
+    const species = Math.floor(Math.random() * BUG_ICONS.length);
+    setGrid((g) => g.map((_, i) => (i === idx ? species : null)));
+  }, []);
+
+  // The bug skitters to a new random cell on a timer (and on every hit).
   useEffect(() => {
     if (!infested) return;
-    const interval = setInterval(() => {
-      const idx = Math.floor(Math.random() * 9);
-      setGrid((g) => g.map((_, i) => i === idx));
-    }, 800);
-    // Initial bug
-    const idx = Math.floor(Math.random() * 9);
-    setGrid((g) => g.map((_, i) => i === idx));
-
+    spawnAt(Math.floor(Math.random() * 9));
+    const interval = setInterval(() => spawnAt(Math.floor(Math.random() * 9)), 850);
     return () => clearInterval(interval);
-  }, [infested]);
+  }, [infested, spawnAt]);
+
+  // Close automatically once the server confirms the bug is gone, or on Escape.
+  useEffect(() => {
+    if (!infested) onClose();
+  }, [infested, onClose]);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
 
   const whack = (idx: number) => {
-    if (sentRef.current || !infested) return;
-    if (grid[idx]) {
-      SFX.harvest();
-      const newHits = hits + 1;
-      setHits(newHits);
-      if (newHits >= targetHits) {
-        sentRef.current = true;
-        send({ t: "seller_clear_bug", x: infested.x, y: infested.y });
-      } else {
-        // move bug immediately on successful whack
-        const nextIdx = (idx + Math.floor(Math.random() * 8) + 1) % 9;
-        setGrid((g) => g.map((_, i) => i === nextIdx));
-      }
+    if (sentRef.current || !infested || grid[idx] === null) {
+      if (grid[idx] === null) SFX.bad();
+      return;
+    }
+    SFX.harvest();
+    const newHits = hits + 1;
+    setHits(newHits);
+    if (newHits >= BUG_HUNT_TARGET) {
+      sentRef.current = true;
+      send({ t: "seller_clear_bug", x: infested.x, y: infested.y });
     } else {
-      SFX.bad();
+      // Bug darts to a different cell on a successful hit.
+      spawnAt((idx + Math.floor(Math.random() * 8) + 1) % 9);
     }
   };
 
   if (!infested) return null;
 
+  const pct = Math.min(100, (hits / BUG_HUNT_TARGET) * 100);
+
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(10,5,15,0.72)] p-4">
       <div className="pixel-panel w-[min(480px,96vw)] p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <div className="pixel-chip bg-purple-600 border-purple-800 text-white" data-gold="true">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="pixel-chip font-pixel text-[9px]" data-gold="true">
               BUG HUNT
-            </div>
-            <div className="font-pixel text-[10px] text-purple-400">
-              กำจัดแมลงที่ระบาดสวนเพื่อน ({infested.x}, {infested.y})
-            </div>
+            </span>
+            <span className="truncate font-pixel text-[10px] text-[var(--muted-foreground)]">
+              แมลงลงสวนช่อง {infested.x},{infested.y}
+            </span>
           </div>
-          <div className="pixel-panel p-2 font-pixel text-[10px] text-[var(--foreground)]">
-            Whacks: {hits}/{targetHits}
-          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="pixel-btn shrink-0 px-2 py-1 font-pixel text-[8px]"
+            title="ออก (ค้างไว้จับทีหลังได้)"
+          >
+            ESC
+          </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 my-4">
-          {grid.map((hasBug, idx) => (
-            <button
-              key={idx}
-              onClick={() => whack(idx)}
-              className="pixel-btn h-24 flex items-center justify-center text-4xl"
-              style={{ background: hasBug ? "#c084fc" : "#2e1047" }}
-            >
-              {hasBug ? "🐛" : ""}
-            </button>
-          ))}
+        {/* Progress — one notch per required hit */}
+        <div className="mb-4 h-2 w-full overflow-hidden" style={{ boxShadow: "0 0 0 2px #1a0f1f" }}>
+          <div
+            style={{
+              height: "100%",
+              width: `${pct}%`,
+              background: "linear-gradient(90deg,#7b3fa0,#c084fc)",
+              transition: "width 0.15s steps(5)",
+            }}
+          />
         </div>
 
-        <div className="mt-3 font-pixel text-[8px] text-[var(--muted-foreground)]">
-          ตีหัวแมลงสีม่วงให้ครบ 5 ครั้ง เพื่อปลดล็อกช่องให้ชาวสวน!
+        <div className="my-1 grid grid-cols-3 gap-3">
+          {grid.map((species, idx) => {
+            const Bug = species !== null ? BUG_ICONS[species] : null;
+            return (
+              <button
+                key={idx}
+                onClick={() => whack(idx)}
+                className="pixel-btn flex h-24 items-center justify-center"
+                data-active={Bug ? "true" : undefined}
+              >
+                {Bug && <Bug size={48} />}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-2">
+          <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+            ตีแมลงให้ครบ {BUG_HUNT_TARGET} ตัว ปลดล็อกช่องให้ชาวสวน
+          </span>
+          <span className="font-pixel text-[9px] text-[var(--gold)]">
+            {hits}/{BUG_HUNT_TARGET}
+          </span>
         </div>
       </div>
     </div>
@@ -3317,16 +3396,60 @@ function SellerPuzzleOverlay({
   );
 }
 
+/** Tiny pixel crate — vector stand-in for the seller "pick up" action. */
+function CrateMark({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated" }}
+    >
+      <rect x="3" y="4" width="10" height="9" fill="#8a5a2b" />
+      <rect x="3" y="4" width="10" height="2" fill="#a06a3a" />
+      <rect x="3" y="11" width="10" height="2" fill="#6b421d" />
+      <rect x="7" y="4" width="2" height="9" fill="#5a2f17" />
+      <rect x="3" y="7" width="10" height="2" fill="#5a2f17" />
+      <rect x="3" y="4" width="10" height="9" fill="none" stroke="#3a2410" strokeWidth="1" />
+    </svg>
+  );
+}
+
+/** Tiny pixel basket — vector stand-in for the basket capacity readout. */
+function BasketMark({ size = 10 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated" }}
+    >
+      <rect x="3" y="6" width="10" height="2" fill="#a06a3a" />
+      <rect x="4" y="8" width="8" height="5" fill="#8a5a2b" />
+      <rect x="4" y="8" width="8" height="5" fill="none" stroke="#5a2f17" strokeWidth="1" />
+      <rect x="6" y="8" width="1" height="5" fill="#6b3a1b" />
+      <rect x="9" y="8" width="1" height="5" fill="#6b3a1b" />
+      <rect x="5" y="4" width="6" height="2" fill="#6b3a1b" />
+    </svg>
+  );
+}
+
 function Toolbar({
   self,
   send,
   marketPrices,
   cargo,
+  bugHuntReady,
+  onBugHunt,
 }: {
   self: PublicPlayer;
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
   marketPrices?: Record<CropId, number>;
   cargo?: Cargo[];
+  bugHuntReady?: boolean;
+  onBugHunt?: () => void;
 }) {
   const cropPool = selectedCropPool(self.selectedCrops);
   if (self.role === "seller") {
@@ -3352,7 +3475,7 @@ function Toolbar({
               className="farm-tool-btn pixel-btn"
               disabled={!nearbyCargo || basketFull}
             >
-              <span>📦</span>
+              <CrateMark />
               <span>หยิบของ</span>
               <span className="farm-key-hint">SPACE</span>
             </button>
@@ -3365,6 +3488,35 @@ function Toolbar({
               <span>{nearMarket && stack.length > 0 ? "ส่งให้ลูกค้า" : "ไปตลาด"}</span>
               <span className="farm-key-hint">1-5</span>
             </button>
+            {/* Bug hunt is optional — only offered when standing near the infested tile.
+                Seller can ignore it and keep moving/selling. */}
+            {(() => {
+              const coords = getInfestedTileCoords(self.tiles);
+              const label = coords
+                ? bugHuntReady
+                  ? "จับแมลง"
+                  : `ไปหลุม (${coords.x},${coords.y})`
+                : "จับแมลง";
+              return (
+                <button
+                  onClick={onBugHunt}
+                  className="farm-tool-btn pixel-btn"
+                  data-active={bugHuntReady ? "true" : undefined}
+                  disabled={!bugHuntReady}
+                  title={
+                    coords
+                      ? bugHuntReady
+                        ? "เปิดมินิเกมจับแมลง"
+                        : `เดินไปช่อง ${coords.x},${coords.y} เพื่อจับแมลง`
+                      : "ไม่มีแมลงรบกวนในสวน"
+                  }
+                >
+                  <CaterpillarIcon size={20} />
+                  <span>{label}</span>
+                  <span className="farm-key-hint">{bugHuntReady ? "พร้อม" : "—"}</span>
+                </button>
+              );
+            })()}
           </div>
         </div>
         <div className="farm-toolbar-section farm-toolbar-crops">
@@ -3386,10 +3538,11 @@ function Toolbar({
                 );
               })}
               <div
-                className="pointer-events-none absolute inset-0 flex items-center justify-center font-pixel text-[7px]"
+                className="pointer-events-none absolute inset-0 flex items-center justify-center gap-1 font-pixel text-[7px]"
                 style={{ color: "var(--foreground)" }}
               >
-                🧺 {stack.length}/{SELLER_BASKET_CAPACITY}
+                <BasketMark />
+                {stack.length}/{SELLER_BASKET_CAPACITY}
               </div>
             </div>
           </div>
