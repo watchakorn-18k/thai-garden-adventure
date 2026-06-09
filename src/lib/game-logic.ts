@@ -102,6 +102,8 @@ export function applyAction(input: ActionInput): ActionResult {
 
   const next = cloneTiles(input.tiles);
   const tile = next[target.y][target.x];
+  if (tile.bug) return { tiles: input.tiles, coins: input.coins, events: [] };
+
   const events: GameEvent[] = [];
   let coins = input.coins;
 

@@ -1,5 +1,6 @@
 import { Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { toast } from "sonner";
 import PixelFarmer from "./PixelFarmer";
 import CosmeticPicker from "./CosmeticPicker";
 import CropIndexBook from "./CropIndexBook";
@@ -32,6 +33,7 @@ import {
   type Direction,
   type MatchTeam,
   type TeamId,
+  type Tile,
   type Tool,
 } from "@/lib/game-types";
 import {
@@ -259,9 +261,34 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
                 });
               }
             }
+          } else if (ev.kind === "bug_found") {
+            SFX.bad();
+            if (ev.playerId === selfId) {
+              toast("แมลงระบาด! 🐛", {
+                id: "bug-found",
+                description: "แมลงกินผักของคุณ! ขอให้คนขายช่วยจับที่ตลาดด่วน",
+              });
+            }
+          } else if (ev.kind === "bug_cleared") {
+            if (ev.playerId === selfId || matchRole === "spectator") {
+              SFX.harvest();
+              const coinCount = Math.min(4, Math.ceil(ev.reward / 15));
+              for (let i = 0; i < coinCount; i++) {
+                setTimeout(() => SFX.coin(), i * 80);
+              }
+              if (ev.playerId === selfId) {
+                toast.success("จับแมลงสำเร็จ! 🐛✨", {
+                  description: `ได้เงินเพิ่ม +${ev.reward} เหรียญ และปลดล็อกช่องแล้ว`,
+                });
+              }
+            }
           } else if (ev.kind === "insufficient_funds") {
             if (ev.playerId === selfId) {
               SFX.bad();
+              toast("เงินไม่พอ", {
+                id: "insufficient-funds",
+                description: "คุณมีเงินไม่พอซื้อเมล็ดพันธุ์",
+              });
             }
           } else if (ev.kind === "cargo_picked_up") {
             if (ev.playerId === selfId || matchRole === "spectator") SFX.harvest();
@@ -983,6 +1010,10 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
 
       {state.status === "playing" && self && !isSpectator && isSellerPuzzleReady(self) && (
         <SellerPuzzleOverlay self={self} send={send} />
+      )}
+
+      {state.status === "playing" && self && !isSpectator && isSellerBugReady(self) && (
+        <BugCatchingOverlay self={self} send={send} />
       )}
 
       {state.status === "playing" && self && !isSpectator && (
@@ -2984,7 +3015,122 @@ function isSellerPuzzleReady(player: PublicPlayer): boolean {
   return (
     player.role === "seller" &&
     playerCargoStack(player).length > 0 &&
-    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5
+    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5 &&
+    !hasInfestedTile(player.tiles)
+  );
+}
+
+function isSellerBugReady(player: PublicPlayer): boolean {
+  return (
+    player.role === "seller" &&
+    Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) <= 1.5 &&
+    hasInfestedTile(player.tiles)
+  );
+}
+
+function hasInfestedTile(tiles?: Tile[][]): boolean {
+  if (!tiles) return false;
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      if (tiles[y]?.[x]?.bug) return true;
+    }
+  }
+  return false;
+}
+
+function getInfestedTileCoords(tiles?: Tile[][]): { x: number; y: number } | null {
+  if (!tiles) return null;
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      if (tiles[y]?.[x]?.bug) return { x, y };
+    }
+  }
+  return null;
+}
+
+function BugCatchingOverlay({
+  self,
+  send,
+}: {
+  self: PublicPlayer;
+  send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
+}) {
+  const infested = getInfestedTileCoords(self.tiles);
+  const [grid, setGrid] = useState<boolean[]>(Array(9).fill(false));
+  const [hits, setHits] = useState(0);
+  const [targetHits] = useState(5);
+  const sentRef = useRef(false);
+
+  // Randomly move the bug every 800ms
+  useEffect(() => {
+    if (!infested) return;
+    const interval = setInterval(() => {
+      const idx = Math.floor(Math.random() * 9);
+      setGrid((g) => g.map((_, i) => i === idx));
+    }, 800);
+    // Initial bug
+    const idx = Math.floor(Math.random() * 9);
+    setGrid((g) => g.map((_, i) => i === idx));
+
+    return () => clearInterval(interval);
+  }, [infested]);
+
+  const whack = (idx: number) => {
+    if (sentRef.current || !infested) return;
+    if (grid[idx]) {
+      SFX.harvest();
+      const newHits = hits + 1;
+      setHits(newHits);
+      if (newHits >= targetHits) {
+        sentRef.current = true;
+        send({ t: "seller_clear_bug", x: infested.x, y: infested.y });
+      } else {
+        // move bug immediately on successful whack
+        const nextIdx = (idx + Math.floor(Math.random() * 8) + 1) % 9;
+        setGrid((g) => g.map((_, i) => i === nextIdx));
+      }
+    } else {
+      SFX.bad();
+    }
+  };
+
+  if (!infested) return null;
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(10,5,15,0.72)] p-4">
+      <div className="pixel-panel w-[min(480px,96vw)] p-5">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="pixel-chip bg-purple-600 border-purple-800 text-white" data-gold="true">
+              BUG HUNT
+            </div>
+            <div className="font-pixel text-[10px] text-purple-400">
+              กำจัดแมลงที่ระบาดสวนเพื่อน ({infested.x}, {infested.y})
+            </div>
+          </div>
+          <div className="pixel-panel p-2 font-pixel text-[10px] text-[var(--foreground)]">
+            Whacks: {hits}/{targetHits}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 my-4">
+          {grid.map((hasBug, idx) => (
+            <button
+              key={idx}
+              onClick={() => whack(idx)}
+              className="pixel-btn h-24 flex items-center justify-center text-4xl"
+              style={{ background: hasBug ? "#c084fc" : "#2e1047" }}
+            >
+              {hasBug ? "🐛" : ""}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-3 font-pixel text-[8px] text-[var(--muted-foreground)]">
+          ตีหัวแมลงสีม่วงให้ครบ 5 ครั้ง เพื่อปลดล็อกช่องให้ชาวสวน!
+        </div>
+      </div>
+    </div>
   );
 }
 

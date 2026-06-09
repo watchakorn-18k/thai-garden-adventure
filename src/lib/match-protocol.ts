@@ -125,6 +125,11 @@ export const clientMsg = z.discriminatedUnion("t", [
     choice: sellerPuzzleChoiceSchema,
     pos: z.object({ x: z.number(), y: z.number() }).optional(),
   }),
+  z.object({
+    t: z.literal("seller_clear_bug"),
+    x: z.number().int(),
+    y: z.number().int(),
+  }),
   z.object({ t: z.literal("swap_role"), targetTeammateId: z.string().min(1) }),
   z.object({ t: z.literal("tool"), tool: toolSchema }),
   z.object({ t: z.literal("seed"), id: cropIdSchema }),
@@ -244,6 +249,8 @@ export type ServerEvent =
       totalReward?: number;
     }
   | { kind: "cargo_spoiled"; playerId: string; cargoId: string; x: number; y: number }
+  | { kind: "bug_found"; playerId: string; x: number; y: number }
+  | { kind: "bug_cleared"; playerId: string; x: number; y: number; reward: number }
   | { kind: "role_swapped"; playerId: string; playerId1: string; playerId2: string };
 
 export type ServerMsg =

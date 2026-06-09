@@ -437,6 +437,26 @@ export default function PhaserField({
               this.paintTile(px, py, cell?.type ?? "grass");
               if (cell?.crop)
                 drawRects(this.cropG, cropRects(cell.crop.id, cell.crop.stage), px, py);
+              if (cell?.bug) {
+                // Draw a simple pixel-art bug on the tile
+                const g = this.cropG;
+                const s = TILE / ART_GRID;
+                const bx = px + 20;
+                const by = py + 20;
+                g.fillStyle(0xa855f7, 1); // Purple bug body
+                g.fillRect(bx + 4 * s, by + 4 * s, 8 * s, 6 * s);
+                g.fillStyle(0x000000, 1); // Bug eyes
+                g.fillRect(bx + 4 * s, by + 4 * s, 2 * s, 2 * s);
+                g.fillRect(bx + 10 * s, by + 4 * s, 2 * s, 2 * s);
+                // Antennas
+                g.fillRect(bx + 5 * s, by + 2 * s, 1 * s, 2 * s);
+                g.fillRect(bx + 10 * s, by + 2 * s, 1 * s, 2 * s);
+                // Legs
+                g.fillRect(bx + 2 * s, by + 6 * s, 2 * s, 1 * s);
+                g.fillRect(bx + 12 * s, by + 6 * s, 2 * s, 1 * s);
+                g.fillRect(bx + 2 * s, by + 8 * s, 2 * s, 1 * s);
+                g.fillRect(bx + 12 * s, by + 8 * s, 2 * s, 1 * s);
+              }
             }
           }
         }
@@ -682,7 +702,6 @@ export default function PhaserField({
         }
 
         spawnEvent(ev: ServerEvent) {
-          if (ev.kind === "insufficient_funds") return;
           if (ev.kind === "cargo_picked_up") {
             // Show pickup text near the teammate who picked up
             const mates = teammatesRef.current;
@@ -742,10 +761,54 @@ export default function PhaserField({
             if (!isSelf) this.drawTeammates();
             return;
           }
-          if (!isSelfRef.current) {
+          if (ev.kind === "bug_found") {
+            const label = this.add
+              .text(ev.x * TILE + TILE / 2, ev.y * TILE, "แมลงระบาด! 🐛", {
+                fontFamily: PIXEL_FONT,
+                fontSize: "10px",
+                color: "#c084fc",
+                stroke: "#000000",
+                strokeThickness: 3,
+              })
+              .setOrigin(0.5, 0.5)
+              .setDepth(20);
+            this.tweens.add({
+              targets: label,
+              y: ev.y * TILE - 24,
+              alpha: 0,
+              duration: 1200,
+              ease: "Quad.Out",
+              onComplete: () => label.destroy(),
+            });
+            return;
+          }
+          if (ev.kind === "bug_cleared") {
+            const label = this.add
+              .text(ev.x * TILE + TILE / 2, ev.y * TILE, `แก้แมลง! +${ev.reward}`, {
+                fontFamily: PIXEL_FONT,
+                fontSize: "10px",
+                color: "#4ade80",
+                stroke: "#000000",
+                strokeThickness: 3,
+              })
+              .setOrigin(0.5, 0.5)
+              .setDepth(20);
+            this.tweens.add({
+              targets: label,
+              y: ev.y * TILE - 24,
+              alpha: 0,
+              duration: 1200,
+              ease: "Quad.Out",
+              onComplete: () => label.destroy(),
+            });
+            return;
+          }
+          if (!("x" in ev) || !("y" in ev)) return;
+          if (ev.kind !== "insufficient_funds" && !isSelfRef.current) {
             this.triggerAction();
           }
           const isWithered = ev.kind === "harvest" && ev.reward === 0;
+          const isInsufficient = ev.kind === "insufficient_funds";
           const text =
             ev.kind === "harvest"
               ? isWithered
@@ -757,9 +820,16 @@ export default function PhaserField({
                   ? "รดน้ำ"
                   : ev.kind === "plant"
                     ? CROPS[ev.cropId].name
-                    : "";
+                    : ev.kind === "insufficient_funds"
+                      ? "เงินไม่พอ"
+                      : "";
           if (!text) return;
-          const color = isWithered ? "#ff6b6b" : ev.kind === "harvest" ? "#ffd24a" : "#f4e4c1";
+          const color =
+            isWithered || isInsufficient
+              ? "#ff6b6b"
+              : ev.kind === "harvest"
+                ? "#ffd24a"
+                : "#f4e4c1";
           const label = this.add
             .text(ev.x * TILE + TILE / 2, ev.y * TILE, text, {
               fontFamily: PIXEL_FONT,

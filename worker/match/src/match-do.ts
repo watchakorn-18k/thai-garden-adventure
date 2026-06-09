@@ -431,6 +431,12 @@ export class MatchRoom implements DurableObject {
       this.sellCargo(player, now, msg.choice);
       return;
     }
+    if (msg.t === "seller_clear_bug") {
+      if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
+      this.advanceMovement(now);
+      this.sellerClearBug(player, msg.x, msg.y, now);
+      return;
+    }
     if (msg.t === "action") {
       if (now - player.lastActionAt < ACTION_COOLDOWN_MS) return;
       this.advanceMovement(now);
@@ -568,19 +574,33 @@ export class MatchRoom implements DurableObject {
       if (ev.kind === "harvest") {
         player.stats.harvests += 1;
         player.stats.cropHarvests[ev.cropId] += 1;
-        const cargoId = crypto.randomUUID();
-        const cargo: Cargo = {
-          id: cargoId,
-          cropId: ev.cropId,
-          position: { x: ev.x, y: ev.y },
-          ownerPlayerId: player.id,
-          teamId: team.id,
-          baseReward: ev.reward,
-          createdAt: now,
-        };
-        this.fieldCargo.push(cargo);
-        this.pendingEvents.push({ kind: "cargo_created", playerId: player.id, cargo });
-        this.updateMarketAfterHarvest(ev.cropId);
+
+        // Spawn bugs with 15% probability on harvest in 2v2
+        const hasBug = Math.random() < 0.15;
+        if (hasBug) {
+          player.tiles[ev.y][ev.x] = { type: "grass", bug: true };
+          // Sync with teammate
+          for (const teammate of this.players.values()) {
+            if (teammate.teamId === player.teamId && teammate.id !== player.id) {
+              teammate.tiles = player.tiles;
+            }
+          }
+          this.pendingEvents.push({ kind: "bug_found", playerId: player.id, x: ev.x, y: ev.y });
+        } else {
+          const cargoId = crypto.randomUUID();
+          const cargo: Cargo = {
+            id: cargoId,
+            cropId: ev.cropId,
+            position: { x: ev.x, y: ev.y },
+            ownerPlayerId: player.id,
+            teamId: team.id,
+            baseReward: ev.reward,
+            createdAt: now,
+          };
+          this.fieldCargo.push(cargo);
+          this.pendingEvents.push({ kind: "cargo_created", playerId: player.id, cargo });
+          this.updateMarketAfterHarvest(ev.cropId);
+        }
       } else {
         this.pendingEvents.push({ ...ev, playerId: player.id });
       }
@@ -666,6 +686,60 @@ export class MatchRoom implements DurableObject {
       cargoIds: [cargo.id],
       totalReward: reward,
     });
+    this.checkTeamRaceWin();
+    if (this.status !== "ended") {
+      this.persist();
+      this.broadcastSnapshot();
+    }
+    this.flushEvents();
+  }
+
+  private sellerClearBug(player: PlayerState, x: number, y: number, now: number): void {
+    if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
+    // Seller must be at the market stall to clear bugs
+    if (Math.hypot(MARKET_TILE_POS.x - player.pos.x, MARKET_TILE_POS.y - player.pos.y) > 1.5)
+      return;
+
+    const team = this.teams.find((t) => t.id === player.teamId);
+    if (!team) return;
+
+    // Check if the team's field has a bug at (x, y)
+    // In 2v2, team A uses player 0's board, team B uses player 2's board.
+    const farmerId = team.playerIds.find((id) => {
+      const p = this.players.get(id);
+      return p && p.role === "farmer";
+    });
+    if (!farmerId) return;
+    const farmer = this.players.get(farmerId);
+    if (!farmer) return;
+
+    const tile = farmer.tiles[y]?.[x];
+    if (!tile || !tile.bug) return;
+
+    // Remove the bug
+    tile.bug = false;
+
+    // Sync with teammate
+    for (const teammate of this.players.values()) {
+      if (teammate.teamId === player.teamId) {
+        teammate.tiles = farmer.tiles;
+      }
+    }
+
+    // Reward team with flat coins
+    const reward = 30;
+    team.coins += reward;
+    player.stats.coinsEarned += reward;
+    this.mirrorTeamCoinsToPlayers();
+
+    this.pendingEvents.push({
+      kind: "bug_cleared",
+      playerId: player.id,
+      x,
+      y,
+      reward,
+    });
+
     this.checkTeamRaceWin();
     if (this.status !== "ended") {
       this.persist();
