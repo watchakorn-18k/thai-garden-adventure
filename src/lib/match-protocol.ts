@@ -96,6 +96,7 @@ export const clientMsg = z.discriminatedUnion("t", [
     t: z.literal("join"),
     code: z.string().regex(ROOM_CODE_RE),
     name: z.string().min(1).max(16),
+    userId: z.string().optional(),
     sessionId: z.string().optional(),
     role: matchRoleSchema.optional(),
     cosmetics: cosmeticsSchema.optional(),
@@ -168,6 +169,7 @@ export interface PublicPlayerStats {
 
 export interface PublicPlayer {
   id: string;
+  userId?: string;
   name: string;
   coins: number;
   teamId?: TeamId;
@@ -195,6 +197,7 @@ export interface MatchRecap {
   timeRemainingMs: number;
   players: Array<{
     id: string;
+  userId?: string;
     name: string;
     coins: number;
     harvests: number;

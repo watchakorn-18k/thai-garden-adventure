@@ -40,6 +40,7 @@ import { DEFAULT_COSMETICS, type PlayerCosmetics } from "../../../src/lib/player
 interface PlayerState {
   id: string;
   sessionId: string;
+  userId?: string;
   name: string;
   cosmetics: PlayerCosmetics;
   coins: number;
@@ -205,7 +206,7 @@ export class MatchRoom implements DurableObject {
     const msg = parsed.data;
 
     if (msg.t === "join") {
-      this.handleJoin(ws, msg.code, msg.name, msg.sessionId, msg.role ?? "player", msg.cosmetics);
+      this.handleJoin(ws, msg.code, msg.name, msg.sessionId, msg.role ?? "player", msg.cosmetics, msg.userId);
       return;
     }
 
@@ -1348,6 +1349,7 @@ export class MatchRoom implements DurableObject {
     sessionId?: string,
     role: MatchRole = "player",
     cosmetics: PlayerCosmetics = DEFAULT_COSMETICS,
+    userId?: string,
   ): void {
     this.code = code;
     this.dropDisconnectedWaitingPlayers();
@@ -1419,6 +1421,8 @@ export class MatchRoom implements DurableObject {
     } | null;
     if (att?.playerId && this.players.has(att.playerId)) {
       playerId = att.playerId;
+    } else if (userId && [...this.players.values()].some((p) => p.userId === userId)) {
+      playerId = [...this.players.values()].find((p) => p.userId === userId)?.id;
     } else if (sessionId) {
       playerId = [...this.players.values()].find((p) => p.sessionId === sessionId)?.id;
     }
@@ -1442,6 +1446,7 @@ export class MatchRoom implements DurableObject {
       this.players.set(playerId, {
         id: playerId,
         sessionId,
+        userId,
         name,
         cosmetics: cosmeticsSchema.parse(cosmetics),
         coins: 50,

@@ -18,6 +18,7 @@ interface MatchError {
 interface UseMatchOpts {
   code: string;
   name: string;
+  userId?: string;
   enabled?: boolean;
   role?: MatchRole;
   cosmetics?: PlayerCosmetics;
@@ -60,6 +61,16 @@ function sessionKey(code: string): string {
 function readSessionId(code: string): string | undefined {
   if (typeof window === "undefined") return undefined;
   return sessionStorage.getItem(sessionKey(code)) ?? undefined;
+}
+
+function readUserId(): string | undefined {
+  if (typeof window === "undefined") return undefined;
+  let userId = localStorage.getItem("tg.userId");
+  if (!userId) {
+    userId = crypto.randomUUID();
+    localStorage.setItem("tg.userId", userId);
+  }
+  return userId;
 }
 
 function writeSessionId(code: string, sessionId: string): void {
@@ -126,6 +137,7 @@ export function useMatch({
           role,
           cosmetics: cosmeticsRef.current,
           sessionId: readSessionId(code),
+          userId: readUserId(),
         };
         ws.send(JSON.stringify(msg));
         sentJoinRef.current = true;
