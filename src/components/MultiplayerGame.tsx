@@ -516,6 +516,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const lastStatus = useRef<string | undefined>(undefined);
   const [actionFlash, setActionFlash] = useState(0);
   const [acting, setActing] = useState(false);
+  const actingRef = useRef(false);
   const actionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [combo, setCombo] = useState(0);
   const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -566,6 +567,8 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     (dir: Direction | null) => {
       if (isSpectator) return;
       if (!selfRef.current || statusRef.current !== "playing") return;
+      // Freeze movement while the dig/use animation plays so it finishes first.
+      if (actingRef.current && dir) return;
       if (lastInputDir.current === dir) return;
       lastInputDir.current = dir;
       setPredictedDir(dir);
@@ -577,14 +580,31 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const sendAction = useCallback(() => {
     if (isSpectator) return;
     if (statusRef.current !== "playing") return;
+    const isSeller = selfRef.current?.role === "seller";
     setActionFlash((n) => n + 1);
     setActing(true);
     if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
-    actionTimerRef.current = setTimeout(() => setActing(false), 320);
+    // Farmers freeze in place until the dig/use animation finishes; sellers
+    // (quick pickup) keep moving freely.
+    if (!isSeller) {
+      actingRef.current = true;
+      if (lastInputDir.current) {
+        lastInputDir.current = null;
+        setPredictedDir(null);
+        send({ t: "move_stop" });
+      }
+      actionTimerRef.current = setTimeout(() => {
+        setActing(false);
+        actingRef.current = false;
+        // Resume walking if a movement key is still held after the animation.
+        const dir = keysToDir(keys.current, nextDiagonalAxis);
+        if (dir) setMovement(dir);
+      }, 320);
+    } else {
+      actionTimerRef.current = setTimeout(() => setActing(false), 320);
+    }
     const local = localPlayerRef.current;
     if (local) {
-      const isSeller = selfRef.current?.role === "seller";
-
       if (isSeller) {
         // Seller pickup — play harvest SFX, skip farmer pending action
         SFX.harvest();
@@ -631,7 +651,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
 
       send({ t: "action", pos: local.pos, dir: local.dir });
     }
-  }, [isSpectator, send, recalculateLocalPlayer]);
+  }, [isSpectator, send, recalculateLocalPlayer, setMovement]);
 
   useEffect(() => {
     if (isSpectator) return;
@@ -711,6 +731,11 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     const tick = (now: number) => {
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
+      // Pause local movement prediction while the dig/use animation plays.
+      if (actingRef.current) {
+        raf = requestAnimationFrame(tick);
+        return;
+      }
       const k = keys.current;
       let dx = 0;
       let dy = 0;
@@ -749,6 +774,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     if (isSpectator) return;
     if (state?.status !== "playing") return;
     const i = setInterval(() => {
+      if (actingRef.current) return;
       const dir = keysToDir(keys.current, nextDiagonalAxis);
       if (dir) {
         lastInputDir.current = dir;
