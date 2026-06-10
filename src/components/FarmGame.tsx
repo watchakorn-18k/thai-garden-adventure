@@ -207,13 +207,16 @@ export default function FarmGame() {
     return { x, y };
   }, [pos, dir]);
 
-  const addPopup = (x: number, y: number, text: string, tone: "good" | "bad" | "info" = "info") => {
-    const id = ++popupId.current;
-    setPopups((p) => [...p, { id, x, y, text, tone }]);
-    setTimeout(() => setPopups((p) => p.filter((q) => q.id !== id)), 950);
-  };
+  const addPopup = useCallback(
+    (x: number, y: number, text: string, tone: "good" | "bad" | "info" = "info") => {
+      const id = ++popupId.current;
+      setPopups((p) => [...p, { id, x, y, text, tone }]);
+      setTimeout(() => setPopups((p) => p.filter((q) => q.id !== id)), 950);
+    },
+    [],
+  );
 
-  const burstParticles = (x: number, y: number, kind: "dirt" | "water" | "sparkle") => {
+  const burstParticles = useCallback((x: number, y: number, kind: "dirt" | "water" | "sparkle") => {
     const palette =
       kind === "dirt"
         ? ["#6b3a1c", "#8b5a2b", "#3d2412"]
@@ -237,20 +240,20 @@ export default function FarmGame() {
     popupId.current += count;
     setParticles((p) => [...p, ...fresh]);
     setTimeout(() => setParticles((p) => p.filter((q) => !fresh.find((f) => f.id === q.id))), 650);
-  };
+  }, []);
 
-  const shake = (x: number, y: number) => {
+  const shake = useCallback((x: number, y: number) => {
     const id = ++popupId.current;
     setShakeTile({ x, y, id });
     setTimeout(() => setShakeTile((s) => (s?.id === id ? null : s)), 280);
-  };
+  }, []);
 
-  const triggerScreenShake = (intensity = 1) => {
+  const triggerScreenShake = useCallback((intensity = 1) => {
     setScreenShake((s) => Math.max(s, intensity));
     setTimeout(() => setScreenShake(0), 320);
-  };
+  }, []);
 
-  const spawnFlyCoins = (x: number, y: number, n: number) => {
+  const spawnFlyCoins = useCallback((x: number, y: number, n: number) => {
     const sx = x * TILE + TILE / 2;
     const sy = y * TILE + TILE / 2;
     // target ~ top-right of field where coin chip lives
@@ -279,13 +282,13 @@ export default function FarmGame() {
       },
       700 + n * 60,
     );
-  };
+  }, []);
 
-  const spawnCrit = (x: number, y: number) => {
+  const spawnCrit = useCallback((x: number, y: number) => {
     const id = ++popupId.current;
     setCrits((c) => [...c, { id, x, y }]);
     setTimeout(() => setCrits((c) => c.filter((q) => q.id !== id)), 500);
-  };
+  }, []);
 
   const doAction = useCallback(
     (override?: {
@@ -424,7 +427,7 @@ export default function FarmGame() {
         return result.tiles;
       });
     },
-    [burstParticles, shake, spawnFlyCoins, spawnCrit, triggerScreenShake],
+    [addPopup, burstParticles, shake, spawnFlyCoins, spawnCrit, triggerScreenShake],
   );
 
   const doActionRef = useRef(doAction);

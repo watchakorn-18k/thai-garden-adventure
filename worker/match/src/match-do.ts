@@ -107,6 +107,12 @@ const MAX_SPECTATORS = 10;
 const BOT_TICK_MS = 150;
 const BOT_NAMES = ["บอทมะลิ", "บอทข้าวหอม", "บอทตะวัน", "บอทใบเตย", "บอทมะนาว"];
 const BOT_COSMETICS: PlayerCosmetics = { hat: "#8bc967", shirt: "#4cc2ee", pants: "#4a2f5c" };
+const TWO_V_TWO_SLOTS = [
+  { teamId: "A", role: "farmer" },
+  { teamId: "A", role: "seller" },
+  { teamId: "B", role: "farmer" },
+  { teamId: "B", role: "seller" },
+] as const satisfies Array<{ teamId: TeamId; role: PlayerRole }>;
 
 interface SocketAttachment {
   playerId?: string;
@@ -270,6 +276,11 @@ export class MatchRoom implements DurableObject {
       player.cosmetics = cosmeticsSchema.parse(msg.cosmetics);
       this.persist();
       this.broadcastSnapshot();
+      return;
+    }
+
+    if (msg.t === "choose_team_role") {
+      this.chooseTeamRole(ws, player, msg.teamId, msg.role);
       return;
     }
 
@@ -786,6 +797,48 @@ export class MatchRoom implements DurableObject {
     }
   }
 
+  private chooseTeamRole(
+    ws: WebSocket,
+    player: PlayerState,
+    teamId: TeamId,
+    role: PlayerRole,
+  ): void {
+    if (this.settings.mode !== "2v2") {
+      this.sendTo(ws, { t: "error", code: "invalid_mode", message: "เลือกทีมได้เฉพาะโหมด 2v2" });
+      return;
+    }
+    if (this.status !== "lobby") {
+      this.sendTo(ws, { t: "error", code: "match_active", message: "เลือกทีมได้เฉพาะในล็อบบี้" });
+      return;
+    }
+    if (player.isBot) return;
+    if ([...this.players.values()].some((p) => p.ready)) {
+      this.sendTo(ws, { t: "error", code: "ready_locked", message: "มีผู้เล่นกด READY แล้ว" });
+      return;
+    }
+    const occupant = this.slotOccupant(teamId, role, player.id);
+    if (occupant && !occupant.isBot) {
+      this.sendTo(ws, { t: "error", code: "slot_taken", message: "สล็อตนี้มีผู้เล่นแล้ว" });
+      return;
+    }
+    player.teamId = teamId;
+    player.role = role;
+    if (role !== "seller") clearPlayerCargo(player);
+    this.syncTeamsAndRoles();
+    this.persist();
+    this.broadcastSnapshot();
+  }
+
+  private slotOccupant(
+    teamId: TeamId,
+    role: PlayerRole,
+    exceptPlayerId?: string,
+  ): PlayerState | undefined {
+    return [...this.players.values()].find(
+      (p) => p.id !== exceptPlayerId && p.teamId === teamId && p.role === role,
+    );
+  }
+
   private syncTeamsAndRoles(resetCoins = false): void {
     if (this.settings.mode !== "2v2") {
       this.teams = [];
@@ -799,27 +852,59 @@ export class MatchRoom implements DurableObject {
     }
 
     const players = [...this.players.values()];
+    const assigned = new Map<string, PlayerState>();
+    const assign = (player: PlayerState): boolean => {
+      if (!player.teamId || !player.role) return false;
+      if (
+        !TWO_V_TWO_SLOTS.some((slot) => slot.teamId === player.teamId && slot.role === player.role)
+      ) {
+        player.teamId = undefined;
+        player.role = undefined;
+        return false;
+      }
+      const key = slotKey(player.teamId, player.role);
+      if (assigned.has(key)) {
+        player.teamId = undefined;
+        player.role = undefined;
+        return false;
+      }
+      assigned.set(key, player);
+      return true;
+    };
+
+    for (const player of players.filter((p) => !p.isBot)) assign(player);
+    for (const player of players.filter((p) => p.isBot)) assign(player);
+
+    for (const player of players) {
+      if (player.teamId && player.role) continue;
+      const slot = TWO_V_TWO_SLOTS.find((s) => !assigned.has(slotKey(s.teamId, s.role)));
+      if (!slot) continue;
+      player.teamId = slot.teamId;
+      player.role = slot.role;
+      assigned.set(slotKey(slot.teamId, slot.role), player);
+    }
+
     const existingCoins = new Map(this.teams.map((team) => [team.id, team.coins]));
-    this.teams = [
-      {
-        id: "A",
-        name: "Team A",
-        playerIds: players.slice(0, 2).map((p) => p.id),
-        coins: resetCoins ? 50 : (existingCoins.get("A") ?? 50),
-      },
-      {
-        id: "B",
-        name: "Team B",
-        playerIds: players.slice(2, 4).map((p) => p.id),
-        coins: resetCoins ? 50 : (existingCoins.get("B") ?? 50),
-      },
-    ];
-    for (const [idx, player] of players.entries()) {
-      player.teamId = idx < 2 ? "A" : "B";
-      player.role = idx % 2 === 0 ? "farmer" : "seller";
+    this.teams = ["A", "B"].map((id) => ({
+      id: id as TeamId,
+      name: `Team ${id}`,
+      playerIds: TWO_V_TWO_SLOTS.filter((slot) => slot.teamId === id)
+        .map((slot) => assigned.get(slotKey(slot.teamId, slot.role))?.id)
+        .filter((id): id is string => Boolean(id)),
+      coins: resetCoins ? 50 : (existingCoins.get(id as TeamId) ?? 50),
+    }));
+    for (const player of players) {
       if (player.role !== "seller") clearPlayerCargo(player);
     }
     this.mirrorTeamCoinsToPlayers();
+  }
+
+  private slotIndexForPlayer(player: PlayerState): number | undefined {
+    if (!player.teamId || !player.role) return undefined;
+    const idx = TWO_V_TWO_SLOTS.findIndex(
+      (slot) => slot.teamId === player.teamId && slot.role === player.role,
+    );
+    return idx >= 0 ? idx : undefined;
   }
 
   private mirrorTeamCoinsToPlayers(): void {
@@ -1728,7 +1813,7 @@ export class MatchRoom implements DurableObject {
       p.selectedCrops = fillSelectedCrops(p.selectedCrops, this.bannedCropIds());
       p.seedChoice = p.selectedCrops[0];
       p.dir = "down";
-      p.pos = this.spawnPosForSlot(idx);
+      p.pos = this.spawnPosForSlot(this.slotIndexForPlayer(p) ?? idx);
       p.disconnectedAt = undefined;
       p.stats = emptyStats();
       p.inputDir = undefined;
@@ -2280,6 +2365,10 @@ interface BotPlan {
 
 function randInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function slotKey(teamId: TeamId, role: PlayerRole): string {
+  return `${teamId}:${role}`;
 }
 
 function pickBotCrops(banned: readonly CropId[]): CropId[] {

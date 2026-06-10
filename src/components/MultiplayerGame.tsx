@@ -35,6 +35,7 @@ import {
   type CropId,
   type Direction,
   type MatchTeam,
+  type PlayerRole,
   type TeamId,
   type Tile,
   type Tool,
@@ -599,9 +600,15 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const sendAction = useCallback(() => {
     if (isSpectator) return;
     if (statusRef.current !== "playing") return;
-    const isSeller = selfRef.current?.role === "seller";
+    const currentSelf = selfRef.current;
+    const isSeller = currentSelf?.role === "seller";
+    if (isSeller && currentSelf && isSellerBugReady(currentSelf)) {
+      SFX.click();
+      setBugHuntOpen(true);
+      return;
+    }
     if (!isSeller && actingRef.current) return;
-    const actDur = toolDurationMs(selfRef.current?.tool ?? "hoe");
+    const actDur = toolDurationMs(currentSelf?.tool ?? "hoe");
     setActionFlash((n) => n + 1);
     setActing(true);
     if (actionTimerRef.current) clearTimeout(actionTimerRef.current);
@@ -940,6 +947,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
             onKick={(playerId) => send({ t: "kick", playerId })}
             onAddBot={() => send({ t: "add_bot" })}
             onRemoveBot={(playerId) => send({ t: "remove_bot", playerId })}
+            onChooseTeamRole={(teamId, role) => send({ t: "choose_team_role", teamId, role })}
           />
         ))}
 
@@ -1667,6 +1675,7 @@ function LobbyView({
   onKick,
   onAddBot,
   onRemoveBot,
+  onChooseTeamRole,
 }: {
   self?: PublicPlayer;
   opp?: PublicPlayer;
@@ -1679,6 +1688,7 @@ function LobbyView({
   onKick: (playerId: string) => void;
   onAddBot: () => void;
   onRemoveBot: (playerId: string) => void;
+  onChooseTeamRole: (teamId: TeamId, role: PlayerRole) => void;
 }) {
   const is2v2 = state.settings.mode === "2v2";
   const waitingForOpponent = is2v2 ? state.players.length < state.settings.maxPlayers : !opp;
@@ -1733,11 +1743,14 @@ function LobbyView({
       {state.settings.mode === "2v2" ? (
         <TeamSlots
           players={state.players}
+          selfId={self?.id}
           hostId={state.hostId}
           isHost={isHost && state.status === "lobby"}
           canManage={isHost && state.status === "lobby"}
+          canChoose={state.status === "lobby" && !state.players.some((p) => p.ready)}
           onKick={onKick}
           onRemoveBot={onRemoveBot}
+          onChooseTeamRole={onChooseTeamRole}
         />
       ) : (
         <div className="lobby-versus-grid">
@@ -2302,45 +2315,57 @@ function RoomSettingsSummary({
 
 function TeamSlots({
   players,
+  selfId,
   hostId,
   isHost,
   canManage = false,
+  canChoose = false,
   onKick,
   onRemoveBot,
+  onChooseTeamRole,
 }: {
   players: PublicPlayer[];
+  selfId?: string;
   hostId?: string;
   isHost: boolean;
   canManage?: boolean;
+  canChoose?: boolean;
   onKick?: (playerId: string) => void;
   onRemoveBot?: (playerId: string) => void;
+  onChooseTeamRole?: (teamId: TeamId, role: PlayerRole) => void;
 }) {
-  const teamA = players.filter((p) => p.teamId === "A");
-  const teamB = players.filter((p) => p.teamId === "B");
   return (
     <div className="grid w-full grid-cols-1 gap-4 md:grid-cols-[1fr_auto_1fr]">
       <TeamSlotColumn
         title="TEAM A"
-        players={teamA}
+        teamId="A"
+        players={players}
+        selfId={selfId}
         side="left"
         hostId={hostId}
         isHost={isHost}
         canManage={canManage}
+        canChoose={canChoose}
         onKick={onKick}
         onRemoveBot={onRemoveBot}
+        onChooseTeamRole={onChooseTeamRole}
       />
       <div className="lobby-vs-core self-center justify-self-center" aria-hidden>
         <span>VS</span>
       </div>
       <TeamSlotColumn
         title="TEAM B"
-        players={teamB}
+        teamId="B"
+        players={players}
+        selfId={selfId}
         side="right"
         hostId={hostId}
         isHost={isHost}
         canManage={canManage}
+        canChoose={canChoose}
         onKick={onKick}
         onRemoveBot={onRemoveBot}
+        onChooseTeamRole={onChooseTeamRole}
       />
     </div>
   );
@@ -2348,46 +2373,60 @@ function TeamSlots({
 
 function TeamSlotColumn({
   title,
+  teamId,
   players,
+  selfId,
   side,
   hostId,
   isHost,
   canManage = false,
+  canChoose = false,
   onKick,
   onRemoveBot,
+  onChooseTeamRole,
 }: {
   title: string;
+  teamId: TeamId;
   players: PublicPlayer[];
+  selfId?: string;
   side: "left" | "right";
   hostId?: string;
   isHost: boolean;
   canManage?: boolean;
+  canChoose?: boolean;
   onKick?: (playerId: string) => void;
   onRemoveBot?: (playerId: string) => void;
+  onChooseTeamRole?: (teamId: TeamId, role: PlayerRole) => void;
 }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="pixel-chip text-center font-pixel text-[9px]" data-gold="true">
         {title}
       </div>
-      {[0, 1].map((idx) => {
-        const player = players[idx];
+      {(["farmer", "seller"] as const).map((role) => {
+        const player = players.find((p) => p.teamId === teamId && p.role === role);
         const isBot = Boolean(player?.isBot);
+        const isSelf = player?.id === selfId;
         // Real players are kickable only by a host who owns the room (isHost).
         // Bots are removable by anyone with room-management rights (canManage),
         // which includes a spectator-host who added them.
         const kickable = Boolean(player) && (isBot ? canManage || isHost : isHost);
         const handler = isBot ? onRemoveBot : onKick;
+        const canPickSlot = canChoose && !isSelf && (!player || isBot) && Boolean(onChooseTeamRole);
         return (
           <PlayerCard
-            key={player?.id ?? idx}
+            key={`${teamId}-${role}`}
             player={player}
-            label={<RoleBadge role={player?.role ?? (idx % 2 === 0 ? "farmer" : "seller")} />}
+            label={<RoleBadge role={role} />}
             side={side}
             hostId={hostId}
             canKick={kickable && Boolean(handler)}
             onKick={handler}
             kickLabel={isBot ? "ลบบอท" : "เตะ"}
+            chooseLabel={player?.isBot ? "แทนที่บอท" : "เลือกสล็อตนี้"}
+            canChoose={canPickSlot}
+            onChoose={() => onChooseTeamRole?.(teamId, role)}
+            isSelfSlot={isSelf}
           />
         );
       })}
@@ -2403,6 +2442,10 @@ function PlayerCard({
   canKick = false,
   onKick,
   kickLabel = "เตะ",
+  canChoose = false,
+  onChoose,
+  chooseLabel = "เลือกสล็อตนี้",
+  isSelfSlot = false,
 }: {
   player?: PublicPlayer;
   label: ReactNode;
@@ -2411,6 +2454,10 @@ function PlayerCard({
   canKick?: boolean;
   onKick?: (playerId: string) => void;
   kickLabel?: string;
+  canChoose?: boolean;
+  onChoose?: () => void;
+  chooseLabel?: string;
+  isSelfSlot?: boolean;
 }) {
   const ready = Boolean(player?.ready);
   return (
@@ -2453,8 +2500,19 @@ function PlayerCard({
       </div>
       <div className="lobby-player-name font-pixel">{player?.name ?? "สล็อตว่าง"}</div>
       <div className="lobby-player-meta font-pixel" data-ready={ready ? "true" : undefined}>
-        {player ? (ready ? "พร้อมแล้ว" : "รออยู่") : "เชิญเพื่อน"}
+        {isSelfSlot ? "สล็อตคุณ" : player ? (ready ? "พร้อมแล้ว" : "รออยู่") : "เชิญเพื่อน"}
       </div>
+      {canChoose && (
+        <button
+          onClick={() => {
+            SFX.click();
+            onChoose?.();
+          }}
+          className="pixel-btn mt-3 px-3 py-2"
+        >
+          <span className="font-pixel text-[8px]">{chooseLabel}</span>
+        </button>
+      )}
       {canKick && player && (
         <button
           onClick={() => {
@@ -3127,7 +3185,10 @@ function getInfestedTileCoords(tiles?: Tile[][]): { x: number; y: number } | nul
 }
 
 const BUG_ICONS = [CaterpillarIcon, BeetleIcon, FlyIcon] as const;
-const BUG_HUNT_TARGET = 5;
+const BUG_HUNT_TARGET = 3;
+const BUG_ARENA_W = 320;
+const BUG_ARENA_H = 220;
+const BUG_CATCH_RADIUS = 42;
 
 function BugCatchingOverlay({
   self,
@@ -3139,22 +3200,40 @@ function BugCatchingOverlay({
   onClose: () => void;
 }) {
   const infested = getInfestedTileCoords(self.tiles);
-  // Each cell holds either null (empty) or the bug-species index sitting there.
-  const [grid, setGrid] = useState<(number | null)[]>(() => Array(9).fill(null));
+  const [bug, setBug] = useState(() => ({ x: 82, y: 92, species: 0 }));
+  const [net, setNet] = useState(() => ({ x: 238, y: 128 }));
   const [hits, setHits] = useState(0);
+  const bugRef = useRef(bug);
+  const velocityRef = useRef({ x: 1.8, y: 1.25 });
   const sentRef = useRef(false);
+  const hitLockRef = useRef(false);
 
-  const spawnAt = useCallback((idx: number) => {
-    const species = Math.floor(Math.random() * BUG_ICONS.length);
-    setGrid((g) => g.map((_, i) => (i === idx ? species : null)));
-  }, []);
+  useEffect(() => {
+    bugRef.current = bug;
+  }, [bug]);
 
-  // The bug moves to a new random cell only when hit.
-  // We removed the automatic timer to make it easier and more predictable.
   useEffect(() => {
     if (!infested) return;
-    spawnAt(Math.floor(Math.random() * 9));
-  }, [infested, spawnAt]);
+    let raf = 0;
+    const tick = () => {
+      const current = bugRef.current;
+      const velocity = velocityRef.current;
+      let x = current.x + velocity.x;
+      let y = current.y + velocity.y;
+      if (x < 28 || x > BUG_ARENA_W - 28) {
+        velocity.x *= -1;
+        x = Math.max(28, Math.min(BUG_ARENA_W - 28, x));
+      }
+      if (y < 28 || y > BUG_ARENA_H - 28) {
+        velocity.y *= -1;
+        y = Math.max(28, Math.min(BUG_ARENA_H - 28, y));
+      }
+      setBug({ ...current, x, y });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [infested]);
 
   // Close automatically once the server confirms the bug is gone, or on Escape.
   useEffect(() => {
@@ -3168,34 +3247,60 @@ function BugCatchingOverlay({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose]);
 
-  const whack = (idx: number) => {
-    if (sentRef.current || !infested || grid[idx] === null) {
-      if (grid[idx] === null) SFX.bad();
-      return;
-    }
+  const moveNet = (e: React.PointerEvent<HTMLDivElement>, shouldCatch: boolean) => {
+    if (!infested || sentRef.current) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.max(
+      0,
+      Math.min(BUG_ARENA_W, ((e.clientX - rect.left) / rect.width) * BUG_ARENA_W),
+    );
+    const y = Math.max(
+      0,
+      Math.min(BUG_ARENA_H, ((e.clientY - rect.top) / rect.height) * BUG_ARENA_H),
+    );
+    setNet({ x, y });
+    if (!shouldCatch || hitLockRef.current) return;
+    const dx = x - bugRef.current.x;
+    const dy = y - bugRef.current.y;
+    if (Math.hypot(dx, dy) > BUG_CATCH_RADIUS) return;
+
     SFX.harvest();
+    hitLockRef.current = true;
     const newHits = hits + 1;
     setHits(newHits);
     if (newHits >= BUG_HUNT_TARGET) {
       sentRef.current = true;
       send({ t: "seller_clear_bug", x: infested.x, y: infested.y });
-    } else {
-      // Bug darts to a different cell on a successful hit.
-      spawnAt((idx + Math.floor(Math.random() * 8) + 1) % 9);
+      return;
     }
+    const next = {
+      x: 40 + Math.random() * (BUG_ARENA_W - 80),
+      y: 40 + Math.random() * (BUG_ARENA_H - 80),
+      species: (bugRef.current.species + 1) % BUG_ICONS.length,
+    };
+    velocityRef.current = {
+      x: (velocityRef.current.x > 0 ? 1 : -1) * (2.1 + newHits * 0.35),
+      y: (velocityRef.current.y > 0 ? -1 : 1) * (1.55 + newHits * 0.3),
+    };
+    bugRef.current = next;
+    setBug(next);
+    setTimeout(() => {
+      hitLockRef.current = false;
+    }, 350);
   };
 
   if (!infested) return null;
 
+  const Bug = BUG_ICONS[bug.species];
   const pct = Math.min(100, (hits / BUG_HUNT_TARGET) * 100);
 
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-[rgba(10,5,15,0.72)] p-4">
-      <div className="pixel-panel w-[min(480px,96vw)] p-5">
+      <div className="pixel-panel w-[min(520px,96vw)] p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex min-w-0 items-center gap-3">
             <span className="pixel-chip font-pixel text-[9px]" data-gold="true">
-              BUG HUNT
+              NET CHASE
             </span>
             <span className="truncate font-pixel text-[10px] text-[var(--muted-foreground)]">
               แมลงลงสวนช่อง {infested.x},{infested.y}
@@ -3211,44 +3316,70 @@ function BugCatchingOverlay({
           </button>
         </div>
 
-        {/* Progress — one notch per required hit */}
-        <div className="mb-4 h-2 w-full overflow-hidden" style={{ boxShadow: "0 0 0 2px #1a0f1f" }}>
+        <div
+          className="mb-4 h-2 w-full overflow-hidden"
+          style={{ boxShadow: "0 0 0 2px var(--background)" }}
+        >
           <div
             style={{
               height: "100%",
               width: `${pct}%`,
-              background: "linear-gradient(90deg,#7b3fa0,#c084fc)",
-              transition: "width 0.15s steps(5)",
+              background: "var(--gold)",
+              transition: "width 0.15s steps(3)",
             }}
           />
         </div>
 
-        <div className="my-1 grid grid-cols-3 gap-3">
-          {grid.map((species, idx) => {
-            const Bug = species !== null ? BUG_ICONS[species] : null;
-            return (
-              <button
-                key={idx}
-                onClick={() => whack(idx)}
-                className="pixel-btn flex h-24 items-center justify-center"
-                data-active={Bug ? "true" : undefined}
-              >
-                {Bug && <Bug size={48} />}
-              </button>
-            );
-          })}
+        <div
+          role="button"
+          tabIndex={0}
+          className="relative mx-auto h-[220px] w-full max-w-[320px] overflow-hidden bg-[var(--muted)] outline-none"
+          style={{
+            touchAction: "none",
+            boxShadow:
+              "0 0 0 2px var(--background), 0 0 0 6px var(--border), inset 0 0 0 3px rgba(255,255,255,.08)",
+          }}
+          onPointerDown={(e) => {
+            e.currentTarget.setPointerCapture(e.pointerId);
+            moveNet(e, true);
+          }}
+          onPointerMove={(e) => moveNet(e, e.buttons === 1)}
+        >
+          <div
+            className="absolute grid size-12 place-items-center text-[var(--gold)]"
+            style={{
+              left: `${(bug.x / BUG_ARENA_W) * 100}%`,
+              top: `${(bug.y / BUG_ARENA_H) * 100}%`,
+              transform: "translate(-50%, -50%)",
+              filter: "drop-shadow(2px 2px 0 var(--background))",
+            }}
+          >
+            <Bug size={42} />
+          </div>
+          <div
+            className="pointer-events-none absolute grid size-16 place-items-center font-pixel text-[38px]"
+            style={{
+              left: `${(net.x / BUG_ARENA_W) * 100}%`,
+              top: `${(net.y / BUG_ARENA_H) * 100}%`,
+              transform: "translate(-50%, -50%) rotate(-18deg)",
+              textShadow: "2px 2px 0 var(--background)",
+            }}
+            aria-hidden
+          >
+            🕸️
+          </div>
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-2">
           <span className="font-pixel text-[8px] text-[var(--gold)] animate-bounce">
-            👉 จิ้มตัวแมลงให้โดน!
+            👉 ลากตาข่ายให้โดนแมลง!
           </span>
           <span className="font-pixel text-[9px] text-[var(--gold)]">
             {hits}/{BUG_HUNT_TARGET}
           </span>
         </div>
         <div className="mt-1 font-pixel text-[7px] text-[var(--muted-foreground)]">
-          ตีแมลงให้ครบ {BUG_HUNT_TARGET} ตัว เพื่อปลดล็อกช่องให้ชาวสวน
+          กดหรือลากตาข่ายจับให้ครบ {BUG_HUNT_TARGET} ครั้ง เพื่อปลดล็อกช่องให้ชาวสวน
         </div>
       </div>
     </div>

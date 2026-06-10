@@ -14,4 +14,15 @@ export default defineConfig({
   },
   // Force Nitro in local/CI builds; the Lovable preset only enables it automatically in Lovable sandboxes.
   nitro: { preset: "node-server" },
+  vite: {
+    build: {
+      chunkSizeWarningLimit: 1500,
+      rollupOptions: {
+        onwarn(warning, warn) {
+          if (warning.code === "MODULE_LEVEL_DIRECTIVE") return;
+          warn(warning);
+        },
+      },
+    },
+  },
 });

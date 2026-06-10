@@ -153,7 +153,6 @@ function drawBasket(
     g.fillRect(px, barY, filled, 1 * s);
     g.lineStyle(1, 0x1a0f1f, 1);
     g.strokeRect(px, barY, barW, 1 * s);
-    g.lineStyle(0);
   }
 }
 

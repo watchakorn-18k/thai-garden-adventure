@@ -50,6 +50,8 @@ const cropIdSchema = z.enum([
   "basil",
 ]);
 const matchRoleSchema = z.enum(["player", "spectator"]);
+const playerRoleSchema = z.enum(["farmer", "seller"]);
+const teamIdSchema = z.enum(["A", "B"]);
 const sellerPuzzleChoiceSchema = cropIdSchema;
 const matchModeSchema = z.enum(["1v1", "2v2"]);
 const roomStageSchema = z.enum(["classic", "water", "festival"]);
@@ -142,6 +144,7 @@ export const clientMsg = z.discriminatedUnion("t", [
   z.object({ t: z.literal("cosmetics"), cosmetics: cosmeticsSchema }),
   z.object({ t: z.literal("claim_slot") }),
   z.object({ t: z.literal("leave_slot") }),
+  z.object({ t: z.literal("choose_team_role"), teamId: teamIdSchema, role: playerRoleSchema }),
   z.object({ t: z.literal("cancel_countdown") }),
   z.object({ t: z.literal("start") }),
   z.object({ t: z.literal("settings"), settings: roomSettingsSchema }),
