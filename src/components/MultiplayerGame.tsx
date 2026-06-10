@@ -33,6 +33,7 @@ import {
   SELLER_BASKET_CAPACITY,
   type Cargo,
   type CropId,
+  type MarketOrder,
   type Direction,
   type MatchTeam,
   type PlayerRole,
@@ -305,6 +306,13 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
               for (let i = 0; i < coinCount; i++) {
                 setTimeout(() => SFX.coin(), i * 80);
               }
+            }
+            if (ev.playerId === selfId && ev.marketRushBonus && ev.marketRushBonus > 0) {
+              toast.success(`MARKET RUSH +${ev.marketRushBonus}`, {
+                description: ev.marketRushCropId
+                  ? `${CROPS[ev.marketRushCropId].name} x${ev.marketRushMultiplier ?? 1}`
+                  : "ส่งตรงคำสั่งซื้อด่วน",
+              });
             }
             // Selling to the right customer builds the same combo meter as harvesting.
             if (ev.playerId === selfId) {
@@ -1092,6 +1100,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
           marketPrices={state.marketPrices}
           cargo={state.fieldCargo}
           bugHuntReady={isSellerBugReady(self)}
+          marketOrder={state.marketOrder}
           onBugHunt={() => {
             SFX.click();
             setBugHuntOpen(true);
@@ -3414,7 +3423,7 @@ function SellerPuzzleOverlay({
   onClose: () => void;
 }) {
   const stack = playerCargoStack(self);
-  const cargo = stack[0];
+  const cargo = stack[stack.length - 1];
   const cargoId = cargo?.id;
   const targetCrop = cargo?.cropId;
 
@@ -3611,12 +3620,50 @@ function BasketMark({ size = 10 }: { size?: number }) {
   );
 }
 
+function MarketRushChip({ order }: { order?: MarketOrder }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!order) return;
+    const t = setInterval(() => setNow(Date.now()), 250);
+    return () => clearInterval(t);
+  }, [order]);
+
+  if (!order) return null;
+  const Icon = CROP_ICONS[order.cropId];
+  const remaining = Math.max(0, Math.ceil((order.expiresAt - now) / 1000));
+  return (
+    <div className="pixel-panel flex items-center justify-between gap-2 p-2">
+      <div className="flex items-center gap-2">
+        <span
+          className="flex h-8 w-8 items-center justify-center"
+          style={{ background: CROP_COLOR[order.cropId], boxShadow: "0 0 0 2px var(--background)" }}
+        >
+          <Icon size={22} />
+        </span>
+        <span className="flex flex-col gap-1">
+          <span className="font-pixel text-[8px] text-[var(--gold)]">MARKET RUSH</span>
+          <span className="font-thai text-[12px] text-[var(--foreground)]">
+            ตลาดรับ {CROPS[order.cropId].name} แพง
+          </span>
+        </span>
+      </div>
+      <div className="flex items-center gap-1">
+        <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
+          x{order.multiplier}
+        </span>
+        <span className="pixel-chip font-pixel text-[8px]">{remaining}s</span>
+      </div>
+    </div>
+  );
+}
+
 function Toolbar({
   self,
   send,
   marketPrices,
   cargo,
   bugHuntReady,
+  marketOrder,
   onBugHunt,
 }: {
   self: PublicPlayer;
@@ -3624,6 +3671,7 @@ function Toolbar({
   marketPrices?: Record<CropId, number>;
   cargo?: Cargo[];
   bugHuntReady?: boolean;
+  marketOrder?: MarketOrder;
   onBugHunt?: () => void;
 }) {
   const cropPool = selectedCropPool(self.selectedCrops);
@@ -3696,6 +3744,7 @@ function Toolbar({
         </div>
         <div className="farm-toolbar-section farm-toolbar-crops">
           <span className="farm-toolbar-label">สถานะ</span>
+          <MarketRushChip order={marketOrder} />
           {/* Basket capacity bar — one segment per slot, colored by the crop in it */}
           <div className="flex items-center gap-2">
             <div className="relative flex h-4 w-full gap-px" style={{ background: "var(--muted)" }}>
@@ -3707,6 +3756,10 @@ function Toolbar({
                     className="h-full flex-1"
                     style={{
                       background: slotCargo ? CROP_COLOR[slotCargo.cropId] : "transparent",
+                      boxShadow:
+                        slotCargo && slotCargo.cropId === marketOrder?.cropId
+                          ? "inset 0 0 0 2px var(--gold)"
+                          : undefined,
                       transition: "background 0.15s",
                     }}
                   />
@@ -3785,12 +3838,14 @@ function Toolbar({
 
       <div className="farm-toolbar-section farm-toolbar-crops">
         <span className="farm-toolbar-label">พืชผัก</span>
+        <MarketRushChip order={marketOrder} />
         <div className="farm-crop-grid">
           {cropPool
             .map((id) => CROPS[id])
             .map((c) => {
               const Icon = CROP_ICONS[c.id];
               const active = self.seedChoice === c.id && self.tool === "seed";
+              const rushActive = marketOrder?.cropId === c.id;
               const currentSell = marketPrices ? Math.round(marketPrices[c.id]) : c.sellPrice;
               return (
                 <button
@@ -3815,6 +3870,9 @@ function Toolbar({
                       <span>
                         ขาย <b>{currentSell}</b>
                       </span>
+                      {rushActive && (
+                        <span className="text-[var(--gold)]">RUSH x{marketOrder.multiplier}</span>
+                      )}
                     </span>
                   </span>
                 </button>

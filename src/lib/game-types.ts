@@ -36,11 +36,14 @@ export interface MarketOrder {
   cropId: CropId;
   multiplier: number;
   updatedAt: number;
+  expiresAt: number;
 }
 
 export const MARKET_TILE_POS = { x: 11, y: 7 } as const;
 export const CARGO_TTL_MS = 10_000;
 export const SELLER_BASKET_CAPACITY = 5;
+export const MARKET_ORDER_DURATION_MS = 30_000;
+export const MARKET_ORDER_MULTIPLIER = 1.5;
 
 export interface Crop {
   id: CropId;

@@ -3,6 +3,8 @@ import {
   CARGO_TTL_MS,
   COLS,
   CROPS,
+  MARKET_ORDER_DURATION_MS,
+  MARKET_ORDER_MULTIPLIER,
   MARKET_TILE_POS,
   makeEmptyField,
   ROWS,
@@ -10,6 +12,7 @@ import {
   type Cargo,
   type CropId,
   type Direction,
+  type MarketOrder,
   type MatchTeam,
   type PlayerRole,
   type SellerPuzzleChoice,
@@ -92,6 +95,7 @@ interface StoredRoomState {
   teams?: MatchTeam[];
   fieldCargo?: Cargo[];
   marketPrices?: Record<CropId, number>;
+  marketOrder?: MarketOrder;
   banTurnPlayerId?: string;
   roomClosesAt?: number;
 }
@@ -143,6 +147,7 @@ export class MatchRoom implements DurableObject {
   private teams: MatchTeam[] = [];
   private fieldCargo: Cargo[] = [];
   private marketPrices: Record<CropId, number> = makeMarketPrices();
+  private marketOrder?: MarketOrder;
   private banTurnPlayerId?: string;
   private roomClosesAt?: number;
   private initialized?: Promise<void>;
@@ -641,6 +646,35 @@ export class MatchRoom implements DurableObject {
     this.flushEvents();
   }
 
+  private makeMarketOrder(now: number): MarketOrder {
+    const pool = [
+      ...new Set(
+        [...this.players.values()]
+          .filter((p) => p.role !== "seller")
+          .flatMap((p) => p.selectedCrops),
+      ),
+    ].filter(isCropId);
+    const crops = pool.length ? pool : (Object.keys(CROPS) as CropId[]);
+    const cropId = crops[Math.floor(Math.random() * crops.length)] ?? DEFAULT_SELECTED_CROPS[0];
+    return {
+      cropId,
+      multiplier: MARKET_ORDER_MULTIPLIER,
+      updatedAt: now,
+      expiresAt: now + MARKET_ORDER_DURATION_MS,
+    };
+  }
+
+  private ensureMarketOrder(now: number): void {
+    if (this.settings.mode !== "2v2" || this.status !== "playing") {
+      this.marketOrder = undefined;
+      return;
+    }
+    if (!this.marketOrder || now >= this.marketOrder.expiresAt) {
+      this.marketOrder = this.makeMarketOrder(now);
+      this.dirty = true;
+    }
+  }
+
   private pickUpCargo(player: PlayerState, now: number): void {
     player.lastActionAt = now;
     if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
@@ -673,7 +707,7 @@ export class MatchRoom implements DurableObject {
     if (!team) return;
 
     // Sell one cargo (top of stack) per call
-    const cargo = stack.shift()!;
+    const cargo = stack.pop()!;
     if (stack.length === 0) {
       player.cargoStack = [];
       player.carryingCargo = undefined;
@@ -682,19 +716,27 @@ export class MatchRoom implements DurableObject {
       player.carryingCargo = stack[stack.length - 1];
     }
 
+    this.ensureMarketOrder(now);
     const distance = Math.hypot(
       cargo.position.x - MARKET_TILE_POS.x,
       cargo.position.y - MARKET_TILE_POS.y,
     );
     const baseReward = Math.round(cargo.baseReward * (1 + 0.1 * distance));
     const correct = puzzleChoice !== undefined && puzzleChoice === cargo.cropId;
-    const reward =
+    const puzzleReward =
       puzzleChoice === undefined
         ? baseReward
         : correct
           ? Math.round(baseReward * 1.25)
           : Math.round(baseReward * 0.9);
-    const bonus = reward - baseReward;
+    const bonus = puzzleReward - baseReward;
+    const activeOrder =
+      this.marketOrder && now < this.marketOrder.expiresAt ? this.marketOrder : undefined;
+    const marketRushActive = activeOrder?.cropId === cargo.cropId;
+    const reward = marketRushActive
+      ? Math.round(puzzleReward * activeOrder.multiplier)
+      : puzzleReward;
+    const marketRushBonus = reward - puzzleReward;
 
     team.coins += reward;
     player.stats.coinsEarned += reward;
@@ -709,6 +751,9 @@ export class MatchRoom implements DurableObject {
       puzzleChoice,
       puzzleCorrect: puzzleChoice === undefined ? undefined : correct,
       bonus: puzzleChoice === undefined ? undefined : bonus,
+      marketRushBonus: marketRushActive ? marketRushBonus : undefined,
+      marketRushMultiplier: marketRushActive ? activeOrder.multiplier : undefined,
+      marketRushCropId: marketRushActive ? activeOrder.cropId : undefined,
       count: 1,
       cargoIds: [cargo.id],
       totalReward: reward,
@@ -844,6 +889,7 @@ export class MatchRoom implements DurableObject {
     if (this.settings.mode !== "2v2") {
       this.teams = [];
       this.fieldCargo = [];
+      this.marketOrder = undefined;
       for (const player of this.players.values()) {
         player.teamId = undefined;
         player.role = undefined;
@@ -1066,6 +1112,7 @@ export class MatchRoom implements DurableObject {
     this.teams = normalizeTeams(stored.teams);
     this.fieldCargo = normalizeCargo(stored.fieldCargo);
     this.marketPrices = normalizeMarketPrices(stored.marketPrices);
+    this.marketOrder = normalizeMarketOrder(stored.marketOrder);
     if (this.settings.mode === "2v2") this.syncTeamsAndRoles(false);
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
@@ -1120,6 +1167,7 @@ export class MatchRoom implements DurableObject {
         teams: this.teams,
         fieldCargo: this.fieldCargo,
         marketPrices: this.marketPrices,
+        marketOrder: this.marketOrder,
         banTurnPlayerId: this.banTurnPlayerId,
         roomClosesAt: this.roomClosesAt,
       } satisfies StoredRoomState),
@@ -1826,6 +1874,7 @@ export class MatchRoom implements DurableObject {
       p.botSeedRotation = 0;
       p.botNextActAt = undefined;
     }
+    this.marketOrder = this.settings.mode === "2v2" ? this.makeMarketOrder(now) : undefined;
     this.botPlans.clear();
     this.startTimers();
     this.ensureBotTimer();
@@ -2025,7 +2074,7 @@ export class MatchRoom implements DurableObject {
     } else if (atMarket && stackCount > 0) {
       // Sell one cargo per tick: bot always matches the right customer (its crop)
       const stack = playerCargoStack(bot);
-      this.sellCargo(bot, now, stack[0].cropId);
+      this.sellCargo(bot, now, stack[stack.length - 1].cropId);
     } else if (stackCount < SELLER_BASKET_CAPACITY) {
       this.pickUpCargo(bot, now);
     }
@@ -2051,6 +2100,7 @@ export class MatchRoom implements DurableObject {
   private tickGrowthAll(): void {
     if (this.status !== "playing") return;
     const now = Date.now();
+    this.ensureMarketOrder(now);
     let changed = false;
     for (const p of this.players.values()) {
       if (this.settings.mode === "2v2" && p.role === "seller") continue;
@@ -2230,6 +2280,7 @@ export class MatchRoom implements DurableObject {
     this.marketPrices = makeMarketPrices();
     this.lastPriceUpdateAt = 0;
     this.fieldCargo = [];
+    this.marketOrder = undefined;
     this.syncTeamsAndRoles(true);
     for (const p of this.players.values()) {
       p.ready = false;
@@ -2291,6 +2342,7 @@ export class MatchRoom implements DurableObject {
       teams: this.settings.mode === "2v2" ? this.teams : undefined,
       fieldCargo: this.settings.mode === "2v2" ? this.fieldCargo : undefined,
       marketPrices: this.marketPrices,
+      marketOrder: this.settings.mode === "2v2" ? this.marketOrder : undefined,
       banTurnPlayerId: this.banTurnPlayerId,
       spectatorCount: this.spectatorCount(),
       roomClosesAt: this.roomClosesAt,
@@ -2558,6 +2610,19 @@ function normalizeMarketPrices(raw?: Partial<Record<CropId, number>>): Record<Cr
     if (typeof price === "number" && Number.isFinite(price)) fallback[id] = price;
   }
   return fallback;
+}
+
+function normalizeMarketOrder(raw?: Partial<MarketOrder>): MarketOrder | undefined {
+  if (!raw || !isCropId(raw.cropId)) return undefined;
+  if (typeof raw.multiplier !== "number" || !Number.isFinite(raw.multiplier)) return undefined;
+  if (typeof raw.updatedAt !== "number" || !Number.isFinite(raw.updatedAt)) return undefined;
+  if (typeof raw.expiresAt !== "number" || !Number.isFinite(raw.expiresAt)) return undefined;
+  return {
+    cropId: raw.cropId,
+    multiplier: raw.multiplier,
+    updatedAt: raw.updatedAt,
+    expiresAt: raw.expiresAt,
+  };
 }
 
 function normalizeTeams(raw?: MatchTeam[]): MatchTeam[] {

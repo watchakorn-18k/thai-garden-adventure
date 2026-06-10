@@ -227,6 +227,7 @@ export interface PublicMatchState {
   teams?: MatchTeam[];
   fieldCargo?: Cargo[];
   marketPrices?: Record<CropId, number>;
+  marketOrder?: MarketOrder;
   banTurnPlayerId?: string;
   spectatorCount?: number;
   roomClosesAt?: number;
@@ -250,6 +251,9 @@ export type ServerEvent =
       puzzleChoice?: SellerPuzzleChoice;
       puzzleCorrect?: boolean;
       bonus?: number;
+      marketRushBonus?: number;
+      marketRushMultiplier?: number;
+      marketRushCropId?: CropId;
       count?: number;
       cargoIds?: string[];
       totalReward?: number;
