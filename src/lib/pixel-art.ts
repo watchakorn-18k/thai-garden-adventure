@@ -153,20 +153,24 @@ function auraRects(aura: PlayerCosmetics["aura"]): Rect[] {
       [1, 2, 1, 10, "#ffd24a"],
       [14, 2, 1, 10, "#ffd24a"],
       [4, -1, 8, 1, "#ffd24a"],
+      [3, 14, 10, 1, "#ffd24a"],
     ];
   }
   if (aura === "spark") {
     return [
-      [1, 1, 1, 1, "#ffd24a"],
-      [14, 3, 1, 1, "#f4e4c1"],
-      [2, 13, 1, 1, "#c08bd9"],
-      [13, 12, 1, 1, "#7fd8ff"],
+      [1, 1, 2, 2, "#ffd24a"],
+      [13, 3, 2, 2, "#f4e4c1"],
+      [2, 13, 2, 2, "#c08bd9"],
+      [13, 12, 2, 2, "#7fd8ff"],
+      [7, -1, 2, 2, "#ffd24a"],
     ];
   }
   if (aura === "rainbow") {
     return [
-      [0, 3, 1, 8, "#d94e6a"],
-      [15, 3, 1, 8, "#7fd8ff"],
+      [0, 3, 1, 9, "#d94e6a"],
+      [2, 1, 1, 11, "#ffd24a"],
+      [13, 1, 1, 11, "#8bc967"],
+      [15, 3, 1, 9, "#7fd8ff"],
       [4, -1, 8, 1, "#ffd24a"],
     ];
   }
@@ -234,11 +238,20 @@ export function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
   }
   if (tool === "watering_can") {
     return [
-      [10, 8, 4, 3, p.toolMetal],
-      [10, 10, 4, 1, p.toolMetalDark],
-      [14, 9, 1, 1, p.toolMetal],
-      [15, 11, 1, 1, p.water],
-      [14, 13, 1, 1, p.water],
+      // can body, handle, and spout — mirrors for left-facing use.
+      [9, 7, 5, 4, p.toolMetal],
+      [9, 7, 5, 1, "#d8d3d0"],
+      [9, 10, 5, 1, p.toolMetalDark],
+      [10, 5, 3, 1, "#d8d3d0"],
+      [9, 6, 1, 2, p.toolMetal],
+      [13, 6, 1, 2, p.toolMetal],
+      [14, 7, 2, 1, "#d8d3d0"],
+      [15, 6, 1, 1, "#b8b2b0"],
+      // water stream in front of spout.
+      [15, 8, 1, 1, p.water],
+      [17, 9, 1, 1, p.water],
+      [16, 11, 1, 1, "#7fd8ff"],
+      [18, 12, 1, 1, p.water],
     ];
   }
   return [
@@ -248,7 +261,7 @@ export function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
   ];
 }
 
-export function verticalToolOverlay(tool: Tool, p: Palette): Rect[] {
+export function verticalToolOverlay(tool: Tool, p: Palette, direction: Direction = "down"): Rect[] {
   if (tool === "hoe") {
     return [
       [7, 6, 2, 8, p.tool],
@@ -257,12 +270,39 @@ export function verticalToolOverlay(tool: Tool, p: Palette): Rect[] {
     ];
   }
   if (tool === "watering_can") {
+    if (direction === "up") {
+      return [
+        // back view: centered on the farmer's back, with rear handle visible.
+        [4, 6, 8, 5, p.toolMetal],
+        [4, 6, 8, 1, "#d8d3d0"],
+        [4, 10, 8, 1, p.toolMetalDark],
+        [6, 4, 4, 1, "#d8d3d0"],
+        [5, 5, 1, 2, p.toolMetal],
+        [10, 5, 1, 2, p.toolMetal],
+        [7, 7, 2, 2, p.toolMetalDark],
+        [12, 7, 2, 1, "#d8d3d0"],
+        [13, 6, 1, 1, "#b8b2b0"],
+        [12, 5, 1, 1, p.water],
+        [10, 3, 1, 1, "#7fd8ff"],
+        [13, 2, 1, 1, p.water],
+        [11, 1, 1, 1, "#7fd8ff"],
+      ];
+    }
     return [
-      [6, 7, 4, 3, p.toolMetal],
-      [6, 9, 4, 1, p.toolMetalDark],
-      [5, 8, 1, 1, p.toolMetal],
-      [7, 11, 1, 1, p.water],
-      [9, 12, 1, 1, p.water],
+      // front view: centered in front of the farmer, with face plate and spout.
+      [4, 7, 8, 5, p.toolMetal],
+      [4, 7, 8, 1, "#d8d3d0"],
+      [4, 11, 8, 1, p.toolMetalDark],
+      [6, 5, 4, 1, "#d8d3d0"],
+      [5, 6, 1, 2, p.toolMetal],
+      [10, 6, 1, 2, p.toolMetal],
+      [7, 8, 2, 2, "#d8d3d0"],
+      [3, 9, 2, 1, "#d8d3d0"],
+      [2, 10, 1, 1, "#b8b2b0"],
+      [4, 12, 1, 1, p.water],
+      [7, 13, 1, 1, "#7fd8ff"],
+      [5, 15, 1, 1, p.water],
+      [9, 16, 1, 1, "#7fd8ff"],
     ];
   }
   return [
@@ -290,7 +330,9 @@ export function farmerRects(opts: {
   else body = sideBody(swing, p, cosmetics);
 
   if (!acting) return body;
-  return body.concat(isVertical ? verticalToolOverlay(tool, p) : sideToolOverlay(tool, p));
+  return body.concat(
+    isVertical ? verticalToolOverlay(tool, p, direction) : sideToolOverlay(tool, p),
+  );
 }
 
 // === Crops (ported from PixelCrop.tsx) ======================================

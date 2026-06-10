@@ -939,7 +939,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
             : undefined
         }
         outfit={
-          !isSpectator && state.status !== "playing"
+          !isSpectator && state.status !== "playing" && state.settings.mode !== "1v1"
             ? {
                 open: outfitOpen,
                 cosmetics,

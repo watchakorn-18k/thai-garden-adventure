@@ -662,6 +662,8 @@ export default function PhaserField({
           }
 
           const isActing = this.acting || actingRef.current;
+          this.farmerG.setDepth(10);
+          this.toolG.setDepth(isActing && p.dir === "up" && p.tool === "watering_can" ? 9 : 11);
           // Skip farmer tool animation for seller actions (pickup, not hoe)
           if (isActing && p.role === "seller") {
             // brief bob animation only
@@ -671,7 +673,7 @@ export default function PhaserField({
             const isVertical = p.dir === "up" || p.dir === "down";
             const palette = paletteFor(p.cosmetics ?? {});
             const toolRects = isVertical
-              ? verticalToolOverlay(p.tool, palette)
+              ? verticalToolOverlay(p.tool, palette, p.dir)
               : sideToolOverlay(p.tool, palette);
 
             // Shared swing curve (single source for SP + MP); see tool-animation.ts.

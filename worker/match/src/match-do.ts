@@ -1029,14 +1029,14 @@ export class MatchRoom implements DurableObject {
   }
 
   private spawnPosForSlot(slot: number): { x: number; y: number } {
-    if (this.settings.mode !== "2v2") return { x: slot === 0 ? 3 : 8, y: 4 };
+    if (this.settings.mode !== "2v2") return { x: slot === 0 ? 1 : 4, y: 1 };
     const spots = [
-      { x: 3, y: 3 },
-      { x: 4, y: 4 },
-      { x: 8, y: 3 },
-      { x: 9, y: 4 },
+      { x: 1, y: 0 },
+      { x: 1, y: 2 },
+      { x: 4, y: 0 },
+      { x: 4, y: 2 },
     ];
-    return spots[slot] ?? { x: 6, y: 4 };
+    return spots[slot] ?? { x: 2, y: 1 };
   }
 
   async webSocketClose(ws: WebSocket): Promise<void> {

@@ -94,10 +94,10 @@ const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
 };
 
 export default function FarmGame() {
-  const [pos, setPos] = useState({ x: 5, y: 4 }); // tile-unit float
+  const [pos, setPos] = useState({ x: 2, y: 1 }); // tile-unit float
   const [dir, setDir] = useState<Direction>("down");
   const [walking, setWalking] = useState(false);
-  const posRef = useRef({ x: 5, y: 4 });
+  const posRef = useRef({ x: 2, y: 1 });
   const dirRef = useRef<Direction>("down");
   const walkingRef = useRef(false);
   const [tiles, setTiles] = useState<Tile[][]>(() => makeEmptyField());
@@ -1588,6 +1588,9 @@ export default function FarmGame() {
         }}
         onBuyPreset={handleBuyPreset}
         onEquipPreset={handleEquipPreset}
+        onAddGardenTokens={
+          import.meta.env.DEV ? () => setGardenTokenState(awardGardenTokens(250)) : undefined
+        }
         onSelectCrop={(id) => {
           seedChoiceRef.current = id;
           setSeedChoice(id);

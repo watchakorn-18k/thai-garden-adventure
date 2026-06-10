@@ -36,6 +36,7 @@ interface GameMenuDialogProps {
   onChangeCosmetics: (next: PlayerCosmetics) => void;
   onBuyPreset: (id: string) => void;
   onEquipPreset: (id: string) => void;
+  onAddGardenTokens?: () => void;
   onSelectCrop: (id: CropId) => void;
   onToggleAutoBot: () => void;
   onToggleMuted: () => void;
@@ -68,6 +69,7 @@ export default function GameMenuDialog({
   onChangeCosmetics,
   onBuyPreset,
   onEquipPreset,
+  onAddGardenTokens,
   onSelectCrop,
   onToggleAutoBot,
   onToggleMuted,
@@ -116,6 +118,19 @@ export default function GameMenuDialog({
             <span className="pixel-chip flex items-center gap-2 shop-price-chip">
               GT {gardenTokens}
             </span>
+            {onAddGardenTokens && (
+              <button
+                type="button"
+                onClick={() => {
+                  SFX.coin();
+                  onAddGardenTokens();
+                }}
+                className="pixel-btn px-3 py-2 font-pixel text-[8px]"
+                title="DEV: เพิ่ม Garden Tokens"
+              >
+                +GT
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -221,6 +236,27 @@ function sameCosmetics(a: PlayerCosmetics, b: PlayerCosmetics): boolean {
   );
 }
 
+type ShopCategoryId = "all" | "hat" | "shirt" | "pants" | "shoes" | "skill" | "etc";
+
+const SHOP_CATEGORIES: { id: ShopCategoryId; label: string }[] = [
+  { id: "all", label: "ทั้งหมด" },
+  { id: "hat", label: "หมวก" },
+  { id: "shirt", label: "เสื้อ" },
+  { id: "pants", label: "กางเกง" },
+  { id: "shoes", label: "รองเท้า" },
+  { id: "skill", label: "สกิลอุปกรณ์" },
+  { id: "etc", label: "อื่นๆ" },
+];
+
+const PRESET_CATEGORIES: Record<string, ShopCategoryId[]> = {
+  classic_farmer: ["hat", "shirt", "pants"],
+  rice_farmer: ["hat", "shirt", "pants"],
+  chili_red: ["shirt", "pants"],
+  river_blue: ["hat", "shirt", "pants"],
+  mango_gold: ["hat", "skill"],
+  night_violet: ["hat", "skill"],
+};
+
 function ShopContent({
   gardenTokens,
   unlockedPresetIds,
@@ -234,57 +270,83 @@ function ShopContent({
   onBuyPreset: (id: string) => void;
   onEquipPreset: (id: string) => void;
 }) {
+  const [activeCategory, setActiveCategory] = useState<ShopCategoryId>("all");
+  const presets = COSMETIC_PRESETS.filter((preset) => {
+    if (activeCategory === "all") return true;
+    return (PRESET_CATEGORIES[preset.id] ?? ["etc"]).includes(activeCategory);
+  });
+
   return (
-    <div className="shop-preset-grid">
-      {COSMETIC_PRESETS.map((preset) => {
-        const unlocked = preset.price === 0 || unlockedPresetIds.includes(preset.id);
-        const equipped = sameCosmetics(cosmetics, preset.cosmetics);
-        const affordable = gardenTokens >= preset.price;
-        return (
-          <article
-            key={preset.id}
-            className="shop-preset-card"
-            data-equipped={equipped ? "true" : undefined}
+    <div className="shop-content">
+      <div className="shop-category-tabs" aria-label="หมวดหมู่ร้านค้า">
+        {SHOP_CATEGORIES.map((category) => (
+          <button
+            key={category.id}
+            type="button"
+            className="pixel-btn shop-category-tab"
+            data-active={activeCategory === category.id ? "true" : undefined}
+            onClick={() => {
+              setActiveCategory(category.id);
+              SFX.click();
+            }}
           >
-            <div className="shop-preset-preview-wrap" data-aura={preset.cosmetics.aura}>
-              <PlayerAvatarPreview className="shop-preset-preview" cosmetics={preset.cosmetics} />
-              {preset.cosmetics.aura !== "none" && (
-                <>
-                  <span className="shop-effect-ring" aria-hidden />
-                  <span className="shop-effect-badge">EFFECT</span>
-                </>
-              )}
-            </div>
-            <div className="shop-preset-meta">
-              <h3>{preset.name}</h3>
-              <p>{preset.description}</p>
-              <span className="pixel-chip shop-price-chip">GT {preset.price}</span>
-            </div>
-            <div className="shop-preset-actions">
-              {unlocked ? (
-                <button
-                  type="button"
-                  className="pixel-btn"
-                  data-active={equipped ? "true" : undefined}
-                  disabled={equipped}
-                  onClick={() => onEquipPreset(preset.id)}
-                >
-                  {equipped ? "ใส่อยู่" : "ใส่ชุด"}
-                </button>
-              ) : (
-                <button
-                  type="button"
-                  className="pixel-btn"
-                  disabled={!affordable}
-                  onClick={() => onBuyPreset(preset.id)}
-                >
-                  ซื้อ+ใส่
-                </button>
-              )}
-            </div>
-          </article>
-        );
-      })}
+            {category.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="shop-preset-grid">
+        {presets.map((preset) => {
+          const unlocked = preset.price === 0 || unlockedPresetIds.includes(preset.id);
+          const equipped = sameCosmetics(cosmetics, preset.cosmetics);
+          const affordable = gardenTokens >= preset.price;
+          return (
+            <article
+              key={preset.id}
+              className="shop-preset-card"
+              data-equipped={equipped ? "true" : undefined}
+            >
+              <div className="shop-preset-preview-wrap" data-aura={preset.cosmetics.aura}>
+                <span className="shop-preview-label">ลองใส่แล้ว</span>
+                <PlayerAvatarPreview className="shop-preset-preview" cosmetics={preset.cosmetics} />
+                {preset.cosmetics.aura !== "none" && (
+                  <>
+                    <span className="shop-effect-ring" aria-hidden />
+                    <span className="shop-effect-badge">EFFECT</span>
+                  </>
+                )}
+              </div>
+              <div className="shop-preset-meta">
+                <h3>{preset.name}</h3>
+                <p>{preset.description}</p>
+                <span className="pixel-chip shop-price-chip">GT {preset.price}</span>
+              </div>
+              <div className="shop-preset-actions">
+                {unlocked ? (
+                  <button
+                    type="button"
+                    className="pixel-btn"
+                    data-active={equipped ? "true" : undefined}
+                    disabled={equipped}
+                    onClick={() => onEquipPreset(preset.id)}
+                  >
+                    {equipped ? "ใส่อยู่" : "ใส่ชุด"}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    className="pixel-btn"
+                    disabled={!affordable}
+                    onClick={() => onBuyPreset(preset.id)}
+                  >
+                    ซื้อ+ใส่
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        })}
+      </div>
     </div>
   );
 }

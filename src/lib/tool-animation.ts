@@ -44,7 +44,7 @@ const WATER_SIDE: Key[] = [
 
 const WATER_VERTICAL: Key[] = [
   { t: 0, angle: 0, dx: 0, dy: 0 },
-  { t: 0.45, angle: 18, dx: 0, dy: 1 },
+  { t: 0.45, angle: 0, dx: 0, dy: 1 },
   { t: 1, angle: 0, dx: 0, dy: 0 },
 ];
 
