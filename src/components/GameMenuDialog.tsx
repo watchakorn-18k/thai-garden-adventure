@@ -214,7 +214,10 @@ function sameCosmetics(a: PlayerCosmetics, b: PlayerCosmetics): boolean {
   return (
     a.hat.toLowerCase() === b.hat.toLowerCase() &&
     a.shirt.toLowerCase() === b.shirt.toLowerCase() &&
-    a.pants.toLowerCase() === b.pants.toLowerCase()
+    a.pants.toLowerCase() === b.pants.toLowerCase() &&
+    a.hatShape === b.hatShape &&
+    a.shirtStyle === b.shirtStyle &&
+    a.aura === b.aura
   );
 }
 
@@ -243,7 +246,15 @@ function ShopContent({
             className="shop-preset-card"
             data-equipped={equipped ? "true" : undefined}
           >
-            <PlayerAvatarPreview className="shop-preset-preview" cosmetics={preset.cosmetics} />
+            <div className="shop-preset-preview-wrap" data-aura={preset.cosmetics.aura}>
+              <PlayerAvatarPreview className="shop-preset-preview" cosmetics={preset.cosmetics} />
+              {preset.cosmetics.aura !== "none" && (
+                <>
+                  <span className="shop-effect-ring" aria-hidden />
+                  <span className="shop-effect-badge">EFFECT</span>
+                </>
+              )}
+            </div>
             <div className="shop-preset-meta">
               <h3>{preset.name}</h3>
               <p>{preset.description}</p>
@@ -347,9 +358,11 @@ function ControlsGuide() {
           <span className="font-pixel text-[8px] text-[var(--muted-foreground)] mr-1">
             เลือกเครื่องมือ
           </span>
-          <kbd className="pixel-key pixel-key-sm">1</kbd>
-          <kbd className="pixel-key pixel-key-sm">2</kbd>
-          <kbd className="pixel-key pixel-key-sm">3</kbd>
+          <kbd className="pixel-key pixel-key-sm">E</kbd>
+          <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">จอบ</span>
+          <kbd className="pixel-key pixel-key-sm">Q</kbd>
+          <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">บัวรดน้ำ</span>
+          <span className="font-pixel text-[8px] text-[var(--gold)]">เมล็ดใช้เมาส์เลือก</span>
         </div>
       </div>
 

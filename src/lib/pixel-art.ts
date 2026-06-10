@@ -62,20 +62,127 @@ export function paletteFor(cosmetics: PlayerCosmetics): Palette {
   };
 }
 
-function frontBody(swing: number, p: Palette): Rect[] {
-  const lf = swing === 0;
+function hatRects(shape: PlayerCosmetics["hatShape"], p: Palette): Rect[] {
+  if (shape === "wide") {
+    return [
+      [1, 3, 14, 1, p.hat],
+      [3, 2, 10, 1, p.hat],
+      [1, 4, 14, 1, p.hatDark],
+      [5, 1, 6, 1, p.hat],
+    ];
+  }
+  if (shape === "crown") {
+    return [
+      [4, 3, 8, 2, p.hat],
+      [4, 1, 2, 2, p.hat],
+      [7, 0, 2, 3, p.hat],
+      [10, 1, 2, 2, p.hat],
+      [4, 4, 8, 1, p.hatDark],
+    ];
+  }
+  if (shape === "leaf") {
+    return [
+      [3, 3, 10, 2, p.hat],
+      [5, 1, 6, 2, p.hat],
+      [10, 0, 3, 2, "#8bc967"],
+      [12, 1, 2, 1, "#4e8c3a"],
+      [3, 4, 10, 1, p.hatDark],
+    ];
+  }
+  if (shape === "halo") {
+    return [
+      [4, 0, 8, 1, p.hat],
+      [3, 1, 2, 1, p.hatDark],
+      [11, 1, 2, 1, p.hatDark],
+      [3, 3, 10, 2, p.hat],
+      [3, 4, 10, 1, p.hatDark],
+    ];
+  }
   return [
     [2, 3, 12, 1, p.hat],
     [3, 2, 10, 1, p.hat],
     [2, 4, 12, 1, p.hatDark],
     [5, 1, 6, 1, p.hat],
     [6, 0, 4, 1, p.hatDark],
+  ];
+}
+
+function shirtRects(style: PlayerCosmetics["shirtStyle"], p: Palette, side = false): Rect[] {
+  const x = side ? 5 : 4;
+  const w = side ? 6 : 8;
+  if (style === "overalls") {
+    return [
+      [x, 9, w, 3, p.shirt],
+      [x + 2, 9, 1, 3, p.pants],
+      [x + w - 3, 9, 1, 3, p.pants],
+      [x, 11, w, 1, p.shirtDark],
+    ];
+  }
+  if (style === "sash") {
+    return [
+      [x, 9, w, 3, p.shirt],
+      [x + 1, 9, 2, 1, p.hat],
+      [x + 3, 10, 2, 1, p.hat],
+      [x + 5, 11, 2, 1, p.hat],
+    ];
+  }
+  if (style === "jacket") {
+    return [
+      [x, 9, w, 3, p.shirtDark],
+      [x + 1, 9, Math.max(1, w - 2), 2, p.shirt],
+      [x + Math.floor(w / 2), 9, 1, 3, p.hatDark],
+    ];
+  }
+  if (style === "champion") {
+    return [
+      [x, 9, w, 3, p.shirt],
+      [x + 1, 9, w - 2, 1, p.hat],
+      [x + 3, 10, 2, 2, p.hatDark],
+      [x, 11, w, 1, p.shirtDark],
+    ];
+  }
+  return [
+    [x, 9, w, 3, p.shirt],
+    [x, 11, w, 1, p.shirtDark],
+  ];
+}
+
+function auraRects(aura: PlayerCosmetics["aura"]): Rect[] {
+  if (aura === "gold") {
+    return [
+      [1, 2, 1, 10, "#ffd24a"],
+      [14, 2, 1, 10, "#ffd24a"],
+      [4, -1, 8, 1, "#ffd24a"],
+    ];
+  }
+  if (aura === "spark") {
+    return [
+      [1, 1, 1, 1, "#ffd24a"],
+      [14, 3, 1, 1, "#f4e4c1"],
+      [2, 13, 1, 1, "#c08bd9"],
+      [13, 12, 1, 1, "#7fd8ff"],
+    ];
+  }
+  if (aura === "rainbow") {
+    return [
+      [0, 3, 1, 8, "#d94e6a"],
+      [15, 3, 1, 8, "#7fd8ff"],
+      [4, -1, 8, 1, "#ffd24a"],
+    ];
+  }
+  return [];
+}
+
+function frontBody(swing: number, p: Palette, cosmetics: PlayerCosmetics): Rect[] {
+  const lf = swing === 0;
+  return [
+    ...auraRects(cosmetics.aura),
+    ...hatRects(cosmetics.hatShape, p),
     [5, 5, 6, 3, p.skin],
     [5, 8, 6, 1, p.skinDark],
     [6, 6, 1, 1, p.outline],
     [9, 6, 1, 1, p.outline],
-    [4, 9, 8, 3, p.shirt],
-    [4, 11, 8, 1, p.shirtDark],
+    ...shirtRects(cosmetics.shirtStyle, p),
     [3, lf ? 10 : 9, 1, 3, p.skin],
     [12, lf ? 9 : 10, 1, 3, p.skin],
     [5, 12, 6, 2, p.pants],
@@ -85,17 +192,14 @@ function frontBody(swing: number, p: Palette): Rect[] {
   ];
 }
 
-function backBody(swing: number, p: Palette): Rect[] {
+function backBody(swing: number, p: Palette, cosmetics: PlayerCosmetics): Rect[] {
   const rf = swing === 0;
   return [
-    [2, 3, 12, 1, p.hat],
-    [3, 2, 10, 1, p.hat],
-    [2, 4, 12, 1, p.hatDark],
-    [5, 1, 6, 1, p.hat],
-    [6, 0, 4, 1, p.hatDark],
+    ...auraRects(cosmetics.aura),
+    ...hatRects(cosmetics.hatShape, p),
     [5, 5, 6, 3, p.hair],
     [5, 8, 6, 1, p.skinDark],
-    [4, 9, 8, 3, p.shirtDark],
+    ...shirtRects(cosmetics.shirtStyle, p),
     [3, rf ? 9 : 10, 1, 3, p.skinDark],
     [12, rf ? 10 : 9, 1, 3, p.skinDark],
     [5, 12, 6, 2, p.pantsDark],
@@ -104,18 +208,14 @@ function backBody(swing: number, p: Palette): Rect[] {
   ];
 }
 
-function sideBody(swing: number, p: Palette): Rect[] {
+function sideBody(swing: number, p: Palette, cosmetics: PlayerCosmetics): Rect[] {
   return [
-    [2, 3, 12, 1, p.hat],
-    [3, 2, 10, 1, p.hat],
-    [2, 4, 12, 1, p.hatDark],
-    [5, 1, 6, 1, p.hat],
-    [6, 0, 4, 1, p.hatDark],
+    ...auraRects(cosmetics.aura),
+    ...hatRects(cosmetics.hatShape, p),
     [5, 5, 6, 3, p.skin],
     [10, 6, 1, 1, p.outline],
     [5, 8, 6, 1, p.skinDark],
-    [5, 9, 6, 3, p.shirt],
-    [5, 11, 6, 1, p.shirtDark],
+    ...shirtRects(cosmetics.shirtStyle, p, true),
     [10, 9, 2, 3, p.shirt],
     [6, 12, 4, 2, p.pants],
     [swing === 0 ? 6 : 5, 14, 2, 2, p.shoe],
@@ -185,9 +285,9 @@ export function farmerRects(opts: {
   const isVertical = direction === "up" || direction === "down";
 
   let body: Rect[];
-  if (direction === "down") body = frontBody(swing, p);
-  else if (direction === "up") body = backBody(swing, p);
-  else body = sideBody(swing, p);
+  if (direction === "down") body = frontBody(swing, p, cosmetics);
+  else if (direction === "up") body = backBody(swing, p, cosmetics);
+  else body = sideBody(swing, p, cosmetics);
 
   if (!acting) return body;
   return body.concat(isVertical ? verticalToolOverlay(tool, p) : sideToolOverlay(tool, p));

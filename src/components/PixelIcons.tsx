@@ -108,23 +108,31 @@ export function WaterCanIcon({ size = 24 }: IconProps) {
   return wrap(
     size,
     <>
-      {/* body */}
-      <rect x="4" y="6" width="6" height="6" fill="#9aa0a8" />
-      <rect x="4" y="6" width="6" height="1" fill="#cdd2d8" />
-      <rect x="4" y="11" width="6" height="1" fill="#555a62" />
-      <rect x="3" y="7" width="1" height="4" fill="#9aa0a8" />
-      <rect x="10" y="7" width="1" height="4" fill="#9aa0a8" />
-      {/* handle */}
-      <rect x="5" y="4" width="4" height="1" fill="#9aa0a8" />
-      <rect x="5" y="5" width="1" height="1" fill="#9aa0a8" />
-      <rect x="8" y="5" width="1" height="1" fill="#9aa0a8" />
+      {/* handle arch */}
+      <rect x="5" y="2" width="5" height="1" fill="#d8d3d0" />
+      <rect x="4" y="3" width="1" height="3" fill="#b8b2b0" />
+      <rect x="10" y="3" width="1" height="3" fill="#b8b2b0" />
+      <rect x="5" y="4" width="1" height="1" fill="#f4e4c1" />
+      <rect x="9" y="4" width="1" height="1" fill="#f4e4c1" />
+      {/* can body */}
+      <rect x="3" y="6" width="8" height="5" fill="#b8b2b0" />
+      <rect x="2" y="7" width="1" height="3" fill="#b8b2b0" />
+      <rect x="11" y="7" width="1" height="3" fill="#8d8788" />
+      <rect x="4" y="5" width="6" height="1" fill="#d8d3d0" />
+      <rect x="3" y="6" width="8" height="1" fill="#e6dfdc" />
+      <rect x="3" y="10" width="8" height="1" fill="#777173" />
+      <rect x="4" y="7" width="2" height="2" fill="#d8d3d0" />
       {/* spout */}
-      <rect x="11" y="7" width="2" height="1" fill="#9aa0a8" />
-      <rect x="13" y="6" width="1" height="2" fill="#9aa0a8" />
-      {/* drops */}
-      <rect x="14" y="9" width="1" height="1" fill="#4cc2ee" />
-      <rect x="13" y="11" width="1" height="1" fill="#7fd8ff" />
-      <rect x="14" y="13" width="1" height="1" fill="#4cc2ee" />
+      <rect x="11" y="6" width="2" height="1" fill="#d8d3d0" />
+      <rect x="13" y="5" width="1" height="1" fill="#d8d3d0" />
+      <rect x="14" y="4" width="1" height="2" fill="#b8b2b0" />
+      <rect x="13" y="6" width="2" height="1" fill="#8d8788" />
+      {/* feet + water */}
+      <rect x="4" y="11" width="2" height="1" fill="#777173" />
+      <rect x="8" y="11" width="2" height="1" fill="#777173" />
+      <rect x="14" y="8" width="1" height="1" fill="#7fd8ff" />
+      <rect x="13" y="10" width="1" height="1" fill="#4cc2ee" />
+      <rect x="15" y="11" width="1" height="1" fill="#7fd8ff" />
     </>,
   );
 }

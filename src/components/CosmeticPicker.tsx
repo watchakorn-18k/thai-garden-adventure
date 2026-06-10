@@ -8,7 +8,10 @@ interface Props {
   onClose?: () => void;
 }
 
-const LABELS: Record<keyof PlayerCosmetics, string> = {
+const COLOR_PARTS = ["hat", "shirt", "pants"] as const;
+type ColorPart = (typeof COLOR_PARTS)[number];
+
+const LABELS: Record<ColorPart, string> = {
   hat: "หมวก",
   shirt: "เสื้อ",
   pants: "กางเกง",
@@ -43,7 +46,7 @@ function randomColor(): string {
 }
 
 export default function CosmeticPicker({ value, onChange, compact = false, onClose }: Props) {
-  const setChannel = (part: keyof PlayerCosmetics, channel: Channel, nextValue: number) => {
+  const setChannel = (part: ColorPart, channel: Channel, nextValue: number) => {
     const rgb = hexToRgb(value[part]);
     const next = rgbToHex({ ...rgb, [channel]: nextValue });
     onChange({ ...value, [part]: next });
@@ -51,6 +54,7 @@ export default function CosmeticPicker({ value, onChange, compact = false, onClo
 
   const randomizeAll = () => {
     onChange({
+      ...value,
       hat: randomColor(),
       shirt: randomColor(),
       pants: randomColor(),
@@ -78,7 +82,7 @@ export default function CosmeticPicker({ value, onChange, compact = false, onClo
       </div>
 
       <div className="cosmetic-picker-rows">
-        {(Object.keys(LABELS) as (keyof PlayerCosmetics)[]).map((part) => {
+        {COLOR_PARTS.map((part) => {
           const rgb = hexToRgb(value[part]);
           return (
             <section key={part} className="cosmetic-rgb-row" aria-label={LABELS[part]}>

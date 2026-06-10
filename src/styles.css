@@ -406,7 +406,7 @@
 
   .farm-toolbar {
     display: grid;
-    grid-template-columns: minmax(190px, 0.62fr) minmax(0, 1.38fr);
+    grid-template-columns: 226px minmax(0, 1fr);
     gap: 14px;
     padding: 14px 16px 16px;
     align-items: start;
@@ -426,17 +426,17 @@
   }
   .farm-tool-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     gap: 7px;
   }
   .farm-tool-btn {
     min-height: 50px;
     display: grid;
-    grid-template-rows: 22px auto;
-    place-items: center;
-    gap: 4px;
-    padding: 8px 6px;
-    text-align: center;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    text-align: left;
   }
   .farm-tool-btn .farm-key-hint {
     position: absolute;
@@ -450,17 +450,17 @@
   }
   .farm-crop-grid {
     display: grid;
-    grid-template-columns: repeat(8, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 7px;
   }
   .farm-crop-card {
     min-height: 70px;
     display: grid;
-    grid-template-rows: 28px minmax(0, 1fr);
-    place-items: center;
-    gap: 6px;
-    padding: 8px 6px;
-    text-align: center;
+    grid-template-columns: 38px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    text-align: left;
   }
   .farm-crop-icon {
     display: grid;
@@ -474,12 +474,12 @@
     min-width: 0;
     width: 100%;
     display: grid;
-    gap: 5px;
+    gap: 6px;
   }
   .farm-crop-name {
     overflow: hidden;
     color: #fff3cf;
-    font-size: 8px;
+    font-size: 9px;
     line-height: 1.15;
     text-overflow: ellipsis;
     text-shadow: 1px 1px 0 rgba(26, 15, 31, 0.75);
@@ -487,8 +487,8 @@
   }
   .farm-crop-prices {
     display: flex;
-    justify-content: center;
-    gap: 5px;
+    justify-content: flex-start;
+    gap: 8px;
     font-size: 7px;
     line-height: 1;
     color: var(--muted-foreground);
@@ -499,9 +499,6 @@
     gap: 2px;
     min-width: 0;
     white-space: nowrap;
-  }
-  .farm-crop-prices span:first-child {
-    display: none;
   }
   .farm-crop-prices b {
     color: var(--gold);
@@ -1339,16 +1336,67 @@
       0 0 0 2px #1a0f1f,
       0 0 0 4px var(--gold);
   }
-  .shop-preset-preview {
+  .shop-preset-preview-wrap {
+    position: relative;
     display: grid;
-    place-items: end center;
     overflow: hidden;
     background: #1a0f1f;
     box-shadow: inset 0 0 0 2px var(--border);
   }
+  .shop-preset-preview-wrap[data-aura="gold"] {
+    background:
+      radial-gradient(circle at 50% 68%, rgba(255, 210, 74, 0.36), transparent 42%),
+      #1a0f1f;
+  }
+  .shop-preset-preview-wrap[data-aura="spark"] {
+    background:
+      radial-gradient(circle at 20% 22%, rgba(255, 210, 74, 0.34) 0 2px, transparent 3px),
+      radial-gradient(circle at 78% 30%, rgba(244, 228, 193, 0.28) 0 2px, transparent 3px),
+      radial-gradient(circle at 66% 80%, rgba(127, 216, 255, 0.26) 0 2px, transparent 3px),
+      #1a0f1f;
+  }
+  .shop-preset-preview-wrap[data-aura="rainbow"] {
+    background:
+      linear-gradient(90deg, rgba(217, 78, 106, 0.3), rgba(255, 210, 74, 0.28), rgba(127, 216, 255, 0.3)),
+      #1a0f1f;
+  }
+  .shop-preset-preview {
+    position: relative;
+    z-index: 2;
+    display: grid;
+    place-items: end center;
+    overflow: visible;
+  }
   .shop-preset-preview > * {
-    transform: translateY(7px) scale(0.95);
+    transform: translateY(7px) scale(1.12);
     transform-origin: 50% 100%;
+  }
+  .shop-effect-ring {
+    position: absolute;
+    left: 50%;
+    bottom: 10px;
+    z-index: 1;
+    width: 56px;
+    height: 12px;
+    background: var(--gold);
+    opacity: 0.45;
+    transform: translateX(-50%);
+    box-shadow:
+      0 0 0 2px #1a0f1f,
+      0 0 18px 4px rgba(255, 210, 74, 0.48);
+    animation: farmer-aura-pulse 1.2s steps(2, end) infinite;
+  }
+  .shop-effect-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    z-index: 3;
+    padding: 5px 7px;
+    color: #1a0f1f;
+    background: var(--gold);
+    font-family: var(--font-pixel);
+    font-size: 6px;
+    box-shadow: 0 0 0 2px #1a0f1f;
   }
   .shop-preset-meta {
     display: grid;
@@ -1560,6 +1608,34 @@
   }
   100% {
     transform: translateY(4px);
+    opacity: 0;
+  }
+}
+@keyframes water-stream-side {
+  0% {
+    transform: translate(-2px, -1px) scale(0.6);
+    opacity: 0;
+  }
+  35% {
+    transform: translate(0, 0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translate(3px, 3px) scale(0.72);
+    opacity: 0;
+  }
+}
+@keyframes water-stream-vertical {
+  0% {
+    transform: translateY(-2px) scale(0.6);
+    opacity: 0;
+  }
+  35% {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(4px) scale(0.72);
     opacity: 0;
   }
 }
@@ -1936,6 +2012,39 @@
       0 0 24px 6px rgba(255, 210, 74, 0.7);
   }
 }
+@keyframes farmer-aura-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+    transform: scale(0.96);
+  }
+  50% {
+    opacity: 0.8;
+    transform: scale(1.05);
+  }
+}
+@keyframes farmer-aura-spark {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  50% {
+    opacity: 1;
+    transform: translateY(-1px);
+  }
+}
+@keyframes farmer-aura-rainbow {
+  0% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 0.95;
+  }
+  100% {
+    opacity: 0.45;
+  }
+}
 @keyframes action-ping {
   0%,
   70%,
@@ -2003,6 +2112,14 @@
 .drop-b {
   animation: drop-fall 0.5s ease-in 0.2s infinite;
 }
+.water-stream-side {
+  animation: water-stream-side 0.24s steps(3, end) infinite;
+  transform-origin: 15px 8px;
+}
+.water-stream-vertical {
+  animation: water-stream-vertical 0.24s steps(3, end) infinite;
+  transform-origin: 8px 11px;
+}
 .tool-seed-side,
 .tool-seed-vertical {
   animation: seed-toss 0.5s ease-out forwards;
@@ -2066,6 +2183,19 @@
 }
 .pulse-glow {
   animation: pulse-glow 0.9s ease-in-out infinite;
+}
+.farmer-aura-gold {
+  opacity: 0.6;
+  transform-origin: 8px 8px;
+  animation: farmer-aura-pulse 1.2s steps(2, end) infinite;
+}
+.farmer-aura-spark {
+  transform-origin: 8px 8px;
+  animation: farmer-aura-spark 0.8s steps(2, end) infinite;
+}
+.farmer-aura-rainbow {
+  transform-origin: 8px 8px;
+  animation: farmer-aura-rainbow 1s steps(3, end) infinite;
 }
 .combo-bar-fill {
   animation: combo-bar-fill linear forwards;

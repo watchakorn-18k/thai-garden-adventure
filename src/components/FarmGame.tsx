@@ -9,7 +9,6 @@ import { fetchScoreboard, type ScoreboardEntry } from "@/lib/match-client";
 import {
   HoeIcon,
   WaterCanIcon,
-  SeedIcon,
   CoinIcon,
   MoonIcon,
   ChiliIcon,
@@ -66,9 +65,8 @@ function isAutoBotPauseKey(key: string): boolean {
     "arrowright",
     "space",
     "enter",
-    "digit1",
-    "digit2",
-    "digit3",
+    "keyq",
+    "keye",
   ].includes(key);
 }
 
@@ -589,17 +587,13 @@ export default function FarmGame() {
       if (k === "space" || k === "enter") {
         if (!e.repeat) doAction();
       }
-      if (k === "digit1") {
+      if (k === "keye") {
         toolRef.current = "hoe";
         setTool("hoe");
       }
-      if (k === "digit2") {
+      if (k === "keyq") {
         toolRef.current = "watering_can";
         setTool("watering_can");
-      }
-      if (k === "digit3") {
-        toolRef.current = "seed";
-        setTool("seed");
       }
       if (k === "keym") {
         const v = !isMuted();
@@ -1481,9 +1475,8 @@ export default function FarmGame() {
           <div className="farm-tool-grid">
             {(
               [
-                { id: "hoe", label: "จอบ", Icon: HoeIcon, key: "1" },
-                { id: "watering_can", label: "น้ำ", Icon: WaterCanIcon, key: "2" },
-                { id: "seed", label: "เมล็ด", Icon: SeedIcon, key: "3" },
+                { id: "hoe", label: "จอบ", Icon: HoeIcon, key: "E" },
+                { id: "watering_can", label: "น้ำ", Icon: WaterCanIcon, key: "Q" },
               ] as {
                 id: Tool;
                 label: string;
@@ -1631,15 +1624,14 @@ function normalizedKeyboardKey(e: KeyboardEvent): string {
     ห: "keys",
     ก: "keyd",
     ท: "keym",
+    ๆ: "keyq",
+    ำ: "keye",
     " ": "space",
     enter: "enter",
     arrowup: "arrowup",
     arrowdown: "arrowdown",
     arrowleft: "arrowleft",
     arrowright: "arrowright",
-    "1": "digit1",
-    "2": "digit2",
-    "3": "digit3",
   };
   if (thaiFallback[key]) return thaiFallback[key];
 

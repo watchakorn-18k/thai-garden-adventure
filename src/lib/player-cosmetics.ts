@@ -1,13 +1,23 @@
+export type HatShapeId = "straw" | "wide" | "crown" | "leaf" | "halo";
+export type ShirtStyleId = "plain" | "overalls" | "sash" | "jacket" | "champion";
+export type AuraEffectId = "none" | "gold" | "spark" | "rainbow";
+
 export interface PlayerCosmetics {
   hat: string;
   shirt: string;
   pants: string;
+  hatShape: HatShapeId;
+  shirtStyle: ShirtStyleId;
+  aura: AuraEffectId;
 }
 
 export const DEFAULT_COSMETICS: PlayerCosmetics = {
   hat: "#d9a441",
   shirt: "#c8412e",
   pants: "#3a5a8a",
+  hatShape: "straw",
+  shirtStyle: "plain",
+  aura: "none",
 };
 
 export const COSMETIC_PALETTES = {
@@ -34,38 +44,74 @@ export const COSMETIC_PRESETS: CosmeticPreset[] = [
   },
   {
     id: "rice_farmer",
-    name: "ชาวนาข้าว",
-    description: "โทนอุ่นเหมือนทุ่งข้าวยามเย็น",
+    name: "เอี๊ยมชาวนา",
+    description: "หมวกปีกกว้าง + เอี๊ยมทำนา",
     price: 35,
-    cosmetics: { hat: "#f4d864", shirt: "#f4e4c1", pants: "#5a3f12" },
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hat: "#f4d864",
+      shirt: "#f4e4c1",
+      pants: "#5a3f12",
+      hatShape: "wide",
+      shirtStyle: "overalls",
+    },
   },
   {
     id: "chili_red",
-    name: "พริกแดงแรง",
-    description: "แดงเข้ม ตัดทอง เห็นชัดกลางสวน",
+    name: "ผ้าคาดพริกแดง",
+    description: "เสื้อคาดอกแดงแรง มีทรงใหม่",
     price: 55,
-    cosmetics: { hat: "#ffd24a", shirt: "#d94e6a", pants: "#2d1b3d" },
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hat: "#ffd24a",
+      shirt: "#d94e6a",
+      pants: "#2d1b3d",
+      shirtStyle: "sash",
+    },
   },
   {
     id: "river_blue",
-    name: "น้ำคลองใส",
-    description: "ฟ้าเย็นแบบร่องน้ำหลังบ้าน",
+    name: "แจ็กเก็ตน้ำคลอง",
+    description: "หมวกใบไม้ + แจ็กเก็ตสีฟ้า",
     price: 75,
-    cosmetics: { hat: "#7fd8ff", shirt: "#4cc2ee", pants: "#2a6e9e" },
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hat: "#8bc967",
+      shirt: "#4cc2ee",
+      pants: "#2a6e9e",
+      hatShape: "leaf",
+      shirtStyle: "jacket",
+    },
   },
   {
     id: "mango_gold",
-    name: "มะม่วงทอง",
-    description: "เหลืองทองสดใสสำหรับนักเก็บเกี่ยว",
-    price: 110,
-    cosmetics: { hat: "#ffd24a", shirt: "#f0a05b", pants: "#6b3a1c" },
+    name: "ชุดมะม่วงทอง",
+    description: "มงกุฎทอง + aura ทอง",
+    price: 160,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hat: "#ffd24a",
+      shirt: "#f0a05b",
+      pants: "#6b3a1c",
+      hatShape: "crown",
+      shirtStyle: "champion",
+      aura: "gold",
+    },
   },
   {
     id: "night_violet",
-    name: "ม่วงยามค่ำ",
-    description: "สีเข้มเข้ากับท้องฟ้าดัสก์",
-    price: 150,
-    cosmetics: { hat: "#c08bd9", shirt: "#4a2f5c", pants: "#1a0f1f" },
+    name: "ม่วงประกายดาว",
+    description: "halo หมวก + spark รอบตัว",
+    price: 220,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hat: "#c08bd9",
+      shirt: "#4a2f5c",
+      pants: "#1a0f1f",
+      hatShape: "halo",
+      shirtStyle: "jacket",
+      aura: "spark",
+    },
   },
 ];
 
@@ -75,6 +121,22 @@ function isHexColor(v: unknown): v is string {
   return typeof v === "string" && /^#[0-9a-fA-F]{6}$/.test(v);
 }
 
+const HAT_SHAPES = new Set<HatShapeId>(["straw", "wide", "crown", "leaf", "halo"]);
+const SHIRT_STYLES = new Set<ShirtStyleId>(["plain", "overalls", "sash", "jacket", "champion"]);
+const AURA_EFFECTS = new Set<AuraEffectId>(["none", "gold", "spark", "rainbow"]);
+
+function isHatShape(v: unknown): v is HatShapeId {
+  return typeof v === "string" && HAT_SHAPES.has(v as HatShapeId);
+}
+
+function isShirtStyle(v: unknown): v is ShirtStyleId {
+  return typeof v === "string" && SHIRT_STYLES.has(v as ShirtStyleId);
+}
+
+function isAuraEffect(v: unknown): v is AuraEffectId {
+  return typeof v === "string" && AURA_EFFECTS.has(v as AuraEffectId);
+}
+
 export function normalizeCosmetics(input: unknown): PlayerCosmetics {
   if (!input || typeof input !== "object") return DEFAULT_COSMETICS;
   const c = input as Partial<PlayerCosmetics>;
@@ -82,6 +144,9 @@ export function normalizeCosmetics(input: unknown): PlayerCosmetics {
     hat: isHexColor(c.hat) ? c.hat : DEFAULT_COSMETICS.hat,
     shirt: isHexColor(c.shirt) ? c.shirt : DEFAULT_COSMETICS.shirt,
     pants: isHexColor(c.pants) ? c.pants : DEFAULT_COSMETICS.pants,
+    hatShape: isHatShape(c.hatShape) ? c.hatShape : DEFAULT_COSMETICS.hatShape,
+    shirtStyle: isShirtStyle(c.shirtStyle) ? c.shirtStyle : DEFAULT_COSMETICS.shirtStyle,
+    aura: isAuraEffect(c.aura) ? c.aura : DEFAULT_COSMETICS.aura,
   };
 }
 

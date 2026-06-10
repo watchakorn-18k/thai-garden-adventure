@@ -29,7 +29,7 @@ export default function PlayerAvatarPreview({ cosmetics, className }: PlayerAvat
   return (
     <span className={className} aria-hidden>
       <PixelFarmer
-        key={`${currentCosmetics.hat}:${currentCosmetics.shirt}:${currentCosmetics.pants}`}
+        key={`${currentCosmetics.hat}:${currentCosmetics.shirt}:${currentCosmetics.pants}:${currentCosmetics.hatShape}:${currentCosmetics.shirtStyle}:${currentCosmetics.aura}`}
         direction="down"
         walking={false}
         walkFrame={0}
