@@ -3333,17 +3333,24 @@ function BugCatchingOverlay({
         <div
           role="button"
           tabIndex={0}
-          className="relative mx-auto h-[220px] w-full max-w-[320px] overflow-hidden bg-[var(--muted)] outline-none"
+          className="relative mx-auto h-[220px] w-full max-w-[320px] select-none overflow-hidden bg-[var(--muted)] outline-none"
           style={{
             touchAction: "none",
+            userSelect: "none",
+            cursor: "crosshair",
             boxShadow:
               "0 0 0 2px var(--background), 0 0 0 6px var(--border), inset 0 0 0 3px rgba(255,255,255,.08)",
           }}
           onPointerDown={(e) => {
+            e.preventDefault();
             e.currentTarget.setPointerCapture(e.pointerId);
             moveNet(e, true);
           }}
-          onPointerMove={(e) => moveNet(e, e.buttons === 1)}
+          onPointerMove={(e) => {
+            e.preventDefault();
+            moveNet(e, e.buttons === 1);
+          }}
+          onDragStart={(e) => e.preventDefault()}
         >
           <div
             className="absolute grid size-12 place-items-center text-[var(--gold)]"

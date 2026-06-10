@@ -107,6 +107,8 @@ const MAX_SPECTATORS = 10;
 const BOT_TICK_MS = 150;
 const BOT_NAMES = ["บอทมะลิ", "บอทข้าวหอม", "บอทตะวัน", "บอทใบเตย", "บอทมะนาว"];
 const BOT_COSMETICS: PlayerCosmetics = { hat: "#8bc967", shirt: "#4cc2ee", pants: "#4a2f5c" };
+const BUG_SPAWN_CHANCE = 0.3;
+const BUG_CLEAR_REWARD = 40;
 const TWO_V_TWO_SLOTS = [
   { teamId: "A", role: "farmer" },
   { teamId: "A", role: "seller" },
@@ -601,8 +603,7 @@ export class MatchRoom implements DurableObject {
         player.stats.harvests += 1;
         player.stats.cropHarvests[ev.cropId] += 1;
 
-        // Spawn bugs with 15% probability on harvest in 2v2
-        const hasBug = Math.random() < 0.15;
+        const hasBug = Math.random() < BUG_SPAWN_CHANCE;
         if (hasBug) {
           player.tiles[ev.y][ev.x] = { type: "grass", bug: true };
           // Sync with teammate
@@ -752,7 +753,7 @@ export class MatchRoom implements DurableObject {
     }
 
     // Reward team with flat coins
-    const reward = 30;
+    const reward = BUG_CLEAR_REWARD;
     team.coins += reward;
     player.stats.coinsEarned += reward;
     this.mirrorTeamCoinsToPlayers();
@@ -1964,12 +1965,27 @@ export class MatchRoom implements DurableObject {
     const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND;
     const stackCount = playerCargoCount(bot);
 
-    // Decide target: market when basket full or no cargo left to collect, else nearest team cargo.
+    // Decide target: nearest bug first, then market/cargo logistics.
     let target: { x: number; y: number } | undefined;
+    let targetKind: "bug" | "cargo" | "market" | undefined;
+    let bestBugDist = Infinity;
+    for (let y = 0; y < bot.tiles.length; y += 1) {
+      for (let x = 0; x < bot.tiles[y].length; x += 1) {
+        if (!bot.tiles[y][x].bug) continue;
+        const d = Math.hypot(x - bot.pos.x, y - bot.pos.y);
+        if (d < bestBugDist) {
+          bestBugDist = d;
+          target = { x, y };
+          targetKind = "bug";
+        }
+      }
+    }
+
     const hasTeamCargo = this.fieldCargo.some((c) => c.teamId === bot.teamId);
-    if (stackCount > 0 && (stackCount >= SELLER_BASKET_CAPACITY || !hasTeamCargo)) {
+    if (!target && stackCount > 0 && (stackCount >= SELLER_BASKET_CAPACITY || !hasTeamCargo)) {
       target = MARKET_TILE_POS;
-    } else {
+      targetKind = "market";
+    } else if (!target) {
       let best: Cargo | undefined;
       let bestDist = Infinity;
       for (const cargo of this.fieldCargo) {
@@ -1982,8 +1998,10 @@ export class MatchRoom implements DurableObject {
       }
       if (best) {
         target = best.position;
+        targetKind = "cargo";
       } else if (stackCount > 0) {
         target = MARKET_TILE_POS;
+        targetKind = "market";
       }
     }
     if (!target) return false;
@@ -2002,7 +2020,9 @@ export class MatchRoom implements DurableObject {
     if (now - bot.lastActionAt < ACTION_COOLDOWN_MS) return false;
     const atMarket =
       Math.hypot(MARKET_TILE_POS.x - bot.pos.x, MARKET_TILE_POS.y - bot.pos.y) <= 1.5;
-    if (atMarket && stackCount > 0) {
+    if (targetKind === "bug") {
+      this.sellerClearBug(bot, target.x, target.y, now);
+    } else if (atMarket && stackCount > 0) {
       // Sell one cargo per tick: bot always matches the right customer (its crop)
       const stack = playerCargoStack(bot);
       this.sellCargo(bot, now, stack[0].cropId);
