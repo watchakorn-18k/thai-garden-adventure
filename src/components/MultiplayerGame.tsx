@@ -1,10 +1,10 @@
 import { Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { toast } from "sonner";
 import PixelFarmer from "./PixelFarmer";
 import CosmeticPicker from "./CosmeticPicker";
 import CropIndexBook from "./CropIndexBook";
 import PhaserField from "./PhaserField";
+import TitleUnlockDialog from "./TitleUnlockDialog";
 import {
   ChiliIcon,
   CoinIcon,
@@ -12,7 +12,6 @@ import {
   HoeIcon,
   MorningGloryIcon,
   RiceIcon,
-  SeedIcon,
   WaterCanIcon,
   MangoIcon,
   LemongrassIcon,
@@ -47,7 +46,7 @@ import {
   writeCosmetics,
   type PlayerCosmetics,
 } from "@/lib/player-cosmetics";
-import { useMatch } from "@/lib/match-client";
+import { fetchScoreboard, useMatch, type ScoreboardEntry } from "@/lib/match-client";
 import { toolDurationMs } from "@/lib/tool-animation";
 import { SFX, setMuted } from "@/lib/sfx";
 import lobbyMusicUrl from "../../lobby_music.wav";
@@ -71,6 +70,13 @@ import {
   type RoomStage,
   type ServerEvent,
 } from "@/lib/match-protocol";
+import { applyStoredProgressAward, readProgress } from "@/lib/progress-storage";
+import {
+  calculateLevel,
+  levelTitle,
+  type AppliedProgressAward,
+  type PlayerProgress,
+} from "@/lib/progression";
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
@@ -146,6 +152,10 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const is2v2Ref = useRef(false);
   const localPlayerRef = useRef<PublicPlayer | undefined>(undefined);
   const [localPlayer, setLocalPlayer] = useState<PublicPlayer | undefined>(undefined);
+  const [progress, setProgress] = useState<PlayerProgress | null>(null);
+  const [progressTampered, setProgressTampered] = useState(false);
+  const [lastProgressAward, setLastProgressAward] = useState<AppliedProgressAward | null>(null);
+  const [titleUnlock, setTitleUnlock] = useState<{ level: number; title: string } | null>(null);
 
   const pendingActions = useRef<
     Array<{
@@ -156,6 +166,18 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       seedChoice: CropId;
     }>
   >([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    readProgress().then((result) => {
+      if (cancelled) return;
+      setProgress(result.progress);
+      setProgressTampered(result.tampered);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const recalculateLocalPlayer = useCallback(() => {
     const s = selfRef.current;
@@ -218,6 +240,8 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     name,
     role,
     cosmetics,
+    enabled: progress !== null,
+    playerLevel: progress?.level,
     onEvents: (batch) => {
       setEvents((prev) => {
         const next = [...prev];
@@ -271,12 +295,6 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
             }
           } else if (ev.kind === "bug_found") {
             SFX.bad();
-            if (ev.playerId === selfId) {
-              toast("แมลงระบาด! 🐛", {
-                id: "bug-found",
-                description: "แมลงกินผักของคุณ! ขอให้คนขายช่วยจับที่ตลาดด่วน",
-              });
-            }
           } else if (ev.kind === "bug_cleared") {
             if (ev.playerId === selfId || matchRole === "spectator") {
               SFX.harvest();
@@ -284,20 +302,9 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
               for (let i = 0; i < coinCount; i++) {
                 setTimeout(() => SFX.coin(), i * 80);
               }
-              if (ev.playerId === selfId) {
-                toast.success("จับแมลงสำเร็จ! 🐛✨", {
-                  description: `ได้เงินเพิ่ม +${ev.reward} เหรียญ และปลดล็อกช่องแล้ว`,
-                });
-              }
             }
           } else if (ev.kind === "insufficient_funds") {
-            if (ev.playerId === selfId) {
-              SFX.bad();
-              toast("เงินไม่พอ", {
-                id: "insufficient-funds",
-                description: "คุณมีเงินไม่พอซื้อเมล็ดพันธุ์",
-              });
-            }
+            if (ev.playerId === selfId) SFX.bad();
           } else if (ev.kind === "cargo_picked_up") {
             if (ev.playerId === selfId || matchRole === "spectator") SFX.harvest();
           } else if (ev.kind === "cargo_sold") {
@@ -306,13 +313,6 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
               for (let i = 0; i < coinCount; i++) {
                 setTimeout(() => SFX.coin(), i * 80);
               }
-            }
-            if (ev.playerId === selfId && ev.marketRushBonus && ev.marketRushBonus > 0) {
-              toast.success(`MARKET RUSH +${ev.marketRushBonus}`, {
-                description: ev.marketRushCropId
-                  ? `${CROPS[ev.marketRushCropId].name} x${ev.marketRushMultiplier ?? 1}`
-                  : "ส่งตรงคำสั่งซื้อด่วน",
-              });
             }
             // Selling to the right customer builds the same combo meter as harvesting.
             if (ev.playerId === selfId) {
@@ -544,6 +544,29 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const is2v2 = state?.settings.mode === "2v2";
   const selfTeam = self?.teamId ? state?.teams?.find((team) => team.id === self.teamId) : undefined;
   const opp = state?.players.find((p) => p.id !== selfId && (!is2v2 || p.teamId !== self?.teamId));
+  const selfRecap = selfId ? state?.recap?.players.find((entry) => entry.id === selfId) : undefined;
+  const selfExpAward = selfRecap?.expAward;
+
+  useEffect(() => {
+    if (isSpectator || state?.status !== "ended" || !selfExpAward) return;
+    let cancelled = false;
+    applyStoredProgressAward(selfExpAward).then((result) => {
+      if (cancelled) return;
+      setProgress(result.progress);
+      if (result.applied) {
+        setLastProgressAward(result);
+        const before = levelTitle(result.previousLevel);
+        const after = levelTitle(result.progress.level);
+        if (result.leveledUp && before !== after) {
+          setTitleUnlock({ level: result.progress.level, title: after });
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isSpectator, selfExpAward, state?.status]);
+
   useEffect(() => {
     selfRef.current = self;
     statusRef.current = state?.status;
@@ -713,18 +736,22 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       }
       // Seller delivery keys (1-5) are handled inside SellerPuzzleOverlay, which
       // owns the customer board — only farmers map digits to tools here.
-      if (selfPlayer?.role !== "seller") {
-        if (k === "digit1") {
+      if (selfPlayer && selfPlayer.role !== "seller") {
+        if (k === "keye") {
           SFX.click();
           send({ t: "tool", tool: "hoe" });
         }
-        if (k === "digit2") {
+        if (k === "keyq") {
           SFX.click();
           send({ t: "tool", tool: "watering_can" });
         }
-        if (k === "digit3") {
-          SFX.click();
-          send({ t: "tool", tool: "seed" });
+        const cropShortcut = { digit1: 0, digit2: 1, digit3: 2, digit4: 3 }[k];
+        if (cropShortcut !== undefined) {
+          const cropId = selectedCropPool(selfPlayer.selectedCrops)[cropShortcut];
+          if (cropId) {
+            SFX.click();
+            send({ t: "seed", id: cropId });
+          }
         }
       }
     };
@@ -948,6 +975,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
             opp={opp}
             state={state}
             isHost={hasHostControls}
+            selfLevel={progress?.level}
             onReady={() => send({ t: "ready" })}
             onStart={() => send({ t: "start" })}
             onLeaveSlot={() => send({ t: "leave_slot" })}
@@ -1063,6 +1091,9 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
           self={self}
           spectator={isSpectator}
           roomClosesAt={state.roomClosesAt}
+          progress={progress}
+          progressTampered={progressTampered}
+          progressAward={lastProgressAward}
         />
       )}
 
@@ -1244,7 +1275,8 @@ function MultiplayerControlsGuide() {
 
           <div className="multi-guide-actions">
             <GuideAction keys="SPACE" label="ใช้" sub="ลงมือกับช่องตรงหน้า" />
-            <GuideAction keys="1 / 2 / 3" label="เครื่องมือ" sub="จอบ · น้ำ · เมล็ด" />
+            <GuideAction keys="E / Q" label="เครื่องมือ" sub="จอบ · บัวรดน้ำ" />
+            <GuideAction keys="1 / 2 / 3 / 4" label="เมล็ด" sub="เลือกช่องเมล็ด" />
             <GuideAction keys="R" label="พร้อม" sub="พร้อมใน lobby / เลือกผัก" />
           </div>
         </div>
@@ -1273,6 +1305,8 @@ function normalizedKeyboardKey(e: KeyboardEvent): string {
     ห: "keys",
     ก: "keyd",
     พ: "keyr",
+    ๆ: "keyq",
+    ำ: "keye",
     " ": "space",
     enter: "enter",
     arrowup: "arrowup",
@@ -1282,6 +1316,10 @@ function normalizedKeyboardKey(e: KeyboardEvent): string {
     "1": "digit1",
     "2": "digit2",
     "3": "digit3",
+    "4": "digit4",
+    "5": "digit5",
+    "6": "digit6",
+    "7": "digit7",
   };
   if (thaiFallback[key]) return thaiFallback[key];
 
@@ -1677,6 +1715,7 @@ function LobbyView({
   opp,
   state,
   isHost,
+  selfLevel,
   onReady,
   onStart,
   onLeaveSlot,
@@ -1690,6 +1729,7 @@ function LobbyView({
   opp?: PublicPlayer;
   state: PublicMatchState;
   isHost: boolean;
+  selfLevel?: number;
   onReady: () => void;
   onStart: () => void;
   onLeaveSlot: () => void;
@@ -1753,6 +1793,7 @@ function LobbyView({
         <TeamSlots
           players={state.players}
           selfId={self?.id}
+          selfLevel={selfLevel}
           hostId={state.hostId}
           isHost={isHost && state.status === "lobby"}
           canManage={isHost && state.status === "lobby"}
@@ -1763,7 +1804,13 @@ function LobbyView({
         />
       ) : (
         <div className="lobby-versus-grid">
-          <PlayerCard player={self} label="คุณ" side="left" hostId={state.hostId} />
+          <PlayerCard
+            player={self}
+            label="คุณ"
+            side="left"
+            hostId={state.hostId}
+            fallbackLevel={selfLevel}
+          />
           <div className="lobby-vs-core" aria-hidden>
             <span>VS</span>
           </div>
@@ -2325,6 +2372,7 @@ function RoomSettingsSummary({
 function TeamSlots({
   players,
   selfId,
+  selfLevel,
   hostId,
   isHost,
   canManage = false,
@@ -2335,6 +2383,7 @@ function TeamSlots({
 }: {
   players: PublicPlayer[];
   selfId?: string;
+  selfLevel?: number;
   hostId?: string;
   isHost: boolean;
   canManage?: boolean;
@@ -2350,6 +2399,7 @@ function TeamSlots({
         teamId="A"
         players={players}
         selfId={selfId}
+        selfLevel={selfLevel}
         side="left"
         hostId={hostId}
         isHost={isHost}
@@ -2367,6 +2417,7 @@ function TeamSlots({
         teamId="B"
         players={players}
         selfId={selfId}
+        selfLevel={selfLevel}
         side="right"
         hostId={hostId}
         isHost={isHost}
@@ -2385,6 +2436,7 @@ function TeamSlotColumn({
   teamId,
   players,
   selfId,
+  selfLevel,
   side,
   hostId,
   isHost,
@@ -2398,6 +2450,7 @@ function TeamSlotColumn({
   teamId: TeamId;
   players: PublicPlayer[];
   selfId?: string;
+  selfLevel?: number;
   side: "left" | "right";
   hostId?: string;
   isHost: boolean;
@@ -2436,6 +2489,7 @@ function TeamSlotColumn({
             canChoose={canPickSlot}
             onChoose={() => onChooseTeamRole?.(teamId, role)}
             isSelfSlot={isSelf}
+            fallbackLevel={isSelf ? selfLevel : undefined}
           />
         );
       })}
@@ -2455,6 +2509,7 @@ function PlayerCard({
   onChoose,
   chooseLabel = "เลือกสล็อตนี้",
   isSelfSlot = false,
+  fallbackLevel,
 }: {
   player?: PublicPlayer;
   label: ReactNode;
@@ -2467,8 +2522,10 @@ function PlayerCard({
   onChoose?: () => void;
   chooseLabel?: string;
   isSelfSlot?: boolean;
+  fallbackLevel?: number;
 }) {
   const ready = Boolean(player?.ready);
+  const displayLevel = player?.level ?? fallbackLevel;
   return (
     <article
       className="lobby-player-card pixel-panel"
@@ -2492,6 +2549,14 @@ function PlayerCard({
         <div className="lobby-avatar-ground" />
         {player ? (
           <div className="lobby-avatar-sprite">
+            {displayLevel ? (
+              <span
+                className="absolute left-1/2 top-[-12px] z-10 inline-block min-w-[46px] -translate-x-1/2 whitespace-nowrap px-1 py-[1px] text-center font-pixel text-[7px] text-[var(--gold)]"
+                style={{ boxShadow: "0 0 0 1px var(--background), 0 0 0 2px var(--border)" }}
+              >
+                LV {displayLevel}
+              </span>
+            ) : null}
             <PixelFarmer
               direction={side === "left" ? "right" : "left"}
               walking={false}
@@ -2508,6 +2573,11 @@ function PlayerCard({
         )}
       </div>
       <div className="lobby-player-name font-pixel">{player?.name ?? "สล็อตว่าง"}</div>
+      {displayLevel ? (
+        <div className="mt-1 font-pixel text-[7px] text-[var(--gold)]">
+          {levelTitle(displayLevel)}
+        </div>
+      ) : null}
       <div className="lobby-player-meta font-pixel" data-ready={ready ? "true" : undefined}>
         {isSelfSlot ? "สล็อตคุณ" : player ? (ready ? "พร้อมแล้ว" : "รออยู่") : "เชิญเพื่อน"}
       </div>
@@ -3176,21 +3246,36 @@ function isSellerPuzzleReady(player: PublicPlayer): boolean {
   );
 }
 
+const SELLER_BUG_INTERACT_RADIUS = 2.5;
+
 function isSellerBugReady(player: PublicPlayer): boolean {
-  if (player.role !== "seller") return false;
-  const infested = getInfestedTileCoords(player.tiles);
-  if (!infested) return false;
-  return Math.hypot(infested.x - player.pos.x, infested.y - player.pos.y) <= 1.5;
+  return Boolean(getSellerBugTarget(player));
 }
 
-function getInfestedTileCoords(tiles?: Tile[][]): { x: number; y: number } | null {
-  if (!tiles) return null;
-  for (let y = 0; y < ROWS; y++) {
-    for (let x = 0; x < COLS; x++) {
-      if (tiles[y]?.[x]?.bug) return { x, y };
+function getSellerBugTarget(player: PublicPlayer): { x: number; y: number } | null {
+  if (player.role !== "seller") return null;
+  const bugs = getInfestedTileCoords(player.tiles);
+  let best: { x: number; y: number } | null = null;
+  let bestDist = Infinity;
+  for (const bug of bugs) {
+    const dist = Math.hypot(bug.x - player.pos.x, bug.y - player.pos.y);
+    if (dist < bestDist) {
+      best = bug;
+      bestDist = dist;
     }
   }
-  return null;
+  return best && bestDist <= SELLER_BUG_INTERACT_RADIUS ? best : null;
+}
+
+function getInfestedTileCoords(tiles?: Tile[][]): { x: number; y: number }[] {
+  const bugs: { x: number; y: number }[] = [];
+  if (!tiles) return bugs;
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      if (tiles[y]?.[x]?.bug) bugs.push({ x, y });
+    }
+  }
+  return bugs;
 }
 
 const BUG_ICONS = [CaterpillarIcon, BeetleIcon, FlyIcon] as const;
@@ -3208,7 +3293,7 @@ function BugCatchingOverlay({
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
   onClose: () => void;
 }) {
-  const infested = getInfestedTileCoords(self.tiles);
+  const infested = getSellerBugTarget(self);
   const [bug, setBug] = useState(() => ({ x: 82, y: 92, species: 0 }));
   const [net, setNet] = useState(() => ({ x: 238, y: 128 }));
   const [hits, setHits] = useState(0);
@@ -3622,6 +3707,7 @@ function BasketMark({ size = 10 }: { size?: number }) {
 
 function MarketRushChip({ order }: { order?: MarketOrder }) {
   const [now, setNow] = useState(() => Date.now());
+  const [helpOpen, setHelpOpen] = useState(false);
   useEffect(() => {
     if (!order) return;
     const t = setInterval(() => setNow(Date.now()), 250);
@@ -3632,28 +3718,80 @@ function MarketRushChip({ order }: { order?: MarketOrder }) {
   const Icon = CROP_ICONS[order.cropId];
   const remaining = Math.max(0, Math.ceil((order.expiresAt - now) / 1000));
   return (
-    <div className="pixel-panel flex items-center justify-between gap-2 p-2">
-      <div className="flex items-center gap-2">
-        <span
-          className="flex h-8 w-8 items-center justify-center"
-          style={{ background: CROP_COLOR[order.cropId], boxShadow: "0 0 0 2px var(--background)" }}
-        >
-          <Icon size={22} />
-        </span>
-        <span className="flex flex-col gap-1">
-          <span className="font-pixel text-[8px] text-[var(--gold)]">MARKET RUSH</span>
-          <span className="font-thai text-[12px] text-[var(--foreground)]">
-            ตลาดรับ {CROPS[order.cropId].name} แพง
+    <>
+      <div className="pixel-panel flex items-center justify-between gap-2 p-2">
+        <div className="flex items-center gap-2">
+          <span
+            className="flex h-8 w-8 items-center justify-center"
+            style={{
+              background: CROP_COLOR[order.cropId],
+              boxShadow: "0 0 0 2px var(--background)",
+            }}
+          >
+            <Icon size={22} />
           </span>
-        </span>
+          <span className="flex flex-col gap-1">
+            <span className="font-pixel text-[8px] text-[var(--gold)]">MARKET RUSH</span>
+            <span className="font-thai text-[12px] text-[var(--foreground)]">
+              ตลาดรับ {CROPS[order.cropId].name} แพง
+            </span>
+          </span>
+        </div>
+        <div className="flex items-center gap-1">
+          <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
+            x{order.multiplier}
+          </span>
+          <span className="pixel-chip font-pixel text-[8px]">{remaining}s</span>
+          <button
+            type="button"
+            className="pixel-btn h-7 w-7 p-0 font-pixel text-[10px]"
+            onClick={() => {
+              SFX.click();
+              setHelpOpen(true);
+            }}
+            title="Market Rush คืออะไร"
+          >
+            ?
+          </button>
+        </div>
       </div>
-      <div className="flex items-center gap-1">
-        <span className="pixel-chip font-pixel text-[8px]" data-gold="true">
-          x{order.multiplier}
-        </span>
-        <span className="pixel-chip font-pixel text-[8px]">{remaining}s</span>
-      </div>
-    </div>
+      {helpOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(10,5,15,0.78)] p-4">
+          <div className="pixel-panel w-[min(560px,94vw)] p-5">
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <div className="font-pixel text-[12px] text-[var(--gold)]">MARKET RUSH</div>
+                <div className="mt-2 font-thai text-[14px] text-[var(--foreground)]">
+                  ตลาดกำลังรับซื้อ {CROPS[order.cropId].name} แพง x{order.multiplier}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="pixel-btn px-2 py-1 font-pixel text-[8px]"
+                onClick={() => {
+                  SFX.click();
+                  setHelpOpen(false);
+                }}
+              >
+                ปิด
+              </button>
+            </div>
+            <div className="grid gap-3 font-thai text-[14px] leading-relaxed text-[var(--foreground)]">
+              <p>1. คนสวนดูว่าตลาดต้องการพืชอะไร แล้วปลูกหรือเก็บพืชชนิดนั้นให้ทันเวลา</p>
+              <p>2. คนขายหยิบลังพืชชนิดนั้นไปส่งตลาดก่อนเวลาหมด</p>
+              <p>3. ถ้าส่งตรงชนิด จะได้เงินเพิ่มตามตัวคูณ Market Rush</p>
+              <p>
+                4. โบนัสนี้ซ้อนกับโบนัสส่งให้ลูกค้าถูกคนได้ เช่น ถูกคน x1.25 แล้ว Market Rush x
+                {order.multiplier}
+              </p>
+              <p className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+                ช่องในตะกร้าที่ตรงคำสั่งซื้อจะมีกรอบทอง
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 
@@ -3714,7 +3852,7 @@ function Toolbar({
             {/* Bug hunt is optional — only offered when standing near the infested tile.
                 Seller can ignore it and keep moving/selling. */}
             {(() => {
-              const coords = getInfestedTileCoords(self.tiles);
+              const coords = getSellerBugTarget(self);
               const label = coords
                 ? bugHuntReady
                   ? "จับแมลง"
@@ -3809,9 +3947,8 @@ function Toolbar({
         <div className="farm-tool-grid">
           {(
             [
-              { id: "hoe", label: "จอบ", Icon: HoeIcon, key: "1" },
-              { id: "watering_can", label: "นํ้า", Icon: WaterCanIcon, key: "2" },
-              { id: "seed", label: "เมล็ด", Icon: SeedIcon, key: "3" },
+              { id: "hoe", label: "จอบ", Icon: HoeIcon, key: "E" },
+              { id: "watering_can", label: "นํ้า", Icon: WaterCanIcon, key: "Q" },
             ] as {
               id: Tool;
               label: string;
@@ -3842,7 +3979,7 @@ function Toolbar({
         <div className="farm-crop-grid">
           {cropPool
             .map((id) => CROPS[id])
-            .map((c) => {
+            .map((c, idx) => {
               const Icon = CROP_ICONS[c.id];
               const active = self.seedChoice === c.id && self.tool === "seed";
               const rushActive = marketOrder?.cropId === c.id;
@@ -3862,7 +3999,9 @@ function Toolbar({
                     <Icon size={24} />
                   </span>
                   <span className="farm-crop-body">
-                    <span className="farm-crop-name">{c.name}</span>
+                    <span className="farm-crop-name">
+                      {c.name} <span className="farm-key-hint">[{idx + 1}]</span>
+                    </span>
                     <span className="farm-crop-prices">
                       <span>
                         ซื้อ <CoinIcon size={10} /> <b>{c.seedCost}</b>
@@ -4144,6 +4283,9 @@ function EndOverlay({
   self,
   spectator = false,
   roomClosesAt,
+  progress,
+  progressTampered,
+  progressAward,
 }: {
   winnerId?: string;
   winnerTeamId?: TeamId;
@@ -4156,6 +4298,9 @@ function EndOverlay({
   self?: PublicPlayer;
   spectator?: boolean;
   roomClosesAt?: number;
+  progress?: PlayerProgress | null;
+  progressTampered?: boolean;
+  progressAward?: AppliedProgressAward | null;
 }) {
   // In 2v2 the winner is a team; in 1v1 it's a single player. Normalize both
   // into one champion (name + cosmetics) so the trophy stage stays shared.
@@ -4192,6 +4337,11 @@ function EndOverlay({
   const [closeCountdown, setCloseCountdown] = useState(() =>
     roomClosesAt ? Math.max(0, Math.ceil((roomClosesAt - Date.now()) / 1000)) : 0,
   );
+  const [scoreboard, setScoreboard] = useState<ScoreboardEntry[]>([]);
+  const [scoreboardLoaded, setScoreboardLoaded] = useState(false);
+  const progressNext = progress ? calculateLevel(progress.totalExp).next : 0;
+  const selfAward = recap?.players.find((entry) => entry.id === selfId)?.expAward;
+  const awardExp = progressAward?.applied ? (selfAward?.exp ?? 0) : 0;
   useEffect(() => {
     if (!roomClosesAt) return;
     const tick = () =>
@@ -4200,6 +4350,20 @@ function EndOverlay({
     const i = setInterval(tick, 1000);
     return () => clearInterval(i);
   }, [roomClosesAt]);
+  useEffect(() => {
+    let cancelled = false;
+    fetchScoreboard({ mode: is2v2 ? "2v2" : "1v1", limit: 5 })
+      .then((entries) => {
+        if (!cancelled) setScoreboard(entries);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setScoreboardLoaded(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [is2v2]);
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center px-4"
@@ -4351,6 +4515,66 @@ function EndOverlay({
                 );
               })}
         </div>
+        <div className="pixel-panel flex w-full flex-col gap-2 p-3">
+          <div className="flex items-center justify-between gap-3">
+            <span className="font-pixel text-[9px] text-[var(--gold)]">
+              อันดับ {is2v2 ? "2v2" : "1v1"}
+            </span>
+            <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">TOP 5</span>
+          </div>
+          {!scoreboardLoaded ? (
+            <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">กำลังโหลด...</div>
+          ) : scoreboard.length ? (
+            <div className="flex flex-col gap-1">
+              {scoreboard.map((entry) => {
+                const current = players.some(
+                  (p) => p.id === entry.playerId || (p.userId && p.userId === entry.userId),
+                );
+                return (
+                  <div
+                    key={`${entry.matchCode}:${entry.playerId}`}
+                    className="flex items-center justify-between gap-2 font-pixel text-[8px]"
+                    style={current ? { color: "var(--gold)" } : undefined}
+                  >
+                    <span className="min-w-0 truncate">
+                      {entry.rank}. {entry.name}
+                      {entry.winner ? " · WIN" : ""}
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1">
+                      <CoinIcon size={10} />
+                      {entry.coins}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+              ยังไม่มีคะแนน หรือยังไม่ได้ตั้ง Redis
+            </div>
+          )}
+        </div>
+        {!spectator && progress && (
+          <div className="pixel-chip flex w-full flex-col gap-2 font-pixel text-[8px]">
+            <div className="flex items-center justify-between gap-3 text-[var(--gold)]">
+              <span>LV {progress.level}</span>
+              <span>
+                {progress.exp}/{progressNext} XP
+              </span>
+            </div>
+            {awardExp > 0 && (
+              <div className="text-[var(--foreground)]">
+                +{awardExp} XP
+                {progressAward?.leveledUp ? ` · LEVEL UP ${progressAward.progress.level}` : ""}
+              </div>
+            )}
+            {progressTampered && (
+              <div className="text-[var(--accent)]">
+                พบข้อมูล EXP ถูกแก้ไข · รีเซ็ตเป็นค่าเริ่มต้น
+              </div>
+            )}
+          </div>
+        )}
         {recap && (
           <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
             เวลาที่เหลือ {Math.ceil(recap.timeRemainingMs / 1000)}ว"

@@ -1,3 +1,4 @@
+import { Redis } from "@upstash/redis/cloudflare";
 import { applyAction, tickGrowth, updateComboAndGetBonus } from "../../../src/lib/game-logic";
 import {
   CARGO_TTL_MS,
@@ -30,6 +31,7 @@ import {
   roomSettingsSchema,
   cosmeticsSchema,
   type PublicMatchState,
+  type LobbyRoomSummary,
   type MatchRole,
   type MatchRecap,
   type PublicPlayer,
@@ -39,12 +41,14 @@ import {
   type ServerMsg,
 } from "../../../src/lib/match-protocol";
 import { DEFAULT_COSMETICS, type PlayerCosmetics } from "../../../src/lib/player-cosmetics";
+import { createMultiplayerProgressAward } from "../../../src/lib/progression";
 
 interface PlayerState {
   id: string;
   sessionId: string;
   userId?: string;
   name: string;
+  level?: number;
   cosmetics: PlayerCosmetics;
   coins: number;
   teamId?: TeamId;
@@ -71,6 +75,30 @@ interface PlayerState {
   isBot?: boolean;
   botSeedRotation?: number;
   botNextActAt?: number;
+}
+
+interface MatchEnv {
+  MATCHMAKER: DurableObjectNamespace;
+  UPSTASH_REDIS_REST_URL?: string;
+  UPSTASH_REDIS_REST_TOKEN?: string;
+}
+
+interface ScoreboardEntry {
+  userId?: string;
+  playerId: string;
+  name: string;
+  coins: number;
+  score: number;
+  mode: "1v1" | "2v2";
+  teamId?: string;
+  role?: string;
+  rankScore: number;
+  matchCode: string;
+  endedAt: number;
+  durationMs: number;
+  timeRemainingMs: number;
+  endedReason?: string;
+  winner: boolean;
 }
 
 interface StoredRoomState {
@@ -165,7 +193,7 @@ export class MatchRoom implements DurableObject {
 
   constructor(
     private ctx: DurableObjectState,
-    _env: unknown,
+    private env: MatchEnv,
   ) {
     for (const ws of this.ctx.getWebSockets()) {
       const att = ws.deserializeAttachment() as SocketAttachment | null;
@@ -176,6 +204,32 @@ export class MatchRoom implements DurableObject {
 
   private requiresCropSelection(player: PlayerState): boolean {
     return !(this.settings.mode === "2v2" && player.role === "seller");
+  }
+
+  private lobbyRoomSummary(now = Date.now()): LobbyRoomSummary {
+    return {
+      code: this.code,
+      status: this.status,
+      players: this.players.size,
+      maxPlayers: this.settings.maxPlayers,
+      mode: this.settings.mode,
+      stage: this.settings.stage,
+      joinable: this.status === "lobby" && this.players.size < this.settings.maxPlayers,
+      updatedAt: now,
+    };
+  }
+
+  private publishLobbySummary(): void {
+    if (!this.code) return;
+    const id = this.env.MATCHMAKER.idFromName("global");
+    const stub = this.env.MATCHMAKER.get(id);
+    this.ctx.waitUntil(
+      stub.fetch("https://matchmaker/rooms/upsert", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(this.lobbyRoomSummary()),
+      }),
+    );
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -190,6 +244,8 @@ export class MatchRoom implements DurableObject {
         status: this.status,
         players: this.players.size,
         maxPlayers: this.settings.maxPlayers,
+        mode: this.settings.mode,
+        stage: this.settings.stage,
       });
     }
     if (url.pathname === "/ws") {
@@ -227,6 +283,7 @@ export class MatchRoom implements DurableObject {
         msg.role ?? "player",
         msg.cosmetics,
         msg.userId,
+        msg.level,
       );
       return;
     }
@@ -768,8 +825,8 @@ export class MatchRoom implements DurableObject {
 
   private sellerClearBug(player: PlayerState, x: number, y: number, now: number): void {
     if (this.settings.mode !== "2v2" || player.role !== "seller" || !player.teamId) return;
-    // Seller must be near the infested tile to clear the bug
-    if (Math.hypot(x - player.pos.x, y - player.pos.y) > 1.5) return;
+    // Seller must be near the infested tile to clear the bug.
+    if (Math.hypot(x - player.pos.x, y - player.pos.y) > 2.5) return;
 
     const team = this.teams.find((t) => t.id === player.teamId);
     if (!team) return;
@@ -1172,6 +1229,7 @@ export class MatchRoom implements DurableObject {
         roomClosesAt: this.roomClosesAt,
       } satisfies StoredRoomState),
     );
+    if (this.status !== "playing") this.publishLobbySummary();
   }
 
   private persistDirty(now = Date.now()): void {
@@ -1498,6 +1556,7 @@ export class MatchRoom implements DurableObject {
     role: MatchRole = "player",
     cosmetics: PlayerCosmetics = DEFAULT_COSMETICS,
     userId?: string,
+    level?: number,
   ): void {
     this.code = code;
     this.dropDisconnectedWaitingPlayers();
@@ -1580,6 +1639,7 @@ export class MatchRoom implements DurableObject {
       existing.connected = true;
       existing.disconnectedAt = undefined;
       existing.name = name;
+      existing.level = normalizeLevel(level) ?? existing.level;
       existing.cosmetics = cosmeticsSchema.parse(cosmetics);
       existing.inputDir = undefined;
       existing.lastMovementAt = Date.now();
@@ -1596,6 +1656,7 @@ export class MatchRoom implements DurableObject {
         sessionId,
         userId,
         name,
+        level: normalizeLevel(level),
         cosmetics: cosmeticsSchema.parse(cosmetics),
         coins: 50,
         pos: spawn,
@@ -2191,19 +2252,51 @@ export class MatchRoom implements DurableObject {
     return true;
   }
 
+  private humanOpponentCount(player: PlayerState): number {
+    return [...this.players.values()].filter((p) => {
+      if (p.id === player.id || p.isBot) return false;
+      if (this.settings.mode === "2v2") return p.teamId !== player.teamId;
+      return true;
+    }).length;
+  }
+
+  private playerWon(player: PlayerState): boolean {
+    if (this.settings.mode === "2v2")
+      return Boolean(player.teamId && player.teamId === this.winnerTeamId);
+    return player.id === this.winnerId;
+  }
+
   private buildRecap(endedAt: number): MatchRecap {
     const durationMs = this.startedAt ? endedAt - this.startedAt : 0;
+    const botCount = [...this.players.values()].filter((p) => p.isBot).length;
     return {
       endedAt,
       durationMs,
       timeRemainingMs: this.endsAt ? Math.max(0, this.endsAt - endedAt) : 0,
       players: [...this.players.values()].map((p) => ({
         id: p.id,
+        userId: p.userId,
         name: p.name,
         coins: p.coins,
         harvests: p.stats.harvests,
         topCrop: topCrop(p.stats.cropHarvests),
         coinsEarned: p.stats.coinsEarned,
+        expAward: p.isBot
+          ? undefined
+          : createMultiplayerProgressAward({
+              roomCode: this.code,
+              playerId: p.id,
+              userId: p.userId,
+              mode: this.settings.mode,
+              endedAt,
+              durationMs,
+              coinsEarned: p.stats.coinsEarned,
+              harvests: p.stats.harvests,
+              won: this.playerWon(p),
+              humanOpponentCount: this.humanOpponentCount(p),
+              botCount,
+              endedReason: this.endedReason,
+            }),
       })),
     };
   }
@@ -2217,6 +2310,54 @@ export class MatchRoom implements DurableObject {
     this.endMatch(undefined, reason);
   }
 
+  private async submitScoreboard(): Promise<void> {
+    if (!this.env.UPSTASH_REDIS_REST_URL || !this.env.UPSTASH_REDIS_REST_TOKEN || !this.recap)
+      return;
+    const hasHumanOpponent = [...this.players.values()].some(
+      (player) => !player.isBot && this.humanOpponentCount(player) > 0,
+    );
+    if (!hasHumanOpponent) return;
+    const redis = new Redis({
+      url: this.env.UPSTASH_REDIS_REST_URL,
+      token: this.env.UPSTASH_REDIS_REST_TOKEN,
+    });
+    const submitted = await redis.set(`tg:scoreboard:submitted:${this.code}`, "1", {
+      nx: true,
+      ex: 60 * 60 * 24 * 7,
+    });
+    if (!submitted) return;
+
+    const mode = this.settings.mode;
+    const timeRemainingSeconds = Math.floor(this.recap.timeRemainingMs / 1000);
+    for (const player of this.players.values()) {
+      if (player.isBot) continue;
+      const team = player.teamId ? this.teams.find((t) => t.id === player.teamId) : undefined;
+      const coins = mode === "2v2" ? (team?.coins ?? player.coins) : player.coins;
+      const rankScore = coins * 1_000_000 + timeRemainingSeconds;
+      const member = `entry:${mode}:${this.code}:${player.id}`;
+      const entry: ScoreboardEntry = {
+        userId: player.userId,
+        playerId: player.id,
+        name: player.name.slice(0, 16),
+        coins,
+        score: coins,
+        mode,
+        teamId: player.teamId,
+        role: player.role,
+        rankScore,
+        matchCode: this.code,
+        endedAt: this.recap.endedAt,
+        durationMs: this.recap.durationMs,
+        timeRemainingMs: this.recap.timeRemainingMs,
+        endedReason: this.endedReason,
+        winner: this.playerWon(player),
+      };
+      await redis.set(`tg:scoreboard:${member}`, entry);
+      await redis.zadd(`tg:scoreboard:${mode}`, { score: rankScore, member });
+    }
+    await redis.zremrangebyrank(`tg:scoreboard:${mode}`, 0, -101);
+  }
+
   private endMatch(
     winnerId: string | undefined,
     reason: "race" | "timeout" | "forfeit" | "kick",
@@ -2227,6 +2368,9 @@ export class MatchRoom implements DurableObject {
     if (this.settings.mode !== "2v2") this.winnerTeamId = undefined;
     this.endedReason = reason;
     this.recap = this.buildRecap(Date.now());
+    this.ctx.waitUntil(
+      this.submitScoreboard().catch((err) => console.error("scoreboard write failed", err)),
+    );
     if (this.snapshotTimer) {
       clearInterval(this.snapshotTimer);
       this.snapshotTimer = undefined;
@@ -2304,7 +2448,9 @@ export class MatchRoom implements DurableObject {
   private publicState(): PublicMatchState {
     const players: PublicPlayer[] = [...this.players.values()].map((p) => ({
       id: p.id,
+      userId: p.userId,
       name: p.name,
+      level: p.level,
       coins: p.coins,
       teamId: p.teamId,
       role: p.role,
@@ -2560,6 +2706,12 @@ function isPlanValid(
   if (!tile) return false;
   const needs = tileNeeds(tile, bot.selectedCrops, bot.coins, bot.botSeedRotation ?? 0);
   return Boolean(needs) && needs!.tool === plan.tool;
+}
+
+function normalizeLevel(level: unknown): number | undefined {
+  return typeof level === "number" && Number.isFinite(level)
+    ? Math.max(1, Math.min(999, Math.floor(level)))
+    : undefined;
 }
 
 function emptyStats(): PublicPlayerStats {

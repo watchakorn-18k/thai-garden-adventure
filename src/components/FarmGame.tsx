@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
-import CosmeticPicker from "./CosmeticPicker";
-import CropIndexBook from "./CropIndexBook";
+import GameMenuDialog, { type GameMenuTab } from "./GameMenuDialog";
 import QuickMatchButton from "./QuickMatchButton";
+import { fetchScoreboard, type ScoreboardEntry } from "@/lib/match-client";
 import {
   HoeIcon,
   WaterCanIcon,
@@ -18,9 +18,8 @@ import {
   LemongrassIcon,
   PapayaIcon,
   BasilIcon,
-  HelpBookIcon,
-  SpeakerOnIcon,
   SpeakerOffIcon,
+  SpeakerOnIcon,
 } from "./PixelIcons";
 import {
   COLS,
@@ -37,8 +36,15 @@ import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from
 import { toolDurationMs } from "@/lib/tool-animation";
 import { chooseFarmBotPlan, isFarmBotPlanValid, type FarmBotPlan } from "@/lib/farm-bot";
 import { SFX, setMuted, isMuted, startBgm, stopBgm } from "@/lib/sfx";
-import { readCosmetics, writeCosmetics, type PlayerCosmetics } from "@/lib/player-cosmetics";
+import { readCosmetics, writeCosmetics } from "@/lib/player-cosmetics";
 import { loadPlayerName, savePlayerName } from "@/lib/player-name";
+import { applyStoredProgressAward, readProgress } from "@/lib/progress-storage";
+import {
+  calculateLevel,
+  createSinglePlayerHarvestAward,
+  levelTitle,
+  type PlayerProgress,
+} from "@/lib/progression";
 
 function isAutoBotPauseKey(key: string): boolean {
   return [
@@ -109,10 +115,8 @@ export default function FarmGame() {
   });
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
   const [playerName, setPlayerName] = useState("");
-  const [nameOpen, setNameOpen] = useState(false);
-  const [outfitOpen, setOutfitOpen] = useState(false);
-  const [ledgerOpen, setLedgerOpen] = useState(false);
-  const [helpOpen, setHelpOpen] = useState(false);
+  const [gameMenuOpen, setGameMenuOpen] = useState(false);
+  const [gameMenuInitialTab, setGameMenuInitialTab] = useState<GameMenuTab>("outfit");
   const [popups, setPopups] = useState<
     { id: number; x: number; y: number; text: string; tone: "good" | "bad" | "info" }[]
   >([]);
@@ -160,7 +164,7 @@ export default function FarmGame() {
   const seedChoiceRef = useRef<CropId>(seedChoice);
   const marketPricesRef = useRef(marketPrices);
   const comboStateRef = useRef(comboState);
-  const helpOpenRef = useRef(helpOpen);
+  const gameMenuOpenRef = useRef(gameMenuOpen);
   const botPlanRef = useRef<FarmBotPlan | null>(null);
   const botTargetRef = useRef<{ x: number; y: number } | null>(null);
   const botIntentRef = useRef<{ dx: number; dy: number } | null>(null);
@@ -169,6 +173,30 @@ export default function FarmGame() {
   const lastUserInputAtRef = useRef(0);
   const botPausedRef = useRef(false);
   const [autoBotActive, setAutoBotActive] = useState(true);
+  const [homeScoreboard, setHomeScoreboard] = useState<{
+    oneVsOne: ScoreboardEntry[];
+    twoVsTwo: ScoreboardEntry[];
+  }>({
+    oneVsOne: [],
+    twoVsTwo: [],
+  });
+  const [homeScoreboardLoaded, setHomeScoreboardLoaded] = useState(false);
+  const [homeScoreboardOpen, setHomeScoreboardOpen] = useState(false);
+  const [progress, setProgress] = useState<PlayerProgress | null>(null);
+  const [progressTampered, setProgressTampered] = useState(false);
+  const progressAwardSeqRef = useRef(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    readProgress().then((result) => {
+      if (cancelled) return;
+      setProgress(result.progress);
+      setProgressTampered(result.tampered);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     tilesRef.current = tiles;
@@ -189,8 +217,8 @@ export default function FarmGame() {
     comboStateRef.current = comboState;
   }, [comboState]);
   useEffect(() => {
-    helpOpenRef.current = helpOpen;
-  }, [helpOpen]);
+    gameMenuOpenRef.current = gameMenuOpen;
+  }, [gameMenuOpen]);
   // Load (or generate + persist a random veggie) name on the client to avoid SSR mismatch.
   useEffect(() => {
     setPlayerName(loadPlayerName());
@@ -379,6 +407,25 @@ export default function FarmGame() {
                 setComboState(resetCombo);
               }, COMBO_WINDOW);
 
+              const idleAward =
+                autoBotActive &&
+                !botPausedRef.current &&
+                actionNow - lastUserInputAtRef.current > 3000;
+              const award = createSinglePlayerHarvestAward({
+                cropId: ev.cropId,
+                reward: ev.reward,
+                total,
+                at: actionNow,
+                idle: idleAward,
+                sequence: ++progressAwardSeqRef.current,
+              });
+              void applyStoredProgressAward(award).then((result) => {
+                setProgress(result.progress);
+                if (result.applied) {
+                  addPopup(ev.x, ev.y, `+${award.exp} XP`, "info");
+                }
+              });
+
               const basePrice = CROPS[ev.cropId].sellPrice;
               setMarketPrices((prev) => {
                 const next = { ...prev };
@@ -427,7 +474,7 @@ export default function FarmGame() {
         return result.tiles;
       });
     },
-    [addPopup, burstParticles, shake, spawnFlyCoins, spawnCrit, triggerScreenShake],
+    [addPopup, autoBotActive, burstParticles, shake, spawnFlyCoins, spawnCrit, triggerScreenShake],
   );
 
   const doActionRef = useRef(doAction);
@@ -486,8 +533,8 @@ export default function FarmGame() {
       const t = e.target as HTMLElement | null;
       if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
 
-      if (helpOpen) {
-        if (e.key === "Escape") setHelpOpen(false);
+      if (gameMenuOpen) {
+        if (e.key === "Escape") setGameMenuOpen(false);
         e.preventDefault();
         return;
       }
@@ -499,8 +546,12 @@ export default function FarmGame() {
         e.preventDefault();
       }
       if (e.key === "?") {
-        setHelpOpen(true);
+        setGameMenuInitialTab("controls");
+        setGameMenuOpen(true);
+        keys.current.clear();
         SFX.click();
+        e.preventDefault();
+        return;
       }
       if (k === "space" || k === "enter") {
         if (!e.repeat) doAction();
@@ -539,7 +590,7 @@ export default function FarmGame() {
       document.removeEventListener("visibilitychange", onVisChange);
       window.removeEventListener("blur", onBlur);
     };
-  }, [doAction, helpOpen, pauseAutoBot]);
+  }, [doAction, gameMenuOpen, pauseAutoBot]);
 
   useEffect(() => {
     const BOT_SPEED = 5.2; // tiles/sec — same as manual
@@ -547,7 +598,7 @@ export default function FarmGame() {
 
     const i = setInterval(() => {
       const now = Date.now();
-      if (helpOpenRef.current) {
+      if (gameMenuOpenRef.current) {
         botTargetRef.current = null;
         botIntentRef.current = null;
         return;
@@ -824,43 +875,73 @@ export default function FarmGame() {
     ],
     [],
   );
+  const progressNext = progress ? calculateLevel(progress.totalExp).next : 0;
+
+  const openScoreboard = useCallback(() => {
+    setHomeScoreboardOpen(true);
+    SFX.click();
+    if (homeScoreboardLoaded) return;
+    Promise.all([
+      fetchScoreboard({ mode: "1v1", limit: 5 }),
+      fetchScoreboard({ mode: "2v2", limit: 5 }),
+    ])
+      .then(([oneVsOne, twoVsTwo]) => setHomeScoreboard({ oneVsOne, twoVsTwo }))
+      .catch(() => undefined)
+      .finally(() => setHomeScoreboardLoaded(true));
+  }, [homeScoreboardLoaded]);
 
   return (
     <div className="relative min-h-screen w-full flex flex-col items-center justify-start px-6 pb-10 gap-8 overflow-hidden">
-      {/* GitHub repo link */}
-      <a
-        href="https://github.com/watchakorn-18k/thai-garden-adventure"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="fixed top-3 right-3 z-100 pointer-events-auto transition-transform hover:scale-110"
-        title="GitHub"
-      >
-        <div
-          className="flex items-center justify-center"
-          style={{
-            width: 36,
-            height: 36,
-            background: "var(--card)",
-            boxShadow: [
-              "inset 0 2px 0 0 rgba(255,255,255,0.08)",
-              "inset 0 -2px 0 0 rgba(0,0,0,0.4)",
-              "0 0 0 2px #1a0f1f",
-              "0 0 0 4px var(--border)",
-            ].join(","),
+      <div className="fixed right-3 top-3 z-100 flex items-center gap-3 pointer-events-auto">
+        <button
+          type="button"
+          onClick={() => {
+            const v = !isMuted();
+            setMuted(v);
+            setMutedState(v);
+            if (!v) startBgm();
+            SFX.click();
           }}
+          className="pixel-btn flex h-9 w-9 items-center justify-center p-0"
+          title="ปิด/เปิดเสียง (M)"
+          aria-label={muted ? "เปิดเสียง" : "ปิดเสียง"}
         >
-          <svg
-            viewBox="0 0 16 16"
-            width="20"
-            height="20"
-            fill="currentColor"
-            className="text-muted-foreground"
-            style={{ imageRendering: "pixelated" }}
+          {muted ? <SpeakerOffIcon size={18} /> : <SpeakerOnIcon size={18} />}
+        </button>
+        <a
+          href="https://github.com/watchakorn-18k/thai-garden-adventure"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="transition-transform hover:scale-110"
+          title="GitHub"
+        >
+          <div
+            className="flex items-center justify-center"
+            style={{
+              width: 36,
+              height: 36,
+              background: "var(--card)",
+              boxShadow: [
+                "inset 0 2px 0 0 rgba(255,255,255,0.08)",
+                "inset 0 -2px 0 0 rgba(0,0,0,0.4)",
+                "0 0 0 2px #1a0f1f",
+                "0 0 0 4px var(--border)",
+              ].join(","),
+            }}
           >
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-          </svg>
-        </div>
-      </a>
+            <svg
+              viewBox="0 0 16 16"
+              width="20"
+              height="20"
+              fill="currentColor"
+              className="text-muted-foreground"
+              style={{ imageRendering: "pixelated" }}
+            >
+              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+            </svg>
+          </div>
+        </a>
+      </div>
 
       {/* Sky decoration */}
       <div className="sky-stars" />
@@ -951,111 +1032,91 @@ export default function FarmGame() {
               </div>
             </div>
           )}
+          <div className="header-status-stack">
+            <button
+              type="button"
+              onClick={() => {
+                if (autoBotActive) {
+                  pauseAutoBot();
+                } else {
+                  botPausedRef.current = false;
+                  setAutoBotActive(true);
+                }
+                SFX.click();
+              }}
+              className="pixel-chip pixel-btn header-status-chip"
+              data-gold={autoBotActive ? "true" : undefined}
+              title={
+                autoBotActive ? "บอททำงานอัตโนมัติ (คลิกเพื่อหยุด)" : "บอทหยุด (คลิกเพื่อเริ่ม)"
+              }
+            >
+              <span
+                className={autoBotActive ? "live-dot" : "header-status-dot"}
+                style={
+                  autoBotActive
+                    ? undefined
+                    : { width: 9, height: 9, background: "#7d6a5a", boxShadow: "0 0 0 2px #1a0f1f" }
+                }
+              />
+              {autoBotActive ? "อัตโนมัติ" : "หยุด"}
+            </button>
+            <div
+              className={`pixel-chip header-status-chip ${hudPulse ? "pulse-glow" : ""}`}
+              data-gold="true"
+            >
+              <CoinIcon size={16} />
+              <span>{coins}</span>
+            </div>
+          </div>
           <button
             type="button"
+            className="pixel-btn header-level-btn"
+            data-active={gameMenuOpen ? "true" : undefined}
+            aria-haspopup="dialog"
+            aria-expanded={gameMenuOpen}
+            title="เปิดเมนูผู้เล่น"
             onClick={() => {
-              if (autoBotActive) {
-                pauseAutoBot();
-              } else {
-                botPausedRef.current = false;
-                setAutoBotActive(true);
-              }
+              setGameMenuInitialTab("outfit");
+              setGameMenuOpen(true);
+              keys.current.clear();
               SFX.click();
             }}
-            className="pixel-chip pixel-btn flex items-center gap-1.5 font-pixel text-[8px]"
-            data-gold={autoBotActive ? "true" : undefined}
-            title={autoBotActive ? "บอททำงานอัตโนมัติ (คลิกเพื่อหยุด)" : "บอทหยุด (คลิกเพื่อเริ่ม)"}
           >
-            <span
-              className={
-                autoBotActive
-                  ? "live-dot mr-0.5"
-                  : "inline-block w-[9px] height-[9px] bg-slate-500 box-shadow-[0_0_0_2px_#1a0f1f] mr-0.5"
-              }
-              style={
-                autoBotActive
-                  ? undefined
-                  : { width: 9, height: 9, background: "#7d6a5a", boxShadow: "0 0 0 2px #1a0f1f" }
-              }
-            />
-            {autoBotActive ? "อัตโนมัติ" : "หยุด"}
-          </button>
-          <div
-            className={`pixel-chip flex items-center gap-2 ${hudPulse ? "pulse-glow" : ""}`}
-            data-gold="true"
-          >
-            <CoinIcon size={18} />
-            <span>{coins}</span>
-          </div>
-          <HeaderOutfitMenu
-            outfit={{
-              open: outfitOpen,
-              cosmetics,
-              onToggle: () =>
-                setOutfitOpen((current) => {
-                  if (!current) setLedgerOpen(false);
-                  return !current;
-                }),
-              onClose: () => setOutfitOpen(false),
-              onChange: (next) => {
-                setCosmetics(next);
-                writeCosmetics(next);
-                SFX.click();
-              },
-            }}
-          />
-          <CropIndexBook
-            iconOnly
-            open={ledgerOpen}
-            onOpenChange={(next) => {
-              setLedgerOpen(next);
-              if (next) setOutfitOpen(false);
-            }}
-            marketPrices={marketPrices}
-            selectedCropId={seedChoice}
-            onSelectCrop={(id) => {
-              setSeedChoice(id);
-              setTool("seed");
-            }}
-          />
-          <button
-            onClick={() => {
-              setHelpOpen(true);
-              SFX.click();
-            }}
-            className="pixel-btn flex h-[34px] w-[34px] items-center justify-center p-0"
-            title="วิธีเล่น (?)"
-            aria-label="วิธีเล่น"
-          >
-            <HelpBookIcon size={22} />
+            <span className="header-level-avatar" aria-hidden>
+              <PixelFarmer
+                direction="down"
+                walking={false}
+                walkFrame={0}
+                acting={false}
+                tool="hoe"
+                cosmetics={cosmetics}
+              />
+            </span>
+            <span className="header-level-copy">
+              <span className="header-level-name">{playerName || "ตั้งชื่อ"}</span>
+              <span className="header-level-main">
+                {progress ? `LV ${progress.level}` : "เมนู"}
+              </span>
+              <span className="header-level-sub">
+                {progress ? `${progress.exp}/${progressNext} XP` : "เปิดเมนู"}
+              </span>
+              {progressTampered && <span className="header-level-reset">RESET</span>}
+            </span>
           </button>
           <button
+            type="button"
             onClick={() => {
               const v = !isMuted();
               setMuted(v);
               setMutedState(v);
-              if (!v) {
-                startBgm();
-                SFX.click();
-              }
+              if (!v) startBgm();
+              SFX.click();
             }}
-            className="pixel-btn flex h-[34px] w-[34px] items-center justify-center p-0"
+            className="pixel-btn header-sound-btn"
             title="ปิด/เปิดเสียง (M)"
             aria-label={muted ? "เปิดเสียง" : "ปิดเสียง"}
           >
             {muted ? <SpeakerOffIcon size={22} /> : <SpeakerOnIcon size={22} />}
-          </button>
-          <button
-            onClick={() => {
-              setNameOpen(true);
-              SFX.click();
-            }}
-            className="pixel-btn flex h-[34px] items-center gap-1.5 px-2 font-pixel text-[8px]"
-            title="เปลี่ยนชื่อผู้เล่น"
-            aria-label="เปลี่ยนชื่อผู้เล่น"
-          >
-            <PencilIcon size={16} />
-            <span className="max-w-[88px] truncate">{playerName || "ตั้งชื่อ"}</span>
           </button>
         </div>
       </header>
@@ -1080,6 +1141,11 @@ export default function FarmGame() {
               <a href="/lobby?mode=2v2" className="pixel-btn cta-1v1-link">
                 2V2
               </a>
+            </span>
+            <span className="cta-btn-bob" data-delay="true">
+              <button type="button" onClick={openScoreboard} className="pixel-btn cta-1v1-link">
+                SCORE
+              </button>
             </span>
           </div>
         </div>
@@ -1425,125 +1491,61 @@ export default function FarmGame() {
         </div>
       </div>
 
-      {/* Player name modal */}
-      {nameOpen && (
-        <NameModal
-          name={playerName}
-          onClose={() => setNameOpen(false)}
-          onSave={(next) => {
-            setPlayerName(next);
-            savePlayerName(next);
-            setNameOpen(false);
-            SFX.click();
-          }}
+      {homeScoreboardOpen && (
+        <HomeScoreboardDialog
+          scoreboard={homeScoreboard}
+          loaded={homeScoreboardLoaded}
+          onClose={() => setHomeScoreboardOpen(false)}
         />
       )}
 
-      {/* Controls / how-to-play modal */}
-      {helpOpen && (
-        <div
-          className="fixed inset-0 z-40 flex items-center justify-center p-4"
-          style={{ background: "rgba(10,5,15,0.85)" }}
-          onClick={() => setHelpOpen(false)}
-        >
-          <div
-            className="relative w-full max-w-5xl pixel-panel px-6 py-5 help-modal-pop"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-label="วิธีการเล่น"
-          >
-            <div className="flex items-center gap-3 mb-5">
-              <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-                ควบคุม
-              </span>
-              <span className="font-pixel text-[8px] tracking-[1.5px] text-[var(--muted-foreground)] opacity-70">
-                คู่มือการเล่น
-              </span>
-              <span className="flex-1 h-[3px] bg-[#1a0f1f]" />
-              <button
-                type="button"
-                onClick={() => setHelpOpen(false)}
-                className="pixel-btn flex h-8 w-8 items-center justify-center p-0"
-                title="ปิด (ESC)"
-                aria-label="ปิด"
-                style={{ fontSize: 10 }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-[auto_3px_1fr] gap-6 md:gap-7 items-start">
-              <div className="flex flex-col gap-5 min-w-[220px]">
-                <div className="flex items-start gap-4">
-                  <div className="grid grid-cols-3 grid-rows-2 gap-1 shrink-0">
-                    <span />
-                    <kbd className="pixel-key">W</kbd>
-                    <span />
-                    <kbd className="pixel-key">A</kbd>
-                    <kbd className="pixel-key">S</kbd>
-                    <kbd className="pixel-key">D</kbd>
-                  </div>
-                  <div className="flex flex-col gap-1 pt-1">
-                    <span className="font-pixel text-[10px] tracking-wider">เดิน</span>
-                    <span className="font-pixel text-[8px] text-[var(--muted-foreground)] leading-relaxed">
-                      เดินสำรวจ · ลูกศรก็ได้
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <kbd className="pixel-key pixel-key-wide">SPACE</kbd>
-                  <div className="flex flex-col gap-1">
-                    <span className="font-pixel text-[10px] tracking-wider">ใช้เครื่องมือ</span>
-                    <span className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-                      ทำกับช่องที่หันหน้าใส่
-                    </span>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-pixel text-[8px] text-[var(--muted-foreground)] mr-1">
-                    เลือกเครื่องมือ
-                  </span>
-                  <kbd className="pixel-key pixel-key-sm">1</kbd>
-                  <kbd className="pixel-key pixel-key-sm">2</kbd>
-                  <kbd className="pixel-key pixel-key-sm">3</kbd>
-                </div>
-              </div>
-
-              <span className="hidden md:block w-[3px] self-stretch bg-[#1a0f1f]" />
-
-              <div className="flex flex-col gap-3 min-w-0">
-                <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-                  ขั้นตอน
-                </span>
-                <div className="flow-strip">
-                  <FlowStep n="01" label="ขุด" sub="ขุด">
-                    <HoeIcon size={20} />
-                  </FlowStep>
-                  <FlowArrow />
-                  <FlowStep n="02" label="หว่าน" sub="หว่าน">
-                    <SeedIcon size={20} />
-                  </FlowStep>
-                  <FlowArrow />
-                  <FlowStep n="03" label="รดน้ำ" sub="รดน้ำ">
-                    <WaterCanIcon size={20} />
-                  </FlowStep>
-                  <FlowArrow />
-                  <FlowStep n="04" label="รอ" sub="พักผ่อน">
-                    <MoonIcon size={18} />
-                  </FlowStep>
-                  <FlowArrow />
-                  <FlowStep n="05" label="เก็บเกี่ยว" sub="เก็บ" gold>
-                    <CoinIcon size={18} />
-                  </FlowStep>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      <GameMenuDialog
+        open={gameMenuOpen}
+        initialTab={gameMenuInitialTab}
+        playerName={playerName}
+        coins={coins}
+        levelLabel={progress ? `LV ${progress.level} · ${levelTitle(progress.level)}` : "เมนู"}
+        expLabel={progress ? `${progress.exp}/${progressNext} XP` : undefined}
+        autoBotActive={autoBotActive}
+        muted={muted}
+        cosmetics={cosmetics}
+        marketPrices={marketPrices}
+        selectedCropId={seedChoice}
+        onClose={() => setGameMenuOpen(false)}
+        onSaveName={(next) => {
+          setPlayerName(next);
+          savePlayerName(next);
+          SFX.click();
+        }}
+        onChangeCosmetics={(next) => {
+          setCosmetics(next);
+          writeCosmetics(next);
+          SFX.click();
+        }}
+        onSelectCrop={(id) => {
+          seedChoiceRef.current = id;
+          setSeedChoice(id);
+          toolRef.current = "seed";
+          setTool("seed");
+          pauseAutoBot();
+        }}
+        onToggleAutoBot={() => {
+          if (autoBotActive) {
+            pauseAutoBot();
+          } else {
+            botPausedRef.current = false;
+            setAutoBotActive(true);
+          }
+          SFX.click();
+        }}
+        onToggleMuted={() => {
+          const v = !isMuted();
+          setMuted(v);
+          setMutedState(v);
+          if (!v) startBgm();
+          SFX.click();
+        }}
+      />
     </div>
   );
 }
@@ -1571,220 +1573,6 @@ function normalizedKeyboardKey(e: KeyboardEvent): string {
   const code = e.code.toLowerCase();
   if (code && code !== "unidentified") return code;
   return key;
-}
-
-function HeaderOutfitMenu({
-  outfit,
-}: {
-  outfit: {
-    open: boolean;
-    cosmetics: PlayerCosmetics;
-    onToggle: () => void;
-    onClose: () => void;
-    onChange: (next: PlayerCosmetics) => void;
-  };
-}) {
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        onClick={outfit.onToggle}
-        className="pixel-btn flex h-[34px] items-center px-2"
-        aria-expanded={outfit.open}
-        style={{ fontSize: 8 }}
-      >
-        ชุด
-      </button>
-      {outfit.open && (
-        <div className="absolute right-0 top-[calc(100%+0.5rem)] z-30 w-[280px] max-w-[calc(100vw-2rem)]">
-          <CosmeticPicker
-            value={outfit.cosmetics}
-            onChange={outfit.onChange}
-            onClose={outfit.onClose}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function PencilIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width={size}
-      height={size}
-      shapeRendering="crispEdges"
-      style={{ imageRendering: "pixelated" }}
-    >
-      <rect x="10" y="2" width="3" height="3" fill="#ffd24a" />
-      <rect x="7" y="5" width="3" height="3" fill="#f0a05b" />
-      <rect x="4" y="8" width="3" height="3" fill="#f0a05b" />
-      <rect x="2" y="11" width="3" height="3" fill="#c8a878" />
-      <rect x="2" y="13" width="2" height="1" fill="#1a0f1f" />
-      <rect x="11" y="3" width="2" height="2" fill="#fff5b8" />
-    </svg>
-  );
-}
-
-function CheckIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width={size}
-      height={size}
-      shapeRendering="crispEdges"
-      style={{ imageRendering: "pixelated" }}
-    >
-      <rect x="2" y="8" width="2" height="2" fill="#6ab04c" />
-      <rect x="4" y="10" width="2" height="2" fill="#6ab04c" />
-      <rect x="6" y="12" width="2" height="2" fill="#6ab04c" />
-      <rect x="8" y="8" width="2" height="4" fill="#8bc967" />
-      <rect x="10" y="5" width="2" height="3" fill="#8bc967" />
-      <rect x="12" y="2" width="2" height="3" fill="#8bc967" />
-    </svg>
-  );
-}
-
-function CloseXIcon({ size = 16 }: { size?: number }) {
-  return (
-    <svg
-      viewBox="0 0 16 16"
-      width={size}
-      height={size}
-      shapeRendering="crispEdges"
-      style={{ imageRendering: "pixelated" }}
-    >
-      <rect x="3" y="3" width="2" height="2" fill="#ff6b6b" />
-      <rect x="5" y="5" width="2" height="2" fill="#ff6b6b" />
-      <rect x="7" y="7" width="2" height="2" fill="#ff8fb1" />
-      <rect x="9" y="9" width="2" height="2" fill="#ff6b6b" />
-      <rect x="11" y="11" width="2" height="2" fill="#ff6b6b" />
-      <rect x="11" y="3" width="2" height="2" fill="#ff6b6b" />
-      <rect x="9" y="5" width="2" height="2" fill="#ff6b6b" />
-      <rect x="5" y="9" width="2" height="2" fill="#ff6b6b" />
-      <rect x="3" y="11" width="2" height="2" fill="#ff6b6b" />
-    </svg>
-  );
-}
-
-function NameModal({
-  name,
-  onSave,
-  onClose,
-}: {
-  name: string;
-  onSave: (next: string) => void;
-  onClose: () => void;
-}) {
-  const [draft, setDraft] = useState(name);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-  }, []);
-
-  const save = () => onSave(draft.trim().slice(0, 16));
-
-  return (
-    <div
-      className="fixed inset-0 z-100 flex items-center justify-center p-4"
-      style={{ background: "rgba(10,5,15,0.85)" }}
-      onClick={onClose}
-    >
-      <div
-        className="relative w-full max-w-sm pixel-panel px-6 py-5 help-modal-pop"
-        onClick={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="เปลี่ยนชื่อผู้เล่น"
-      >
-        <div className="flex items-center gap-3 mb-5">
-          <span className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">ตั้งชื่อ</span>
-          <span className="flex-1 h-[3px] bg-[#1a0f1f]" />
-        </div>
-
-        <label className="flex flex-col gap-2">
-          <span className="font-pixel text-[9px] text-[var(--muted-foreground)]">ชื่อผู้เล่น</span>
-          <input
-            ref={inputRef}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value.slice(0, 16))}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") save();
-              else if (e.key === "Escape") onClose();
-            }}
-            placeholder="พิมพ์ชื่อ"
-            className="pixel-chip font-pixel text-[12px] px-3 py-2 outline-none"
-          />
-        </label>
-
-        <div className="mt-6 flex items-center justify-end gap-3">
-          <button
-            type="button"
-            onClick={onClose}
-            className="pixel-btn flex h-10 w-10 items-center justify-center p-0"
-            title="ยกเลิก"
-            aria-label="ยกเลิก"
-          >
-            <CloseXIcon size={20} />
-          </button>
-          <button
-            type="button"
-            onClick={save}
-            className="pixel-btn flex h-10 w-10 items-center justify-center p-0"
-            data-accent="true"
-            title="ตกลง"
-            aria-label="ตกลง"
-          >
-            <CheckIcon size={20} />
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function FlowStep({
-  n,
-  label,
-  sub,
-  gold,
-  children,
-}: {
-  n: string;
-  label: string;
-  sub: string;
-  gold?: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flow-step" data-gold={gold ? "true" : undefined}>
-      <span className="flow-step-num font-pixel">{n}</span>
-      <div className="flow-step-icon">{children}</div>
-      <span className="flow-step-label font-pixel">{label}</span>
-      <span className="flow-step-sub">{sub}</span>
-    </div>
-  );
-}
-
-function FlowArrow() {
-  return (
-    <svg
-      className="flow-arrow"
-      width="18"
-      height="14"
-      viewBox="0 0 18 14"
-      shapeRendering="crispEdges"
-      aria-hidden
-    >
-      <rect x="0" y="6" width="11" height="2" fill="currentColor" />
-      <rect x="11" y="4" width="2" height="6" fill="currentColor" />
-      <rect x="13" y="5" width="2" height="4" fill="currentColor" />
-      <rect x="15" y="6" width="2" height="2" fill="currentColor" />
-    </svg>
-  );
 }
 
 function ChickenSprite() {
@@ -1832,6 +1620,106 @@ function DogSprite() {
       <rect x="4" y="13" width="3" height="1" fill="#1a0f1f" />
       <rect x="9" y="13" width="3" height="1" fill="#1a0f1f" />
     </svg>
+  );
+}
+
+function HomeScoreboardDialog({
+  scoreboard,
+  loaded,
+  onClose,
+}: {
+  scoreboard: { oneVsOne: ScoreboardEntry[]; twoVsTwo: ScoreboardEntry[] };
+  loaded: boolean;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-100 flex items-center justify-center p-4"
+      style={{ background: "rgba(10,5,15,0.85)" }}
+      onClick={onClose}
+    >
+      <aside
+        className="pixel-panel flex w-full max-w-xl flex-col gap-3 p-5 help-modal-pop"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="อันดับผู้เล่น"
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
+              อันดับผู้เล่น
+            </div>
+            <div className="mt-1 font-pixel text-[7px] text-[var(--muted-foreground)]">
+              คะแนนจากแมตช์ล่าสุด
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="pixel-btn flex h-8 w-8 items-center justify-center p-0"
+            aria-label="ปิด"
+          >
+            ✕
+          </button>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
+          <HomeScoreboardList title="1V1" entries={scoreboard.oneVsOne} loaded={loaded} />
+          <HomeScoreboardList title="2V2" entries={scoreboard.twoVsTwo} loaded={loaded} />
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function HomeScoreboardList({
+  title,
+  entries,
+  loaded,
+}: {
+  title: string;
+  entries: ScoreboardEntry[];
+  loaded: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="font-pixel text-[8px] text-[var(--foreground)]">{title}</div>
+      {!loaded ? (
+        <div className="grid gap-1.5">
+          {Array.from({ length: 3 }).map((_, i) => (
+            <span
+              key={i}
+              className="block h-[16px] animate-pulse"
+              style={{
+                background: "var(--muted)",
+                boxShadow: "0 0 0 1px var(--background)",
+                opacity: 1 - i * 0.18,
+              }}
+            />
+          ))}
+        </div>
+      ) : entries.length ? (
+        <div className="grid gap-1.5">
+          {entries.map((entry) => (
+            <div
+              key={`${entry.matchCode}:${entry.playerId}`}
+              className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 font-pixel text-[8px]"
+            >
+              <span className="text-[var(--gold)]">#{entry.rank}</span>
+              <span className="truncate">{entry.name}</span>
+              <span className="flex items-center gap-1 text-[var(--gold)]">
+                <CoinIcon size={10} />
+                {entry.coins}
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="font-pixel text-[8px] leading-relaxed text-[var(--muted-foreground)]">
+          ยังไม่มีคะแนน
+        </div>
+      )}
+    </div>
   );
 }
 

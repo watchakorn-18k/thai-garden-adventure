@@ -48,15 +48,140 @@ function DynamicCropIcon({ cropId, stage }: { cropId: CropId; stage: number }) {
   return <RipeIcon size={38} />;
 }
 
-interface CropIndexBookProps {
+interface CropIndexBookContentProps {
   marketPrices?: Record<CropId, number>;
   selectedCropId?: CropId;
   onSelectCrop?: (id: CropId) => void;
   availableCropIds?: CropId[];
+}
+
+interface CropIndexBookProps extends CropIndexBookContentProps {
   compact?: boolean;
   iconOnly?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+}
+
+export function CropIndexBookContent({
+  marketPrices,
+  selectedCropId,
+  onSelectCrop,
+  availableCropIds,
+}: CropIndexBookContentProps) {
+  const [animationStage, setAnimationStage] = useState(0);
+  const crops = availableCropIds?.length
+    ? availableCropIds.map((id) => CROPS[id]).filter(Boolean)
+    : (Object.values(CROPS) as Crop[]);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setAnimationStage((prev) => (prev + 1) % 4);
+    }, 1500);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <div className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">บัญชีเมล็ด</div>
+        <div
+          className="pixel-chip flex items-center gap-2"
+          data-gold="true"
+          style={{ fontSize: 9 }}
+        >
+          <CoinIcon size={16} />
+          <span>ราคาตลาดเปลี่ยนตามการขาย</span>
+        </div>
+      </div>
+
+      <div className="max-h-[380px] overflow-y-auto pr-2 custom-scrollbar grid grid-cols-1 gap-3 md:grid-cols-[1.1fr_0.9fr] lg:grid-cols-[1.15fr_0.95fr_0.9fr]">
+        {crops.map((crop, index) => {
+          const marketPrice = Math.round(marketPrices?.[crop.id] ?? crop.sellPrice);
+          const profit = marketPrice - crop.seedCost;
+          const growSeconds = Math.round(crop.growTime / 1000);
+          const active = selectedCropId === crop.id;
+
+          return (
+            <button
+              key={crop.id}
+              type="button"
+              onClick={() => {
+                SFX.click();
+                onSelectCrop?.(crop.id);
+              }}
+              className="group relative overflow-hidden text-left transition-transform duration-200 active:translate-y-[1px]"
+              style={{
+                minHeight: index === 0 ? 162 : 142,
+                background: "linear-gradient(135deg, rgba(244,228,193,0.08), rgba(26,15,31,0.35))",
+                border: "3px solid #1a0f1f",
+                boxShadow: active
+                  ? "inset 0 0 0 2px var(--gold), 0 10px 0 rgba(26,15,31,0.55)"
+                  : "inset 0 0 0 2px rgba(244,228,193,0.08), 0 8px 0 rgba(26,15,31,0.5)",
+              }}
+            >
+              <div
+                className="absolute inset-x-0 top-0 h-1 opacity-80"
+                style={{
+                  background: "linear-gradient(90deg, var(--gold), rgba(255,210,74,0))",
+                }}
+              />
+              <div className="relative flex h-full flex-col gap-4 p-4">
+                <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="grid place-items-center transition-transform duration-300 group-hover:-translate-y-1"
+                      style={{
+                        width: 54,
+                        height: 54,
+                        background: "#1a0f1f",
+                        boxShadow: "inset 0 0 0 2px var(--gold)",
+                      }}
+                    >
+                      <DynamicCropIcon cropId={crop.id} stage={animationStage} />
+                    </div>
+                    <div>
+                      <p className="font-pixel text-[13px] text-[#f4e4c1]">{crop.name}</p>
+                      <p className="mt-1 font-pixel text-[7px] tracking-[1.5px] text-[var(--muted-foreground)]">
+                        {crop.id.toUpperCase().replace("_", " ")}
+                      </p>
+                    </div>
+                  </div>
+                  <span
+                    className="font-pixel text-[8px] text-[var(--gold)]"
+                    style={{ textShadow: "1px 1px 0 #1a0f1f" }}
+                  >
+                    {growSeconds}s
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  <CropBookStat label="ซื้อ" value={crop.seedCost} tone="muted" />
+                  <CropBookStat label="ขาย" value={marketPrice} tone="gold" />
+                  <CropBookStat label="กำไร" value={profit} tone={profit >= 0 ? "good" : "bad"} />
+                </div>
+
+                <div className="mt-auto">
+                  <div className="mb-2 flex items-center justify-between font-pixel text-[7px] text-[var(--muted-foreground)]">
+                    <span>เวลาเติบโต</span>
+                    <span>{growSeconds} วินาที</span>
+                  </div>
+                  <div className="h-2 bg-[#1a0f1f] p-[2px]">
+                    <div
+                      className="h-full"
+                      style={{
+                        width: `${Math.max(38, 100 - growSeconds * 5)}%`,
+                        background: "linear-gradient(90deg, #6ab04c, var(--gold))",
+                      }}
+                    />
+                  </div>
+                </div>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
 }
 
 export default function CropIndexBook({
@@ -76,18 +201,6 @@ export default function CropIndexBook({
     if (!controlled) setOpenInternal(next);
     onOpenChange?.(next);
   };
-  const [animationStage, setAnimationStage] = useState(0);
-
-  useEffect(() => {
-    if (!open) return;
-    const interval = setInterval(() => {
-      setAnimationStage((prev) => (prev + 1) % 4);
-    }, 1500);
-    return () => clearInterval(interval);
-  }, [open]);
-  const crops = availableCropIds?.length
-    ? availableCropIds.map((id) => CROPS[id]).filter(Boolean)
-    : (Object.values(CROPS) as Crop[]);
 
   return (
     <div className={iconOnly ? "relative" : "relative z-10 w-full max-w-5xl"}>
@@ -151,112 +264,12 @@ export default function CropIndexBook({
               : "pixel-panel mt-3 overflow-hidden px-5 py-5"
           }
         >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-            <div className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
-              บัญชีเมล็ด
-            </div>
-            <div
-              className="pixel-chip flex items-center gap-2"
-              data-gold="true"
-              style={{ fontSize: 9 }}
-            >
-              <CoinIcon size={16} />
-              <span>ราคาตลาดเปลี่ยนตามการขาย</span>
-            </div>
-          </div>
-
-          <div className="max-h-[380px] overflow-y-auto pr-2 custom-scrollbar grid grid-cols-1 gap-3 md:grid-cols-[1.1fr_0.9fr] lg:grid-cols-[1.15fr_0.95fr_0.9fr]">
-            {crops.map((crop, index) => {
-              const Icon = CROP_ICONS[crop.id];
-              const marketPrice = Math.round(marketPrices?.[crop.id] ?? crop.sellPrice);
-              const profit = marketPrice - crop.seedCost;
-              const growSeconds = Math.round(crop.growTime / 1000);
-              const active = selectedCropId === crop.id;
-
-              return (
-                <button
-                  key={crop.id}
-                  type="button"
-                  onClick={() => {
-                    SFX.click();
-                    onSelectCrop?.(crop.id);
-                  }}
-                  className="group relative overflow-hidden text-left transition-transform duration-200 active:translate-y-[1px]"
-                  style={{
-                    minHeight: index === 0 ? 162 : 142,
-                    background:
-                      "linear-gradient(135deg, rgba(244,228,193,0.08), rgba(26,15,31,0.35))",
-                    border: "3px solid #1a0f1f",
-                    boxShadow: active
-                      ? "inset 0 0 0 2px var(--gold), 0 10px 0 rgba(26,15,31,0.55)"
-                      : "inset 0 0 0 2px rgba(244,228,193,0.08), 0 8px 0 rgba(26,15,31,0.5)",
-                  }}
-                >
-                  <div
-                    className="absolute inset-x-0 top-0 h-1 opacity-80"
-                    style={{
-                      background: "linear-gradient(90deg, var(--gold), rgba(255,210,74,0))",
-                    }}
-                  />
-                  <div className="relative flex h-full flex-col gap-4 p-4">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="grid place-items-center transition-transform duration-300 group-hover:-translate-y-1"
-                          style={{
-                            width: 54,
-                            height: 54,
-                            background: "#1a0f1f",
-                            boxShadow: "inset 0 0 0 2px var(--gold)",
-                          }}
-                        >
-                          <DynamicCropIcon cropId={crop.id} stage={animationStage} />
-                        </div>
-                        <div>
-                          <p className="font-pixel text-[13px] text-[#f4e4c1]">{crop.name}</p>
-                          <p className="mt-1 font-pixel text-[7px] tracking-[1.5px] text-[var(--muted-foreground)]">
-                            {crop.id.toUpperCase().replace("_", " ")}
-                          </p>
-                        </div>
-                      </div>
-                      <span
-                        className="font-pixel text-[8px] text-[var(--gold)]"
-                        style={{ textShadow: "1px 1px 0 #1a0f1f" }}
-                      >
-                        {growSeconds}s
-                      </span>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2">
-                      <CropBookStat label="ซื้อ" value={crop.seedCost} tone="muted" />
-                      <CropBookStat label="ขาย" value={marketPrice} tone="gold" />
-                      <CropBookStat
-                        label="กำไร"
-                        value={profit}
-                        tone={profit >= 0 ? "good" : "bad"}
-                      />
-                    </div>
-
-                    <div className="mt-auto">
-                      <div className="mb-2 flex items-center justify-between font-pixel text-[7px] text-[var(--muted-foreground)]">
-                        <span>เวลาเติบโต</span>
-                        <span>{growSeconds} วินาที</span>
-                      </div>
-                      <div className="h-2 bg-[#1a0f1f] p-[2px]">
-                        <div
-                          className="h-full"
-                          style={{
-                            width: `${Math.max(38, 100 - growSeconds * 5)}%`,
-                            background: "linear-gradient(90deg, #6ab04c, var(--gold))",
-                          }}
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+          <CropIndexBookContent
+            marketPrices={marketPrices}
+            selectedCropId={selectedCropId}
+            onSelectCrop={onSelectCrop}
+            availableCropIds={availableCropIds}
+          />
         </section>
       )}
     </div>

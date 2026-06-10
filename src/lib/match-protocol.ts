@@ -13,6 +13,7 @@ import type {
   Tool,
 } from "./game-types";
 import { DEFAULT_COSMETICS, type PlayerCosmetics } from "./player-cosmetics";
+import type { ProgressAward } from "./progression";
 
 export const ROOM_CODE_LEN = 6;
 export const ROOM_CODE_RE = /^[A-Z0-9]{6}$/;
@@ -100,6 +101,7 @@ export const clientMsg = z.discriminatedUnion("t", [
     name: z.string().min(1).max(16),
     userId: z.string().optional(),
     sessionId: z.string().optional(),
+    level: z.number().int().min(1).max(999).optional(),
     role: matchRoleSchema.optional(),
     cosmetics: cosmeticsSchema.optional(),
   }),
@@ -164,6 +166,21 @@ export type MatchStatus =
   | "playing"
   | "ended";
 
+export interface LobbyRoomSummary {
+  code: string;
+  status: MatchStatus;
+  players: number;
+  maxPlayers: number;
+  mode: MatchModeSetting;
+  stage: RoomStage;
+  joinable: boolean;
+  updatedAt: number;
+}
+
+export interface LobbyRoomsResponse {
+  rooms: LobbyRoomSummary[];
+}
+
 export interface PublicPlayerStats {
   harvests: number;
   cropHarvests: Record<CropId, number>;
@@ -174,6 +191,7 @@ export interface PublicPlayer {
   id: string;
   userId?: string;
   name: string;
+  level?: number;
   coins: number;
   teamId?: TeamId;
   role?: PlayerRole;
@@ -206,6 +224,7 @@ export interface MatchRecap {
     harvests: number;
     topCrop?: CropId;
     coinsEarned: number;
+    expAward?: ProgressAward;
   }>;
 }
 

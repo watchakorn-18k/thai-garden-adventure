@@ -191,6 +191,7 @@ Reusable classes live in `@layer base` of `src/styles.css`. Prefer them over ad-
 - **Keycap — `.pixel-key` (+ `-sm`, `-wide`):** parchment-gradient keycap with a `border`-colored underside bevel and hard drop edge; shows keyboard controls.
 - **Toolbar — `.farm-toolbar` / `.farm-tool-btn` / `.farm-crop-card`:** two-column game toolbar (tools left, crop grid right). Tool buttons are `icon / label / key-hint` rows; crop cards are `icon / name + buy-sell prices`.
 - **Workflow strip — `.flow-strip` / `.flow-step`:** numbered mini-cards (icon + label + Thai sub-label) joined by `.flow-arrow`; `[data-gold="true"]` marks the active step. Explains the plant → water → harvest loop.
+- **Game menu — `.header-level-btn` / `.game-menu-*`:** level-like HUD trigger opens the player dialog. Dialog groups outfit, crop index, controls, and settings inside one square pixel panel with tab buttons and internal scrolling.
 - **Lobby — `.lobby-*`:** multiplayer staging — animated title card, versus grid with a breathing `VS` core, per-player cards (sprite, status dot, ready state), and a ready row. All entrance-animated.
 
 ## Do's and Don'ts

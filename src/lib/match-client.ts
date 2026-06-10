@@ -5,6 +5,8 @@ import type {
   PublicMatchState,
   ServerEvent,
   ServerMsg,
+  LobbyRoomsResponse,
+  LobbyRoomSummary,
 } from "./match-protocol";
 import type { PlayerCosmetics } from "./player-cosmetics";
 
@@ -21,6 +23,7 @@ interface UseMatchOpts {
   userId?: string;
   enabled?: boolean;
   role?: MatchRole;
+  playerLevel?: number;
   cosmetics?: PlayerCosmetics;
   onEvents?: (events: ServerEvent[]) => void;
   onEnd?: (winnerId: string | undefined, reason: string) => void;
@@ -52,6 +55,43 @@ export async function requestQuickMatch(): Promise<string> {
   const data = (await res.json()) as { code?: string };
   if (!data.code || !/^[A-Z0-9]{6}$/.test(data.code)) throw new Error("matchmake bad response");
   return data.code;
+}
+
+export async function listOpenRooms(): Promise<LobbyRoomSummary[]> {
+  const res = await fetch(`${httpBaseUrl()}/rooms`);
+  if (!res.ok) throw new Error(`rooms failed: ${res.status}`);
+  const data = (await res.json()) as LobbyRoomsResponse;
+  return Array.isArray(data.rooms) ? data.rooms : [];
+}
+
+export interface ScoreboardEntry {
+  rank: number;
+  userId?: string;
+  playerId: string;
+  name: string;
+  coins: number;
+  score: number;
+  mode: "1v1" | "2v2";
+  teamId?: string;
+  role?: string;
+  matchCode: string;
+  endedAt: number;
+  timeRemainingMs: number;
+  winner: boolean;
+}
+
+export async function fetchScoreboard({
+  mode,
+  limit = 5,
+}: {
+  mode: "1v1" | "2v2";
+  limit?: number;
+}): Promise<ScoreboardEntry[]> {
+  const params = new URLSearchParams({ mode, limit: String(limit) });
+  const res = await fetch(`${httpBaseUrl()}/scoreboard?${params.toString()}`);
+  if (!res.ok) throw new Error(`scoreboard failed: ${res.status}`);
+  const data = (await res.json()) as { entries?: ScoreboardEntry[] };
+  return data.entries ?? [];
 }
 
 function sessionKey(code: string): string {
@@ -89,6 +129,7 @@ export function useMatch({
   enabled = true,
   role = "player",
   cosmetics,
+  playerLevel,
   onEvents,
   onEnd,
 }: UseMatchOpts) {
@@ -135,6 +176,7 @@ export function useMatch({
           code,
           name,
           role,
+          level: playerLevel,
           cosmetics: cosmeticsRef.current,
           sessionId: readSessionId(code),
           userId: readUserId(),
@@ -221,7 +263,7 @@ export function useMatch({
           /* noop */
         }
     };
-  }, [code, name, enabled, role]);
+  }, [code, name, enabled, role, playerLevel]);
 
   const send = (msg: ClientMsg) => {
     const ws = wsRef.current;
