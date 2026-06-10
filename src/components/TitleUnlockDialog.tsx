@@ -16,7 +16,9 @@ export default function TitleUnlockDialog({
           ปลดล็อกฉายาใหม่
         </div>
         <div className="font-pixel text-[14px] text-[var(--gold)]">LV {level}</div>
-        <div className="font-pixel text-[13px] leading-relaxed text-[var(--foreground)]">{title}</div>
+        <div className="font-pixel text-[13px] leading-relaxed text-[var(--foreground)]">
+          {title}
+        </div>
         <button
           type="button"
           className="pixel-btn px-5 py-3 font-pixel text-[10px]"

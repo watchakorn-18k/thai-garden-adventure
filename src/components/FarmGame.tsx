@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
 import GameMenuDialog, { type GameMenuTab } from "./GameMenuDialog";
+import TitleUnlockDialog from "./TitleUnlockDialog";
 import QuickMatchButton from "./QuickMatchButton";
 import { fetchScoreboard, type ScoreboardEntry } from "@/lib/match-client";
 import {
@@ -184,6 +185,7 @@ export default function FarmGame() {
   const [homeScoreboardOpen, setHomeScoreboardOpen] = useState(false);
   const [progress, setProgress] = useState<PlayerProgress | null>(null);
   const [progressTampered, setProgressTampered] = useState(false);
+  const [titleUnlock, setTitleUnlock] = useState<{ level: number; title: string } | null>(null);
   const progressAwardSeqRef = useRef(0);
 
   useEffect(() => {
@@ -423,6 +425,11 @@ export default function FarmGame() {
                 setProgress(result.progress);
                 if (result.applied) {
                   addPopup(ev.x, ev.y, `+${award.exp} XP`, "info");
+                  const before = levelTitle(result.previousLevel);
+                  const after = levelTitle(result.progress.level);
+                  if (result.leveledUp && before !== after) {
+                    setTitleUnlock({ level: result.progress.level, title: after });
+                  }
                 }
               });
 
@@ -1499,6 +1506,14 @@ export default function FarmGame() {
         />
       )}
 
+      {titleUnlock && (
+        <TitleUnlockDialog
+          level={titleUnlock.level}
+          title={titleUnlock.title}
+          onClose={() => setTitleUnlock(null)}
+        />
+      )}
+
       <GameMenuDialog
         open={gameMenuOpen}
         initialTab={gameMenuInitialTab}
@@ -1651,7 +1666,7 @@ function HomeScoreboardDialog({
               อันดับผู้เล่น
             </div>
             <div className="mt-1 font-pixel text-[7px] text-[var(--muted-foreground)]">
-              คะแนนจากแมตช์ล่าสุด
+              เฉพาะแมตช์คนจริง · ไม่รวมบอท
             </div>
           </div>
           <button

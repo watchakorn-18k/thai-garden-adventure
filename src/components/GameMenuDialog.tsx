@@ -134,13 +134,7 @@ export default function GameMenuDialog({
 
         <div className="game-menu-body custom-scrollbar">
           {activeTab === "outfit" && (
-            <div className="game-menu-section-grid">
-              <div className="game-menu-copy-card">
-                <span className="game-menu-kicker">เปลี่ยนลุค</span>
-                <p>เลือกสีหมวก เสื้อ และกางเกง ลุคนี้จะจำไว้ตอนกลับมาเล่นอีกครั้ง</p>
-              </div>
-              <CosmeticPicker value={cosmetics} onChange={onChangeCosmetics} />
-            </div>
+            <CosmeticPicker value={cosmetics} onChange={onChangeCosmetics} />
           )}
 
           {activeTab === "crops" && (

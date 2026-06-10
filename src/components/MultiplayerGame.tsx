@@ -1166,6 +1166,14 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       )}
       {lastError && status === "open" && <ConnectionBanner text={lastError.message} />}
 
+      {titleUnlock && (
+        <TitleUnlockDialog
+          level={titleUnlock.level}
+          title={titleUnlock.title}
+          onClose={() => setTitleUnlock(null)}
+        />
+      )}
+
       {!isSpectator && <MultiplayerControlsGuide />}
     </div>
   );
@@ -2526,6 +2534,7 @@ function PlayerCard({
 }) {
   const ready = Boolean(player?.ready);
   const displayLevel = player?.level ?? fallbackLevel;
+  const displayTitle = displayLevel ? levelTitle(displayLevel) : undefined;
   return (
     <article
       className="lobby-player-card pixel-panel"
@@ -2549,6 +2558,11 @@ function PlayerCard({
         <div className="lobby-avatar-ground" />
         {player ? (
           <div className="lobby-avatar-sprite">
+            {displayTitle ? (
+              <span className="absolute left-1/2 top-[-25px] z-10 inline-block -translate-x-1/2 whitespace-nowrap font-pixel text-[6px] text-[var(--gold)]">
+                {displayTitle}
+              </span>
+            ) : null}
             {displayLevel ? (
               <span
                 className="absolute left-1/2 top-[-12px] z-10 inline-block min-w-[46px] -translate-x-1/2 whitespace-nowrap px-1 py-[1px] text-center font-pixel text-[7px] text-[var(--gold)]"
@@ -2573,11 +2587,6 @@ function PlayerCard({
         )}
       </div>
       <div className="lobby-player-name font-pixel">{player?.name ?? "สล็อตว่าง"}</div>
-      {displayLevel ? (
-        <div className="mt-1 font-pixel text-[7px] text-[var(--gold)]">
-          {levelTitle(displayLevel)}
-        </div>
-      ) : null}
       <div className="lobby-player-meta font-pixel" data-ready={ready ? "true" : undefined}>
         {isSelfSlot ? "สล็อตคุณ" : player ? (ready ? "พร้อมแล้ว" : "รออยู่") : "เชิญเพื่อน"}
       </div>
@@ -4333,6 +4342,14 @@ function EndOverlay({
     is2v2 && winnerTeamId ? players.filter((p) => p.teamId === winnerTeamId) : [];
   const loserTeamMembers =
     is2v2 && self?.teamId ? players.filter((p) => p.teamId === self.teamId) : [];
+  const rankedMatch = players.some(
+    (player) =>
+      !player.isBot &&
+      players.some(
+        (other) =>
+          !other.isBot && other.id !== player.id && (!is2v2 || other.teamId !== player.teamId),
+      ),
+  );
 
   const [closeCountdown, setCloseCountdown] = useState(() =>
     roomClosesAt ? Math.max(0, Math.ceil((roomClosesAt - Date.now()) / 1000)) : 0,
@@ -4351,6 +4368,10 @@ function EndOverlay({
     return () => clearInterval(i);
   }, [roomClosesAt]);
   useEffect(() => {
+    if (!rankedMatch) {
+      setScoreboardLoaded(true);
+      return;
+    }
     let cancelled = false;
     fetchScoreboard({ mode: is2v2 ? "2v2" : "1v1", limit: 5 })
       .then((entries) => {
@@ -4363,7 +4384,7 @@ function EndOverlay({
     return () => {
       cancelled = true;
     };
-  }, [is2v2]);
+  }, [is2v2, rankedMatch]);
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center px-4"
@@ -4520,9 +4541,15 @@ function EndOverlay({
             <span className="font-pixel text-[9px] text-[var(--gold)]">
               อันดับ {is2v2 ? "2v2" : "1v1"}
             </span>
-            <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">TOP 5</span>
+            <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">
+              คนจริงเท่านั้น
+            </span>
           </div>
-          {!scoreboardLoaded ? (
+          {!rankedMatch ? (
+            <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
+              แมตช์บอทไม่บันทึกอันดับ
+            </div>
+          ) : !scoreboardLoaded ? (
             <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">กำลังโหลด...</div>
           ) : scoreboard.length ? (
             <div className="flex flex-col gap-1">
