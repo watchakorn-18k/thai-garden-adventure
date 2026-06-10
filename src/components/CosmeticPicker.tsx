@@ -1,4 +1,4 @@
-import PixelFarmer from "./PixelFarmer";
+import PlayerAvatarPreview from "./PlayerAvatarPreview";
 import type { PlayerCosmetics } from "@/lib/player-cosmetics";
 
 interface Props {
@@ -60,16 +60,7 @@ export default function CosmeticPicker({ value, onChange, compact = false, onClo
   return (
     <div className={`pixel-panel cosmetic-picker ${compact ? "cosmetic-picker-compact" : ""}`}>
       <div className="cosmetic-picker-head">
-        <div className="cosmetic-picker-preview" aria-hidden>
-          <PixelFarmer
-            direction="down"
-            walking={false}
-            walkFrame={0}
-            acting={false}
-            tool="hoe"
-            cosmetics={value}
-          />
-        </div>
+        <PlayerAvatarPreview className="cosmetic-picker-preview" cosmetics={value} />
         <div className="min-w-0">
           <div className="cosmetic-picker-title">แต่งตัว</div>
           <div className="cosmetic-picker-subtitle">เลื่อน RGB 0–255 เพื่อเลือกสีละเอียด</div>

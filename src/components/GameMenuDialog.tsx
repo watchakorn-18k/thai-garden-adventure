@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import CosmeticPicker from "./CosmeticPicker";
+import PlayerAvatarPreview from "./PlayerAvatarPreview";
 import { CropIndexBookContent } from "./CropIndexBook";
 import {
   CoinIcon,
@@ -11,16 +12,18 @@ import {
   WaterCanIcon,
 } from "./PixelIcons";
 import type { CropId } from "@/lib/game-types";
-import type { PlayerCosmetics } from "@/lib/player-cosmetics";
+import { COSMETIC_PRESETS, type PlayerCosmetics } from "@/lib/player-cosmetics";
 import { SFX } from "@/lib/sfx";
 
-export type GameMenuTab = "outfit" | "crops" | "controls" | "settings";
+export type GameMenuTab = "outfit" | "shop" | "crops" | "controls" | "settings";
 
 interface GameMenuDialogProps {
   open: boolean;
   initialTab?: GameMenuTab;
   playerName: string;
   coins: number;
+  gardenTokens: number;
+  unlockedPresetIds: string[];
   levelLabel: string;
   expLabel?: string;
   autoBotActive: boolean;
@@ -31,6 +34,8 @@ interface GameMenuDialogProps {
   onClose: () => void;
   onSaveName: (next: string) => void;
   onChangeCosmetics: (next: PlayerCosmetics) => void;
+  onBuyPreset: (id: string) => void;
+  onEquipPreset: (id: string) => void;
   onSelectCrop: (id: CropId) => void;
   onToggleAutoBot: () => void;
   onToggleMuted: () => void;
@@ -38,6 +43,7 @@ interface GameMenuDialogProps {
 
 const TABS: { id: GameMenuTab; label: string; hint: string }[] = [
   { id: "outfit", label: "ชุด", hint: "แต่งตัว" },
+  { id: "shop", label: "ร้าน", hint: "โทเคน" },
   { id: "crops", label: "พืช", hint: "ราคาตลาด" },
   { id: "controls", label: "ควบคุม", hint: "ปุ่มลัด" },
   { id: "settings", label: "ตั้งค่า", hint: "ชื่อ/เสียง" },
@@ -48,6 +54,8 @@ export default function GameMenuDialog({
   initialTab = "outfit",
   playerName,
   coins,
+  gardenTokens,
+  unlockedPresetIds,
   levelLabel,
   expLabel,
   autoBotActive,
@@ -58,6 +66,8 @@ export default function GameMenuDialog({
   onClose,
   onSaveName,
   onChangeCosmetics,
+  onBuyPreset,
+  onEquipPreset,
   onSelectCrop,
   onToggleAutoBot,
   onToggleMuted,
@@ -103,6 +113,9 @@ export default function GameMenuDialog({
               <CoinIcon size={16} />
               {coins}
             </span>
+            <span className="pixel-chip flex items-center gap-2 shop-price-chip">
+              GT {gardenTokens}
+            </span>
             <button
               type="button"
               onClick={onClose}
@@ -135,6 +148,16 @@ export default function GameMenuDialog({
         <div className="game-menu-body custom-scrollbar">
           {activeTab === "outfit" && (
             <CosmeticPicker value={cosmetics} onChange={onChangeCosmetics} />
+          )}
+
+          {activeTab === "shop" && (
+            <ShopContent
+              gardenTokens={gardenTokens}
+              unlockedPresetIds={unlockedPresetIds}
+              cosmetics={cosmetics}
+              onBuyPreset={onBuyPreset}
+              onEquipPreset={onEquipPreset}
+            />
           )}
 
           {activeTab === "crops" && (
@@ -183,6 +206,74 @@ export default function GameMenuDialog({
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function sameCosmetics(a: PlayerCosmetics, b: PlayerCosmetics): boolean {
+  return (
+    a.hat.toLowerCase() === b.hat.toLowerCase() &&
+    a.shirt.toLowerCase() === b.shirt.toLowerCase() &&
+    a.pants.toLowerCase() === b.pants.toLowerCase()
+  );
+}
+
+function ShopContent({
+  gardenTokens,
+  unlockedPresetIds,
+  cosmetics,
+  onBuyPreset,
+  onEquipPreset,
+}: {
+  gardenTokens: number;
+  unlockedPresetIds: string[];
+  cosmetics: PlayerCosmetics;
+  onBuyPreset: (id: string) => void;
+  onEquipPreset: (id: string) => void;
+}) {
+  return (
+    <div className="shop-preset-grid">
+      {COSMETIC_PRESETS.map((preset) => {
+        const unlocked = preset.price === 0 || unlockedPresetIds.includes(preset.id);
+        const equipped = sameCosmetics(cosmetics, preset.cosmetics);
+        const affordable = gardenTokens >= preset.price;
+        return (
+          <article
+            key={preset.id}
+            className="shop-preset-card"
+            data-equipped={equipped ? "true" : undefined}
+          >
+            <PlayerAvatarPreview className="shop-preset-preview" cosmetics={preset.cosmetics} />
+            <div className="shop-preset-meta">
+              <h3>{preset.name}</h3>
+              <p>{preset.description}</p>
+              <span className="pixel-chip shop-price-chip">GT {preset.price}</span>
+            </div>
+            <div className="shop-preset-actions">
+              {unlocked ? (
+                <button
+                  type="button"
+                  className="pixel-btn"
+                  data-active={equipped ? "true" : undefined}
+                  disabled={equipped}
+                  onClick={() => onEquipPreset(preset.id)}
+                >
+                  {equipped ? "ใส่อยู่" : "ใส่ชุด"}
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  className="pixel-btn"
+                  disabled={!affordable}
+                  onClick={() => onBuyPreset(preset.id)}
+                >
+                  ซื้อ+ใส่
+                </button>
+              )}
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }

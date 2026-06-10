@@ -2,7 +2,7 @@ import { Volume2, VolumeX } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import PixelFarmer from "./PixelFarmer";
 import CosmeticPicker from "./CosmeticPicker";
-import CropIndexBook from "./CropIndexBook";
+import CropIndexBook, { CropIndexBookContent } from "./CropIndexBook";
 import PhaserField from "./PhaserField";
 import TitleUnlockDialog from "./TitleUnlockDialog";
 import {
@@ -134,7 +134,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   const [outfitOpen, setOutfitOpen] = useState(false);
   const [bugHuntOpen, setBugHuntOpen] = useState(false);
   const [puzzleDismissed, setPuzzleDismissed] = useState(false);
-  const [spectatorBookOpen, setSpectatorBookOpen] = useState(true);
+  const [cropIndexOpen, setCropIndexOpen] = useState(false);
   const [events, setEvents] = useState<{ id: number; ev: ServerEvent }[]>([]);
   const [musicEnabled, setMusicEnabled] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -174,8 +174,14 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       setProgress(result.progress);
       setProgressTampered(result.tampered);
     });
+    const syncCosmetics = () => setCosmetics(readCosmetics());
+    syncCosmetics();
+    window.addEventListener("tg:cosmetics", syncCosmetics);
+    window.addEventListener("storage", syncCosmetics);
     return () => {
       cancelled = true;
+      window.removeEventListener("tg:cosmetics", syncCosmetics);
+      window.removeEventListener("storage", syncCosmetics);
     };
   }, []);
 
@@ -903,7 +909,10 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
   }
 
   return (
-    <div className="relative min-h-screen w-full flex flex-col items-center justify-start p-6 gap-4 overflow-hidden">
+    <div
+      className="match-stage-bg relative min-h-screen w-full flex flex-col items-center justify-start p-6 gap-4 overflow-hidden"
+      data-stage={state.settings.stage}
+    >
       <div className="sky-stars" />
 
       <MatchHUD
@@ -917,6 +926,18 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
         status={status}
         role={matchRole}
         combo={combo}
+        cropIndex={
+          state.status !== "crop_ban" &&
+          state.status !== "crop_selection" &&
+          state.status !== "prepare_countdown"
+            ? {
+                onOpen: () => {
+                  SFX.click();
+                  setCropIndexOpen(true);
+                },
+              }
+            : undefined
+        }
         outfit={
           !isSpectator && state.status !== "playing"
             ? {
@@ -1030,6 +1051,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
             marketPrices={state.marketPrices}
             fieldCargo={is2v2 ? state.fieldCargo : undefined}
             is2v2={is2v2}
+            stage={state.settings.stage}
           />
         ) : (
           self && (
@@ -1073,6 +1095,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
                     ? state.players.filter((p) => p.teamId === self.teamId && p.id !== self.id)
                     : undefined
                 }
+                stage={state.settings.stage}
               />
             </div>
           )
@@ -1138,26 +1161,16 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
           }}
         />
       )}
-      {isSpectator &&
-        state.status !== "crop_ban" &&
-        state.status !== "crop_selection" &&
-        state.status !== "prepare_countdown" && (
-          <div className="mt-6 w-full flex justify-center">
-            <CropIndexBook
-              compact
-              open={spectatorBookOpen}
-              onOpenChange={setSpectatorBookOpen}
-              marketPrices={state.marketPrices}
-              selectedCropId={self?.seedChoice}
-              availableCropIds={
-                state.status === "playing" && self
-                  ? selectedCropPool(self.selectedCrops)
-                  : undefined
-              }
-              onSelectCrop={undefined}
-            />
-          </div>
-        )}
+      {cropIndexOpen && (
+        <CropIndexDialog
+          marketPrices={state.marketPrices}
+          selectedCropId={self?.seedChoice}
+          availableCropIds={
+            state.status === "playing" && self ? selectedCropPool(self.selectedCrops) : undefined
+          }
+          onClose={() => setCropIndexOpen(false)}
+        />
+      )}
       {state.status === "playing" && self && !isSpectator && (
         <MobileControls setMovement={setMovement} sendAction={sendAction} />
       )}
@@ -1175,6 +1188,87 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       )}
 
       {!isSpectator && <MultiplayerControlsGuide />}
+    </div>
+  );
+}
+
+function PixelCropIndexIcon({ size = 20 }: { size?: number }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      width={size}
+      height={size}
+      shapeRendering="crispEdges"
+      style={{ imageRendering: "pixelated" }}
+      aria-hidden
+    >
+      <rect x="2" y="2" width="11" height="12" fill="var(--border)" />
+      <rect x="3" y="2" width="9" height="1" fill="var(--gold)" />
+      <rect x="3" y="13" width="9" height="1" fill="var(--background)" />
+      <rect x="3" y="3" width="1" height="10" fill="var(--background)" />
+      <rect x="12" y="3" width="1" height="10" fill="var(--background)" />
+      <rect x="5" y="4" width="5" height="1" fill="var(--gold)" />
+      <rect x="5" y="6" width="6" height="1" fill="var(--foreground)" />
+      <rect x="5" y="8" width="4" height="1" fill="var(--foreground)" />
+      <rect x="7" y="10" width="1" height="2" fill="var(--grass-2)" />
+      <rect x="5" y="10" width="2" height="1" fill="var(--grass-1)" />
+      <rect x="8" y="9" width="2" height="1" fill="var(--grass-1)" />
+    </svg>
+  );
+}
+
+function CropIndexDialog({
+  marketPrices,
+  selectedCropId,
+  availableCropIds,
+  onClose,
+}: {
+  marketPrices?: Record<CropId, number>;
+  selectedCropId?: CropId;
+  availableCropIds?: CropId[];
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-center justify-center p-4"
+      style={{ background: "rgba(10,5,15,0.85)" }}
+      onClick={onClose}
+    >
+      <aside
+        className="pixel-panel help-modal-pop flex w-full max-w-5xl flex-col gap-4 p-5"
+        role="dialog"
+        aria-modal="true"
+        aria-label="บัญชีเมล็ด"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="font-pixel text-[9px] tracking-[2px] text-[var(--gold)]">
+              CROP INDEX
+            </div>
+            <div className="mt-1 font-pixel text-[7px] text-[var(--muted-foreground)]">
+              ราคาซื้อ · ราคาขาย · เวลาเก็บเกี่ยว
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              SFX.click();
+              onClose();
+            }}
+            className="pixel-btn flex h-8 w-8 items-center justify-center p-0"
+            aria-label="ปิด"
+          >
+            ✕
+          </button>
+        </div>
+        <CropIndexBookContent
+          marketPrices={marketPrices}
+          selectedCropId={selectedCropId}
+          availableCropIds={availableCropIds}
+          onSelectCrop={undefined}
+        />
+      </aside>
     </div>
   );
 }
@@ -1399,6 +1493,7 @@ function MatchHUD({
   status,
   role,
   combo,
+  cropIndex,
   outfit,
 }: {
   code: string;
@@ -1418,6 +1513,9 @@ function MatchHUD({
   status: string;
   role: MatchRole;
   combo: number;
+  cropIndex?: {
+    onOpen: () => void;
+  };
   outfit?: {
     open: boolean;
     cosmetics: PlayerCosmetics;
@@ -1480,7 +1578,7 @@ function MatchHUD({
         </div>
       )}
       <header className="relative z-20 w-full max-w-5xl pixel-panel px-6 py-3">
-        <div className="grid items-center gap-4 lg:grid-cols-[auto_minmax(260px,1fr)_auto]">
+        <div className="grid items-center gap-4 lg:grid-cols-[auto_minmax(320px,1fr)_auto]">
           <button
             onClick={copyRoom}
             className="flex items-center gap-3 text-left transition-transform active:translate-y-[1px]"
@@ -1497,7 +1595,7 @@ function MatchHUD({
             </span>
           </button>
 
-          <div className="flex min-w-0 items-center gap-4">
+          <div className="grid min-w-0 items-center gap-3 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
             {settings.mode === "2v2" && teams?.length ? (
               <>
                 <TeamBar
@@ -1505,7 +1603,13 @@ function MatchHUD({
                   active={selfTeam?.id === teams[0]?.id}
                   targetCoins={settings.targetCoins}
                 />
-                <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
+                <VersusTimer
+                  mm={mm}
+                  ss={ss}
+                  status={status}
+                  stateStatus={state.status}
+                  role={role}
+                />
                 <TeamBar
                   team={teams[1]}
                   active={selfTeam?.id === teams[1]?.id}
@@ -1515,13 +1619,46 @@ function MatchHUD({
             ) : (
               <>
                 <PlayerBar player={self} side="left" targetCoins={settings.targetCoins} />
-                <span className="font-pixel text-[12px] text-[var(--muted-foreground)]">VS</span>
+                <VersusTimer
+                  mm={mm}
+                  ss={ss}
+                  status={status}
+                  stateStatus={state.status}
+                  role={role}
+                />
                 <PlayerBar player={opp} side="right" targetCoins={settings.targetCoins} />
               </>
             )}
           </div>
 
-          <div className="flex items-center justify-end gap-4">
+          <div className="flex flex-wrap items-center justify-end gap-3">
+            {cropIndex && (
+              <button
+                type="button"
+                onClick={cropIndex.onOpen}
+                className="pixel-btn flex h-[34px] w-[38px] items-center justify-center p-0"
+                title="เปิดบัญชีเมล็ด"
+                aria-label="เปิดบัญชีเมล็ด"
+              >
+                <PixelCropIndexIcon size={20} />
+              </button>
+            )}
+            <a
+              href="/"
+              onClick={() => SFX.click()}
+              className="pixel-btn flex h-[34px] items-center px-2"
+              title="กลับหน้าแรก"
+            >
+              <span className="font-pixel text-[8px]">หน้าแรก</span>
+            </a>
+            <a
+              href="/lobby"
+              onClick={() => SFX.click()}
+              className="pixel-btn flex h-[34px] items-center px-2"
+              title="กลับล็อบบี้"
+            >
+              <span className="font-pixel text-[8px]">ล็อบบี้</span>
+            </a>
             {combo >= 2 && state.status === "playing" && (
               <div className="relative flex flex-col items-end gap-1">
                 <div
@@ -1564,23 +1701,41 @@ function MatchHUD({
                 {spectatorCount} ชม
               </span>
             )}
-            <div className="flex flex-col items-end gap-1">
-              <div className="font-pixel text-[16px] text-[var(--gold)]">
-                {mm}:{ss}
-              </div>
-              <div className="font-pixel text-[8px] text-[var(--muted-foreground)]">
-                {status !== "open"
-                  ? "กำลังเชื่อมต่อใหม่"
-                  : role === "spectator"
-                    ? `ผู้ตัดสิน · ${state.status.toUpperCase()}`
-                    : state.status.toUpperCase()}
-              </div>
-            </div>
             {outfit && <HeaderOutfitMenu outfit={outfit} />}
           </div>
         </div>
       </header>
     </>
+  );
+}
+
+function VersusTimer({
+  mm,
+  ss,
+  status,
+  stateStatus,
+  role,
+}: {
+  mm: string;
+  ss: string;
+  status: string;
+  stateStatus: string;
+  role: MatchRole;
+}) {
+  return (
+    <div className="flex min-w-[72px] flex-col items-center gap-1 justify-self-center">
+      <div className="font-pixel text-[11px] text-[var(--muted-foreground)]">VS</div>
+      <div className="font-pixel text-[12px] leading-none text-[var(--gold)]">
+        {mm}:{ss}
+      </div>
+      <div className="whitespace-nowrap font-pixel text-[6px] text-[var(--muted-foreground)]">
+        {status !== "open"
+          ? "เชื่อมต่อใหม่"
+          : role === "spectator"
+            ? `ผู้ตัดสิน · ${stateStatus.toUpperCase()}`
+            : stateStatus.toUpperCase()}
+      </div>
+    </div>
   );
 }
 
@@ -1982,7 +2137,7 @@ function CropBanView({
         </div>
       )}
 
-      <div className="pixel-panel my-4 grid grid-cols-1 gap-3 px-4 py-4 md:grid-cols-4">
+      <div className="pixel-panel my-4 grid w-full max-w-3xl grid-cols-2 gap-3 px-4 py-4 md:grid-cols-4">
         {(Object.values(CROPS) as Array<(typeof CROPS)[CropId]>).map((crop) => {
           const Icon = CROP_ICONS[crop.id];
           const active = self?.bannedCrop === crop.id;
@@ -2644,176 +2799,233 @@ function SettingsModal({
     const clamped = Math.min(limits.max, Math.max(limits.min, Math.round(value)));
     setDraft((current) => ({ ...current, [key]: clamped }));
   };
+  const durationMinutes = Math.round(draft.durationMs / 60000);
 
   return (
     <div
       className="fixed inset-0 z-30 flex items-center justify-center p-4"
       style={{ background: "rgba(10,5,15,0.82)" }}
     >
-      <div
-        className="pixel-panel w-full max-w-2xl p-6 flex flex-col gap-5"
-        style={{ background: "#3a2148" }}
-      >
+      <section className="pixel-panel help-modal-pop flex w-full max-w-3xl flex-col gap-4 p-5">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <div className="font-pixel text-[10px] tracking-[3px] text-[#d9c6ef]">
-              ตั้งค่าเจ้าของห้อง
+          <div className="min-w-0">
+            <div className="font-pixel text-[8px] tracking-[3px] text-[var(--muted-foreground)]">
+              เจ้าของห้อง
             </div>
-            <h3 className="font-pixel text-[34px] text-[var(--gold)] mt-2 leading-relaxed">
+            <h3 className="mt-2 font-pixel text-[20px] leading-relaxed text-[var(--gold)]">
               ตั้งค่าห้อง
             </h3>
+            <div className="mt-1 font-pixel text-[7px] leading-relaxed text-[var(--muted-foreground)]">
+              เลือกโหมด · เลือกฉาก · ปรับแต้มกับเวลา
+            </div>
           </div>
           <button
+            type="button"
             onClick={() => {
               SFX.click();
               onClose();
             }}
-            className="pixel-btn px-4 py-3"
+            className="pixel-btn flex h-8 w-8 shrink-0 items-center justify-center p-0"
+            aria-label="ปิด"
           >
-            <span className="font-pixel text-[10px]">ปิด</span>
+            ✕
           </button>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {(["1v1", "2v2"] as const).map((mode) => (
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-[0.9fr_1.1fr]">
+          <div className="pixel-panel flex flex-col gap-3 p-3">
+            <SettingsSectionTitle label="โหมด" value={draft.mode.toUpperCase()} />
+            <div className="grid grid-cols-2 gap-2">
+              {(["1v1", "2v2"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => {
+                    SFX.click();
+                    setMode(mode);
+                  }}
+                  className="pixel-btn flex min-h-[76px] flex-col items-start justify-between p-3 text-left"
+                  data-active={draft.mode === mode ? "true" : undefined}
+                >
+                  <span className="font-pixel text-[11px]">{mode.toUpperCase()}</span>
+                  <span
+                    className={`font-pixel text-[7px] leading-relaxed ${
+                      draft.mode === mode
+                        ? "text-[var(--background)]"
+                        : "text-[var(--muted-foreground)]"
+                    }`}
+                  >
+                    {mode === "2v2" ? "4 คน · ทีมคู่" : "2 คน · ดวลเร็ว"}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <SettingsSectionTitle label="สรุป" value={`${draft.maxPlayers} SLOT`} />
+            <div className="grid gap-2 font-pixel text-[8px] text-[var(--foreground)]">
+              <SettingsSummaryRow label="เป้าหมาย" value={`${draft.targetCoins} เหรียญ`} />
+              <SettingsSummaryRow label="เวลา" value={`${durationMinutes} นาที`} />
+              <SettingsSummaryRow label="สล็อต" value={`${draft.maxPlayers} คน`} />
+            </div>
+          </div>
+
+          <div className="pixel-panel flex flex-col gap-3 p-3">
+            <SettingsSectionTitle label="ฉาก" value={STAGE_COPY[draft.stage].label} />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {(Object.keys(STAGE_COPY) as RoomStage[]).map((stage) => (
+                <button
+                  key={stage}
+                  type="button"
+                  onClick={() => {
+                    SFX.click();
+                    setDraft((current) => ({ ...current, stage }));
+                  }}
+                  className="pixel-btn flex min-h-[88px] flex-col items-start justify-between p-3 text-left"
+                  data-active={draft.stage === stage ? "true" : undefined}
+                >
+                  <span
+                    className={`font-pixel text-[8px] leading-relaxed ${
+                      draft.stage === stage ? "text-[var(--background)]" : "text-[var(--gold)]"
+                    }`}
+                  >
+                    {STAGE_COPY[stage].label}
+                  </span>
+                  <span
+                    className={`font-pixel text-[7px] leading-relaxed ${
+                      draft.stage === stage
+                        ? "text-[var(--background)]"
+                        : "text-[var(--muted-foreground)]"
+                    }`}
+                  >
+                    {STAGE_COPY[stage].desc}
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <SettingStepper
+                label="เป้าหมาย"
+                value={draft.targetCoins}
+                suffix="เหรียญ"
+                step={100}
+                min={ROOM_SETTING_LIMITS.targetCoins.min}
+                max={ROOM_SETTING_LIMITS.targetCoins.max}
+                onChange={(value) =>
+                  setNumber("targetCoins", value, ROOM_SETTING_LIMITS.targetCoins)
+                }
+              />
+              <SettingStepper
+                label="เวลา"
+                value={durationMinutes}
+                suffix="นาที"
+                step={1}
+                min={ROOM_SETTING_LIMITS.durationMs.min / 60000}
+                max={ROOM_SETTING_LIMITS.durationMs.max / 60000}
+                onChange={(value) =>
+                  setNumber("durationMs", value * 60000, ROOM_SETTING_LIMITS.durationMs)
+                }
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="font-pixel text-[7px] leading-relaxed text-[var(--muted-foreground)]">
+            ค่าใหม่มีผลเมื่อกดบันทึก · ผู้เล่นในห้องจะเห็นพร้อมกัน
+          </div>
+          <div className="flex flex-wrap items-center justify-end gap-3">
             <button
-              key={mode}
+              type="button"
               onClick={() => {
                 SFX.click();
-                setMode(mode);
+                onClose();
               }}
-              className="pixel-panel p-4 text-left transition-transform active:translate-y-[1px]"
-              data-ready={draft.mode === mode ? "true" : undefined}
-              style={{ background: draft.mode === mode ? "#4a2b58" : "#2b1836" }}
+              className="pixel-btn px-4 py-3"
             >
-              <div className="font-pixel text-[12px] text-[var(--gold)] leading-relaxed">
-                {mode === "2v2" ? "2v2" : "1v1"}
-              </div>
-              <div className="font-pixel text-[13px] text-[#fff1d6] mt-3 leading-[1.8]">
-                {mode === "2v2" ? "ทีม 4 คน · ชาวสวน + คนขาย" : "ดวล 2 คนแบบเดิม"}
-              </div>
+              <span className="font-pixel text-[9px]">ยกเลิก</span>
             </button>
-          ))}
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-          {(Object.keys(STAGE_COPY) as RoomStage[]).map((stage) => (
             <button
-              key={stage}
+              type="button"
               onClick={() => {
                 SFX.click();
-                setDraft((current) => ({ ...current, stage }));
+                onSave(draft);
               }}
-              className="pixel-panel p-4 text-left transition-transform active:translate-y-[1px]"
-              data-ready={draft.stage === stage ? "true" : undefined}
-              style={{ background: draft.stage === stage ? "#4a2b58" : "#2b1836" }}
+              className="pixel-btn px-5 py-3"
+              data-accent="true"
             >
-              <div className="font-pixel text-[12px] text-[var(--gold)] leading-relaxed">
-                {STAGE_COPY[stage].label}
-              </div>
-              <div className="font-pixel text-[13px] text-[#fff1d6] mt-3 leading-[1.8]">
-                {STAGE_COPY[stage].desc}
-              </div>
+              <span className="font-pixel text-[9px]">บันทึก</span>
             </button>
-          ))}
+          </div>
         </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <SettingField
-            label="เป้าหมาย"
-            helper="เหรียญที่ต้องทำให้ถึงก่อน"
-            value={draft.targetCoins}
-          >
-            <input
-              className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3"
-              type="number"
-              min={ROOM_SETTING_LIMITS.targetCoins.min}
-              max={ROOM_SETTING_LIMITS.targetCoins.max}
-              step={50}
-              value={draft.targetCoins}
-              onChange={(e) =>
-                setNumber("targetCoins", Number(e.target.value), ROOM_SETTING_LIMITS.targetCoins)
-              }
-            />
-          </SettingField>
-          <SettingField
-            label="TIME"
-            helper="นาทีต่อรอบ"
-            value={Math.round(draft.durationMs / 60000)}
-          >
-            <input
-              className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3"
-              type="number"
-              min={ROOM_SETTING_LIMITS.durationMs.min / 60000}
-              max={ROOM_SETTING_LIMITS.durationMs.max / 60000}
-              step={1}
-              value={Math.round(draft.durationMs / 60000)}
-              onChange={(e) =>
-                setNumber(
-                  "durationMs",
-                  Number(e.target.value) * 60000,
-                  ROOM_SETTING_LIMITS.durationMs,
-                )
-              }
-            />
-          </SettingField>
-          <SettingField label="สล็อต" helper="ปรับตามโหมด" value={draft.maxPlayers}>
-            <input
-              className="pixel-chip w-full font-pixel text-[16px] bg-[#24132f] text-[#fff3c4] px-4 py-3 opacity-80"
-              type="number"
-              min={2}
-              max={4}
-              value={draft.maxPlayers}
-              readOnly
-            />
-          </SettingField>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-end gap-3">
-          <button
-            onClick={() => {
-              SFX.click();
-              onClose();
-            }}
-            className="pixel-btn px-5 py-4"
-          >
-            <span className="font-pixel text-[11px]">ยกเลิก</span>
-          </button>
-          <button
-            onClick={() => {
-              SFX.click();
-              onSave(draft);
-            }}
-            className="pixel-btn px-5 py-4"
-            data-accent="true"
-          >
-            <span className="font-pixel text-[11px]">บันทึกการตั้งค่า</span>
-          </button>
-        </div>
-      </div>
+      </section>
     </div>
   );
 }
 
-function SettingField({
+function SettingsSectionTitle({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3">
+      <span className="font-pixel text-[8px] tracking-[2px] text-[var(--gold)]">{label}</span>
+      <span className="pixel-chip font-pixel text-[7px]" data-gold="true">
+        {value}
+      </span>
+    </div>
+  );
+}
+
+function SettingsSummaryRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 bg-[var(--muted)] px-3 py-2">
+      <span className="text-[var(--muted-foreground)]">{label}</span>
+      <span className="text-[var(--gold)]">{value}</span>
+    </div>
+  );
+}
+
+function SettingStepper({
   label,
-  helper,
   value,
-  children,
+  suffix,
+  step,
+  min,
+  max,
+  onChange,
 }: {
   label: string;
-  helper: string;
   value: number;
-  children: React.ReactNode;
+  suffix: string;
+  step: number;
+  min: number;
+  max: number;
+  onChange: (value: number) => void;
 }) {
+  const dec = () => onChange(Math.max(min, value - step));
+  const inc = () => onChange(Math.min(max, value + step));
   return (
-    <label className="flex flex-col gap-2">
-      <span className="font-pixel text-[11px] text-[var(--gold)]">{label}</span>
-      {children}
-      <span className="font-pixel text-[12px] text-[#fff1d6] leading-[1.8]">
-        {helper} · {value}
-      </span>
-    </label>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-pixel text-[8px] text-[var(--gold)]">{label}</span>
+        <span className="font-pixel text-[7px] text-[var(--muted-foreground)]">{suffix}</span>
+      </div>
+      <div className="grid grid-cols-[36px_minmax(0,1fr)_36px] gap-2">
+        <button type="button" className="pixel-btn h-9 p-0 font-pixel text-[12px]" onClick={dec}>
+          −
+        </button>
+        <input
+          className="pixel-chip w-full bg-[var(--background)] px-3 py-2 text-center font-pixel text-[14px] text-[var(--gold)]"
+          type="number"
+          min={min}
+          max={max}
+          step={step}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+        />
+        <button type="button" className="pixel-btn h-9 p-0 font-pixel text-[12px]" onClick={inc}>
+          +
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -3008,6 +3220,7 @@ function SelfField({
   cargo,
   showMarket = false,
   teammates,
+  stage = "classic",
 }: {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
@@ -3018,6 +3231,7 @@ function SelfField({
   cargo?: Cargo[];
   showMarket?: boolean;
   teammates?: PublicPlayer[];
+  stage?: RoomStage;
 }) {
   return (
     <PhaserField
@@ -3029,6 +3243,7 @@ function SelfField({
       cargo={cargo}
       showMarket={showMarket}
       teammates={teammates}
+      stage={stage}
     />
   );
 }
@@ -3040,6 +3255,7 @@ function SpectatorMatchView({
   marketPrices,
   fieldCargo,
   is2v2 = false,
+  stage = "classic",
 }: {
   players: PublicPlayer[];
   events: { id: number; ev: ServerEvent }[];
@@ -3047,6 +3263,7 @@ function SpectatorMatchView({
   marketPrices?: Record<CropId, number>;
   fieldCargo?: Cargo[];
   is2v2?: boolean;
+  stage?: RoomStage;
 }) {
   const [now, setNow] = useState(() => Date.now());
 
@@ -3161,6 +3378,7 @@ function SpectatorMatchView({
                   cargo={is2v2 ? fieldCargo?.filter((c) => c.teamId === player.teamId) : undefined}
                   showMarket={is2v2}
                   teammates={field.teammates}
+                  stage={stage}
                 />
                 <div className="absolute inset-0 pointer-events-none">
                   {overlays.map((c) => {
@@ -3217,6 +3435,7 @@ function OpponentStatusCard({
             walkFrame={0}
             acting={false}
             tool={player.tool}
+            cosmetics={player.cosmetics}
           />
         </div>
       </div>

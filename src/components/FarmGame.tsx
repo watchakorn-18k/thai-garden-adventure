@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import PixelFarmer from "./PixelFarmer";
 import PixelCrop from "./PixelCrop";
+import PlayerAvatarPreview from "./PlayerAvatarPreview";
 import GameMenuDialog, { type GameMenuTab } from "./GameMenuDialog";
 import TitleUnlockDialog from "./TitleUnlockDialog";
 import QuickMatchButton from "./QuickMatchButton";
@@ -37,7 +38,13 @@ import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from
 import { toolDurationMs } from "@/lib/tool-animation";
 import { chooseFarmBotPlan, isFarmBotPlanValid, type FarmBotPlan } from "@/lib/farm-bot";
 import { SFX, setMuted, isMuted, startBgm, stopBgm } from "@/lib/sfx";
-import { readCosmetics, writeCosmetics } from "@/lib/player-cosmetics";
+import { COSMETIC_PRESETS, readCosmetics, writeCosmetics } from "@/lib/player-cosmetics";
+import {
+  awardGardenTokens,
+  buyCosmeticPreset,
+  isCosmeticPresetUnlocked,
+  readGardenTokenState,
+} from "@/lib/garden-tokens";
 import { loadPlayerName, savePlayerName } from "@/lib/player-name";
 import { applyStoredProgressAward, readProgress } from "@/lib/progress-storage";
 import {
@@ -115,6 +122,7 @@ export default function FarmGame() {
     crops: [],
   });
   const [cosmetics, setCosmetics] = useState(() => readCosmetics());
+  const [gardenTokenState, setGardenTokenState] = useState(() => readGardenTokenState());
   const [playerName, setPlayerName] = useState("");
   const [gameMenuOpen, setGameMenuOpen] = useState(false);
   const [gameMenuInitialTab, setGameMenuInitialTab] = useState<GameMenuTab>("outfit");
@@ -221,9 +229,23 @@ export default function FarmGame() {
   useEffect(() => {
     gameMenuOpenRef.current = gameMenuOpen;
   }, [gameMenuOpen]);
-  // Load (or generate + persist a random veggie) name on the client to avoid SSR mismatch.
+  // Load browser-only profile data after hydration to avoid SSR mismatch.
   useEffect(() => {
+    const syncCosmetics = () => setCosmetics(readCosmetics());
+    const syncGardenTokens = () => setGardenTokenState(readGardenTokenState());
     setPlayerName(loadPlayerName());
+    syncCosmetics();
+    syncGardenTokens();
+    window.addEventListener("tg:cosmetics", syncCosmetics);
+    window.addEventListener("tg:gardenTokens", syncGardenTokens);
+    window.addEventListener("storage", syncCosmetics);
+    window.addEventListener("storage", syncGardenTokens);
+    return () => {
+      window.removeEventListener("tg:cosmetics", syncCosmetics);
+      window.removeEventListener("tg:gardenTokens", syncGardenTokens);
+      window.removeEventListener("storage", syncCosmetics);
+      window.removeEventListener("storage", syncGardenTokens);
+    };
   }, []);
 
   const facingTile = useCallback(() => {
@@ -424,7 +446,11 @@ export default function FarmGame() {
               void applyStoredProgressAward(award).then((result) => {
                 setProgress(result.progress);
                 if (result.applied) {
+                  const tokenBonus = result.leveledUp ? result.progress.level * 10 : 0;
+                  const nextTokens = awardGardenTokens(1 + tokenBonus);
+                  setGardenTokenState(nextTokens);
                   addPopup(ev.x, ev.y, `+${award.exp} XP`, "info");
+                  addPopup(ev.x, ev.y, tokenBonus ? `+${1 + tokenBonus} GT` : "+1 GT", "info");
                   const before = levelTitle(result.previousLevel);
                   const after = levelTitle(result.progress.level);
                   if (result.leveledUp && before !== after) {
@@ -897,6 +923,39 @@ export default function FarmGame() {
       .finally(() => setHomeScoreboardLoaded(true));
   }, [homeScoreboardLoaded]);
 
+  const equipPreset = useCallback((id: string) => {
+    const preset = COSMETIC_PRESETS.find((item) => item.id === id);
+    if (!preset) return false;
+    setCosmetics(preset.cosmetics);
+    writeCosmetics(preset.cosmetics);
+    return true;
+  }, []);
+
+  const handleBuyPreset = useCallback(
+    (id: string) => {
+      const result = buyCosmeticPreset(id);
+      setGardenTokenState(result.state);
+      if (!result.ok && result.reason !== "owned") {
+        SFX.bad();
+        return;
+      }
+      equipPreset(id);
+      SFX.coin();
+    },
+    [equipPreset],
+  );
+
+  const handleEquipPreset = useCallback(
+    (id: string) => {
+      if (!isCosmeticPresetUnlocked(gardenTokenState, id)) {
+        SFX.bad();
+        return;
+      }
+      if (equipPreset(id)) SFX.click();
+    },
+    [equipPreset, gardenTokenState],
+  );
+
   return (
     <div className="relative min-h-screen w-full flex flex-col items-center justify-start px-6 pb-10 gap-8 overflow-hidden">
       <div className="fixed right-3 top-3 z-100 flex items-center gap-3 pointer-events-auto">
@@ -1089,16 +1148,7 @@ export default function FarmGame() {
               SFX.click();
             }}
           >
-            <span className="header-level-avatar" aria-hidden>
-              <PixelFarmer
-                direction="down"
-                walking={false}
-                walkFrame={0}
-                acting={false}
-                tool="hoe"
-                cosmetics={cosmetics}
-              />
-            </span>
+            <PlayerAvatarPreview className="header-level-avatar" cosmetics={cosmetics} />
             <span className="header-level-copy">
               <span className="header-level-name">{playerName || "ตั้งชื่อ"}</span>
               <span className="header-level-main">
@@ -1130,7 +1180,7 @@ export default function FarmGame() {
       </header>
 
       {/* Multiplayer call-to-action — sits above the single-player field */}
-      <div className="cta-multiplayer relative z-0 w-full max-w-5xl">
+      <div className="cta-multiplayer relative z-30 w-full max-w-5xl">
         <div className="cta-multiplayer-card">
           <div className="cta-multiplayer-copy">
             <span className="cta-multiplayer-label font-pixel">อยากแข่งกับเพื่อน?</span>
@@ -1141,14 +1191,17 @@ export default function FarmGame() {
               <QuickMatchButton label="จับคู่ด่วน" className="pixel-btn cta-quick-match" />
             </span>
             <span className="cta-btn-bob" data-delay="true">
-              <a href="/lobby?mode=1v1" className="pixel-btn cta-1v1-link">
-                1V1
-              </a>
-            </span>
-            <span className="cta-btn-bob" data-delay="true">
-              <a href="/lobby?mode=2v2" className="pixel-btn cta-1v1-link">
-                2V2
-              </a>
+              <details className="cta-mode-menu">
+                <summary className="pixel-btn cta-1v1-link">โหมดแข่ง</summary>
+                <div className="cta-mode-list">
+                  <a href="/lobby?mode=1v1" className="pixel-btn cta-mode-link">
+                    1V1
+                  </a>
+                  <a href="/lobby?mode=2v2" className="pixel-btn cta-mode-link">
+                    2V2
+                  </a>
+                </div>
+              </details>
             </span>
             <span className="cta-btn-bob" data-delay="true">
               <button type="button" onClick={openScoreboard} className="pixel-btn cta-1v1-link">
@@ -1520,6 +1573,8 @@ export default function FarmGame() {
         initialTab={gameMenuInitialTab}
         playerName={playerName}
         coins={coins}
+        gardenTokens={gardenTokenState.balance}
+        unlockedPresetIds={gardenTokenState.unlockedPresetIds}
         levelLabel={progress ? `LV ${progress.level} · ${levelTitle(progress.level)}` : "เมนู"}
         expLabel={progress ? `${progress.exp}/${progressNext} XP` : undefined}
         autoBotActive={autoBotActive}
@@ -1538,6 +1593,8 @@ export default function FarmGame() {
           writeCosmetics(next);
           SFX.click();
         }}
+        onBuyPreset={handleBuyPreset}
+        onEquipPreset={handleEquipPreset}
         onSelectCrop={(id) => {
           seedChoiceRef.current = id;
           setSeedChoice(id);

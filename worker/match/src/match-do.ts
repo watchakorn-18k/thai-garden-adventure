@@ -138,7 +138,10 @@ const ROOM_CLOSE_MS = 60_000;
 const MAX_SPECTATORS = 10;
 const BOT_TICK_MS = 150;
 const BOT_NAMES = ["บอทมะลิ", "บอทข้าวหอม", "บอทตะวัน", "บอทใบเตย", "บอทมะนาว"];
-const BOT_COSMETICS: PlayerCosmetics = { hat: "#8bc967", shirt: "#4cc2ee", pants: "#4a2f5c" };
+const BOT_HAT_COLORS = ["#8bc967", "#ffd24a", "#4cc2ee", "#d94e6a", "#f4e4c1"];
+const BOT_SHIRT_COLORS = ["#4cc2ee", "#d94e6a", "#6ab04c", "#e8a23a", "#b89dd1"];
+const BOT_PANTS_COLORS = ["#4a2f5c", "#2a6e9e", "#5a2f17", "#3a6b2a", "#8b6420"];
+const BOT_LEVEL_TIERS = [3, 7, 12, 18, 25, 34, 45, 60, 78, 96];
 const BUG_SPAWN_CHANCE = 0.3;
 const BUG_CLEAR_REWARD = 40;
 const TWO_V_TWO_SLOTS = [
@@ -1356,7 +1359,8 @@ export class MatchRoom implements DurableObject {
       id: playerId,
       sessionId,
       name,
-      cosmetics: BOT_COSMETICS,
+      level: makeBotLevel(),
+      cosmetics: makeBotCosmetics(),
       coins: 50,
       pos: spawn,
       dir: "down",
@@ -2042,7 +2046,7 @@ export class MatchRoom implements DurableObject {
         plan = next;
         this.botPlans.set(bot.id, plan);
       }
-      const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+      const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND * botSkillMultiplier(bot);
       const dx = plan.sx - bot.pos.x;
       const dy = plan.sy - bot.pos.y;
       const dist = Math.hypot(dx, dy);
@@ -2072,7 +2076,7 @@ export class MatchRoom implements DurableObject {
    * Returns true if the bot moved this tick (so the caller marks state dirty).
    */
   private botSellerStep(bot: PlayerState, now: number): boolean {
-    const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND;
+    const step = (BOT_TICK_MS / 1000) * MOVE_SPEED_TILES_PER_SECOND * botSkillMultiplier(bot);
     const stackCount = playerCargoCount(bot);
 
     // Decide target: nearest bug first, then market/cargo logistics.
@@ -2583,6 +2587,27 @@ interface BotPlan {
 
 function randInt(min: number, max: number): number {
   return min + Math.floor(Math.random() * (max - min + 1));
+}
+
+function pickOne<T>(items: readonly T[]): T {
+  return items[randInt(0, items.length - 1)];
+}
+
+function makeBotCosmetics(): PlayerCosmetics {
+  return cosmeticsSchema.parse({
+    hat: pickOne(BOT_HAT_COLORS),
+    shirt: pickOne(BOT_SHIRT_COLORS),
+    pants: pickOne(BOT_PANTS_COLORS),
+  });
+}
+
+function makeBotLevel(): number {
+  return pickOne(BOT_LEVEL_TIERS) + randInt(-2, 2);
+}
+
+function botSkillMultiplier(bot: PlayerState): number {
+  const level = normalizeLevel(bot.level) ?? 1;
+  return Math.min(1.28, Math.max(0.82, 0.78 + level / 120));
 }
 
 function slotKey(teamId: TeamId, role: PlayerRole): string {

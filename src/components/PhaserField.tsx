@@ -10,7 +10,7 @@ import {
   type CropId,
   type Direction,
 } from "@/lib/game-types";
-import type { PublicPlayer, ServerEvent } from "@/lib/match-protocol";
+import type { PublicPlayer, RoomStage, ServerEvent } from "@/lib/match-protocol";
 
 function playerCargoStack(player: PublicPlayer): Cargo[] {
   if (player.cargoStack && player.cargoStack.length > 0) return player.cargoStack;
@@ -51,6 +51,71 @@ const CROP_CODE: Record<string, number> = {
   basil: 8,
 };
 
+const STAGE_PALETTE: Record<
+  RoomStage,
+  {
+    grassTop: number;
+    grassBottom: number;
+    grassBlade: number;
+    grassShadow: number;
+    grassEdge: number;
+    soilBase: number;
+    soilDark: number;
+    soilLight: number;
+    wateredBase: number;
+    wateredDark: number;
+    wateredLight: number;
+    waterSpark: number;
+    accent: number;
+  }
+> = {
+  classic: {
+    grassTop: 0x6ab04c,
+    grassBottom: 0x4e8c3a,
+    grassBlade: 0x8bc967,
+    grassShadow: 0x2a4d1f,
+    grassEdge: 0x3a6b2a,
+    soilBase: 0x5a2f17,
+    soilDark: 0x422010,
+    soilLight: 0x6b3a1c,
+    wateredBase: 0x2a1810,
+    wateredDark: 0x1f1208,
+    wateredLight: 0x3a2010,
+    waterSpark: 0x7fd8ff,
+    accent: 0xffd24a,
+  },
+  water: {
+    grassTop: 0x5cae72,
+    grassBottom: 0x3f8b62,
+    grassBlade: 0x9ce0a3,
+    grassShadow: 0x216052,
+    grassEdge: 0x2e6f58,
+    soilBase: 0x4b3421,
+    soilDark: 0x332315,
+    soilLight: 0x6b5135,
+    wateredBase: 0x173d4c,
+    wateredDark: 0x102a36,
+    wateredLight: 0x255a6f,
+    waterSpark: 0x7fd8ff,
+    accent: 0x7fd8ff,
+  },
+  festival: {
+    grassTop: 0x7a8f3a,
+    grassBottom: 0x5f6f2c,
+    grassBlade: 0xd9a13a,
+    grassShadow: 0x4a3518,
+    grassEdge: 0x6f4f24,
+    soilBase: 0x6b2f2e,
+    soilDark: 0x421b24,
+    soilLight: 0x8b4a32,
+    wateredBase: 0x3a1f2f,
+    wateredDark: 0x241222,
+    wateredLight: 0x5a2b3f,
+    waterSpark: 0xffd24a,
+    accent: 0xffd24a,
+  },
+};
+
 interface Props {
   player: PublicPlayer;
   events: { id: number; ev: ServerEvent }[];
@@ -61,6 +126,7 @@ interface Props {
   showMarket?: boolean;
   /** 2v2: other players sharing this plot, drawn as secondary sprites. */
   teammates?: PublicPlayer[];
+  stage?: RoomStage;
 }
 
 function hexNum(hex: string): number {
@@ -169,6 +235,7 @@ export default function PhaserField({
   cargo,
   showMarket = false,
   teammates,
+  stage = "classic",
 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<FieldScene | null>(null);
@@ -182,6 +249,7 @@ export default function PhaserField({
   const cargoRef = useRef<Cargo[]>(cargo ?? []);
   const showMarketRef = useRef(showMarket);
   const teammatesRef = useRef<PublicPlayer[]>(teammates ?? []);
+  const stageRef = useRef<RoomStage>(stage);
   playerRef.current = player;
   actingRef.current = acting;
   predictedDirRef.current = predictedDir ?? null;
@@ -189,6 +257,7 @@ export default function PhaserField({
   cargoRef.current = cargo ?? [];
   showMarketRef.current = showMarket;
   teammatesRef.current = teammates ?? [];
+  stageRef.current = stage;
 
   useEffect(() => {
     let game: Phaser.Game | null = null;
@@ -413,7 +482,7 @@ export default function PhaserField({
         /** Cheap rolling hash of the tile/crop layout to detect changes. */
         tileSignature(): number {
           const p = playerRef.current;
-          let h = 0;
+          let h = stageRef.current === "water" ? 17 : stageRef.current === "festival" ? 31 : 0;
           for (let y = 0; y < ROWS; y++) {
             for (let x = 0; x < COLS; x++) {
               const cell = p.tiles[y]?.[x];
@@ -430,6 +499,8 @@ export default function PhaserField({
           const p = playerRef.current;
           this.tileG.clear();
           this.cropG.clear();
+          if (stageRef.current === "water") this.drawWaterStageBase();
+          if (stageRef.current === "festival") this.drawFestivalStageBase();
           for (let y = 0; y < ROWS; y++) {
             for (let x = 0; x < COLS; x++) {
               const cell = p.tiles[y]?.[x];
@@ -462,27 +533,57 @@ export default function PhaserField({
           }
         }
 
+        drawWaterStageBase() {
+          const g = this.tileG;
+          const w = COLS * TILE;
+          const h = ROWS * TILE;
+          g.fillStyle(0x2a6e9e, 1);
+          g.fillRect(0, 0, w, h);
+          g.fillStyle(0x3a8ec0, 1);
+          for (let y = 0; y < h; y += TILE * 2) {
+            g.fillRect(0, y + TILE - 5, w, 4);
+          }
+        }
+
+        drawFestivalStageBase() {
+          const g = this.tileG;
+          g.fillStyle(0x2d1b3d, 1);
+          g.fillRect(0, 0, COLS * TILE, ROWS * TILE);
+          g.fillStyle(0xffd24a, 0.28);
+          for (let x = 0; x < COLS; x += 2) {
+            g.fillRect(x * TILE + 18, 8, 8, 8);
+          }
+        }
+
         paintTile(px: number, py: number, type: "grass" | "tilled" | "watered") {
           const g = this.tileG;
+          const palette = STAGE_PALETTE[stageRef.current];
           if (type === "grass") {
-            g.fillStyle(0x6ab04c, 1);
+            g.fillStyle(palette.grassTop, 1);
             g.fillRect(px, py, TILE, TILE);
-            g.fillStyle(0x4e8c3a, 1);
+            g.fillStyle(palette.grassBottom, 1);
             g.fillRect(px, py + TILE * 0.5, TILE, TILE * 0.5);
-            g.fillStyle(0x8bc967, 1);
+            g.fillStyle(palette.grassBlade, 1);
             g.fillRect(px + 10, py + 16, 3, 3);
             g.fillRect(px + 38, py + 11, 3, 3);
             g.fillRect(px + 22, py + 38, 3, 3);
-            g.fillStyle(0x2a4d1f, 1);
+            g.fillStyle(palette.grassShadow, 1);
             g.fillRect(px + 14, py + 41, 4, 4);
             g.fillRect(px + 44, py + 25, 4, 4);
-            g.fillStyle(0x3a6b2a, 1);
+            g.fillStyle(palette.grassEdge, 1);
             g.fillRect(px, py + TILE - 3, TILE, 3);
+            if (stageRef.current === "water" && (px / TILE + py / TILE) % 4 === 0) {
+              g.fillStyle(palette.waterSpark, 0.65);
+              g.fillRect(px + 5, py + 5, 5, 2);
+            }
+            if (stageRef.current === "festival" && (px / TILE + py / TILE) % 5 === 0) {
+              g.fillStyle(palette.accent, 0.75);
+              g.fillRect(px + 44, py + 8, 4, 4);
+            }
           } else {
-            // tilled / watered share the furrow base
-            const base = type === "watered" ? 0x2a1810 : 0x5a2f17;
-            const dark = type === "watered" ? 0x1f1208 : 0x422010;
-            const light = type === "watered" ? 0x3a2010 : 0x6b3a1c;
+            const base = type === "watered" ? palette.wateredBase : palette.soilBase;
+            const dark = type === "watered" ? palette.wateredDark : palette.soilDark;
+            const light = type === "watered" ? palette.wateredLight : palette.soilLight;
             g.fillStyle(base, 1);
             g.fillRect(px, py, TILE, TILE);
             for (let fy = 0; fy < TILE; fy += 18) {
@@ -492,12 +593,11 @@ export default function PhaserField({
               g.fillRect(px, py + fy + 10, TILE, 2);
             }
             if (type === "watered") {
-              g.fillStyle(0x7fd8ff, 0.9);
+              g.fillStyle(palette.waterSpark, 0.9);
               g.fillRect(px + 16, py + 18, 2, 2);
               g.fillRect(px + 38, py + 30, 2, 2);
             }
           }
-          // tile edge
           g.lineStyle(1, 0x000000, 0.25);
           g.strokeRect(px + 0.5, py + 0.5, TILE - 1, TILE - 1);
         }
@@ -915,10 +1015,11 @@ export default function PhaserField({
     sceneRef.current?.applyPlayer();
   }, [player]);
 
-  // Redraw teammate sprites when their props change (tool, role, cargo, roster).
+  // Redraw field and teammate sprites when their props change (tool, role, cargo, roster, stage).
   useEffect(() => {
+    sceneRef.current?.applyPlayer();
     sceneRef.current?.applyTeammates();
-  }, [teammates]);
+  }, [teammates, stage]);
 
   // Apply local movement direction immediately for the controlled player.
   useEffect(() => {
