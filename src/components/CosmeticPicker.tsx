@@ -34,11 +34,27 @@ function rgbToHex(rgb: Record<Channel, number>): string {
   return `#${toHex(rgb.r)}${toHex(rgb.g)}${toHex(rgb.b)}`;
 }
 
+function randomColor(): string {
+  return rgbToHex({
+    r: Math.floor(Math.random() * 256),
+    g: Math.floor(Math.random() * 256),
+    b: Math.floor(Math.random() * 256),
+  });
+}
+
 export default function CosmeticPicker({ value, onChange, compact = false, onClose }: Props) {
   const setChannel = (part: keyof PlayerCosmetics, channel: Channel, nextValue: number) => {
     const rgb = hexToRgb(value[part]);
     const next = rgbToHex({ ...rgb, [channel]: nextValue });
     onChange({ ...value, [part]: next });
+  };
+
+  const randomizeAll = () => {
+    onChange({
+      hat: randomColor(),
+      shirt: randomColor(),
+      pants: randomColor(),
+    });
   };
 
   return (
@@ -58,11 +74,16 @@ export default function CosmeticPicker({ value, onChange, compact = false, onClo
           <div className="cosmetic-picker-title">แต่งตัว</div>
           <div className="cosmetic-picker-subtitle">เลื่อน RGB 0–255 เพื่อเลือกสีละเอียด</div>
         </div>
-        {onClose && (
-          <button type="button" onClick={onClose} className="pixel-btn cosmetic-picker-close">
-            ปิด
+        <div className="cosmetic-picker-actions">
+          <button type="button" onClick={randomizeAll} className="pixel-btn cosmetic-picker-random">
+            สุ่มสี
           </button>
-        )}
+          {onClose && (
+            <button type="button" onClick={onClose} className="pixel-btn cosmetic-picker-close">
+              ปิด
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="cosmetic-picker-rows">
@@ -74,7 +95,11 @@ export default function CosmeticPicker({ value, onChange, compact = false, onClo
                 <span>{LABELS[part]}</span>
                 <small>{value[part].toUpperCase()}</small>
               </div>
-              <div className="cosmetic-current-chip" style={{ background: value[part] }} aria-hidden />
+              <div
+                className="cosmetic-current-chip"
+                style={{ background: value[part] }}
+                aria-hidden
+              />
               <div className="cosmetic-rgb-sliders">
                 {CHANNELS.map((channel) => (
                   <label key={channel} className="cosmetic-rgb-channel">

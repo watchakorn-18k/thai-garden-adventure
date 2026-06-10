@@ -960,10 +960,22 @@
     font-size: 7px;
     line-height: 1.6;
   }
-  .cosmetic-picker-close {
+  .cosmetic-picker-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .cosmetic-picker-close,
+  .cosmetic-picker-random {
     min-height: 34px;
     padding: 8px 10px;
     font-size: 8px;
+    white-space: nowrap;
+  }
+  .cosmetic-picker-random {
+    background: var(--gold);
+    color: #1a0f1f;
   }
   .cosmetic-picker-rows {
     display: grid;
@@ -1052,8 +1064,8 @@
     .cosmetic-rgb-row {
       grid-template-columns: 1fr;
     }
-    .cosmetic-picker-close {
-      justify-self: start;
+    .cosmetic-picker-actions {
+      justify-content: flex-start;
     }
   }
 

@@ -1104,6 +1104,7 @@ export default function FarmGame() {
               <span className="header-level-main">
                 {progress ? `LV ${progress.level}` : "เมนู"}
               </span>
+              {progress && <span className="header-level-score">{levelTitle(progress.level)}</span>}
               <span className="header-level-sub">
                 {progress ? `${progress.exp}/${progressNext} XP` : "เปิดเมนู"}
               </span>
@@ -1647,6 +1648,8 @@ function HomeScoreboardDialog({
   loaded: boolean;
   onClose: () => void;
 }) {
+  const [activeMode, setActiveMode] = useState<"1v1" | "2v2">("1v1");
+  const entries = activeMode === "1v1" ? scoreboard.oneVsOne : scoreboard.twoVsTwo;
   return (
     <div
       className="fixed inset-0 z-100 flex items-center justify-center p-4"
@@ -1678,10 +1681,20 @@ function HomeScoreboardDialog({
             ✕
           </button>
         </div>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-1">
-          <HomeScoreboardList title="1V1" entries={scoreboard.oneVsOne} loaded={loaded} />
-          <HomeScoreboardList title="2V2" entries={scoreboard.twoVsTwo} loaded={loaded} />
+        <div className="grid grid-cols-2 gap-2">
+          {(["1v1", "2v2"] as const).map((mode) => (
+            <button
+              key={mode}
+              type="button"
+              className="pixel-btn px-3 py-2 font-pixel text-[8px]"
+              data-active={activeMode === mode ? "true" : undefined}
+              onClick={() => setActiveMode(mode)}
+            >
+              {mode.toUpperCase()}
+            </button>
+          ))}
         </div>
+        <HomeScoreboardList title={activeMode.toUpperCase()} entries={entries} loaded={loaded} />
       </aside>
     </div>
   );
@@ -1698,7 +1711,10 @@ function HomeScoreboardList({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <div className="font-pixel text-[8px] text-[var(--foreground)]">{title}</div>
+      <div className="flex items-center justify-between gap-2 font-pixel text-[8px] text-[var(--foreground)]">
+        <span>{title}</span>
+        <span className="text-[var(--muted-foreground)]">TOP 5</span>
+      </div>
       {!loaded ? (
         <div className="grid gap-1.5">
           {Array.from({ length: 3 }).map((_, i) => (
@@ -1716,17 +1732,7 @@ function HomeScoreboardList({
       ) : entries.length ? (
         <div className="grid gap-1.5">
           {entries.map((entry) => (
-            <div
-              key={`${entry.matchCode}:${entry.playerId}`}
-              className="grid grid-cols-[24px_minmax(0,1fr)_auto] items-center gap-2 font-pixel text-[8px]"
-            >
-              <span className="text-[var(--gold)]">#{entry.rank}</span>
-              <span className="truncate">{entry.name}</span>
-              <span className="flex items-center gap-1 text-[var(--gold)]">
-                <CoinIcon size={10} />
-                {entry.coins}
-              </span>
-            </div>
+            <ScoreboardRow key={`${entry.matchCode}:${entry.playerId}`} entry={entry} />
           ))}
         </div>
       ) : (
@@ -1734,6 +1740,30 @@ function HomeScoreboardList({
           ยังไม่มีคะแนน
         </div>
       )}
+    </div>
+  );
+}
+
+function ScoreboardRow({ entry }: { entry: ScoreboardEntry }) {
+  const seconds = Math.ceil(entry.timeRemainingMs / 1000);
+  return (
+    <div className="grid gap-1 font-pixel text-[8px]">
+      <div className="grid grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-2">
+        <span className="text-[var(--gold)]">#{entry.rank}</span>
+        <span className="truncate">
+          {entry.name}
+          {entry.winner ? " · WIN" : ""}
+        </span>
+        <span className="flex items-center gap-1 text-[var(--gold)]">
+          <CoinIcon size={10} />
+          {entry.coins}
+        </span>
+      </div>
+      <div className="ml-[36px] flex flex-wrap items-center gap-2 text-[7px] text-[var(--muted-foreground)]">
+        {entry.mode === "2v2" && entry.teamId && <span>ทีม {entry.teamId}</span>}
+        {entry.role && <span>{entry.role === "seller" ? "คนขาย" : "ชาวสวน"}</span>}
+        <span>เหลือ {seconds} วิ</span>
+      </div>
     </div>
   );
 }

@@ -4566,10 +4566,12 @@ function EndOverlay({
                     <span className="min-w-0 truncate">
                       {entry.rank}. {entry.name}
                       {entry.winner ? " · WIN" : ""}
+                      {entry.mode === "2v2" && entry.teamId ? ` · ทีม ${entry.teamId}` : ""}
+                      {entry.role ? ` · ${entry.role === "seller" ? "คนขาย" : "ชาวสวน"}` : ""}
                     </span>
                     <span className="flex shrink-0 items-center gap-1">
                       <CoinIcon size={10} />
-                      {entry.coins}
+                      {entry.coins} · {Math.ceil(entry.timeRemainingMs / 1000)}วิ
                     </span>
                   </div>
                 );
