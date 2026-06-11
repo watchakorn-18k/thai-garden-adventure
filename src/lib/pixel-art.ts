@@ -280,22 +280,23 @@ export function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
     ];
   }
   if (tool === "watering_can") {
+    const highlight = p.toolGlow === "transparent" ? "#d8d3d0" : p.toolGlow;
     return [
       // can body, handle, and spout — mirrors for left-facing use.
       [9, 7, 5, 4, p.toolMetal],
-      [9, 7, 5, 1, "#d8d3d0"],
+      [9, 7, 5, 1, highlight],
       [9, 10, 5, 1, p.toolMetalDark],
-      [10, 5, 3, 1, "#d8d3d0"],
+      [10, 5, 3, 1, highlight],
       [9, 6, 1, 2, p.toolMetal],
       [13, 6, 1, 2, p.toolMetal],
-      [14, 7, 2, 1, "#d8d3d0"],
-      [15, 6, 1, 1, "#b8b2b0"],
-      [10, 8, 1, 1, p.toolGlow],
-      [13, 9, 1, 1, p.toolGlow],
+      [14, 7, 2, 1, highlight],
+      [15, 6, 1, 1, p.toolMetalDark],
+      [10, 8, 1, 1, highlight],
+      [13, 9, 1, 1, highlight],
       // water stream in front of spout.
       [15, 8, 1, 1, p.water],
       [17, 9, 1, 1, p.water],
-      [16, 11, 1, 1, "#7fd8ff"],
+      [16, 11, 1, 1, highlight],
       [18, 12, 1, 1, p.water],
     ];
   }
@@ -315,43 +316,44 @@ export function verticalToolOverlay(tool: Tool, p: Palette, direction: Direction
     ];
   }
   if (tool === "watering_can") {
+    const highlight = p.toolGlow === "transparent" ? "#d8d3d0" : p.toolGlow;
     if (direction === "up") {
       return [
         // back view: centered on the farmer's back, with rear handle visible.
         [4, 6, 8, 5, p.toolMetal],
-        [4, 6, 8, 1, "#d8d3d0"],
+        [4, 6, 8, 1, highlight],
         [4, 10, 8, 1, p.toolMetalDark],
-        [6, 4, 4, 1, "#d8d3d0"],
+        [6, 4, 4, 1, highlight],
         [5, 5, 1, 2, p.toolMetal],
         [10, 5, 1, 2, p.toolMetal],
         [7, 7, 2, 2, p.toolMetalDark],
-        [12, 7, 2, 1, "#d8d3d0"],
-        [13, 6, 1, 1, "#b8b2b0"],
-        [5, 7, 1, 1, p.toolGlow],
-        [10, 8, 1, 1, p.toolGlow],
+        [12, 7, 2, 1, highlight],
+        [13, 6, 1, 1, p.toolMetalDark],
+        [5, 7, 1, 1, highlight],
+        [10, 8, 1, 1, highlight],
         [12, 5, 1, 1, p.water],
-        [10, 3, 1, 1, "#7fd8ff"],
+        [10, 3, 1, 1, highlight],
         [13, 2, 1, 1, p.water],
-        [11, 1, 1, 1, "#7fd8ff"],
+        [11, 1, 1, 1, highlight],
       ];
     }
     return [
       // front view: centered in front of the farmer, with face plate and spout.
       [4, 7, 8, 5, p.toolMetal],
-      [4, 7, 8, 1, "#d8d3d0"],
+      [4, 7, 8, 1, highlight],
       [4, 11, 8, 1, p.toolMetalDark],
-      [6, 5, 4, 1, "#d8d3d0"],
+      [6, 5, 4, 1, highlight],
       [5, 6, 1, 2, p.toolMetal],
       [10, 6, 1, 2, p.toolMetal],
-      [7, 8, 2, 2, "#d8d3d0"],
-      [3, 9, 2, 1, "#d8d3d0"],
-      [2, 10, 1, 1, "#b8b2b0"],
-      [6, 8, 1, 1, p.toolGlow],
-      [10, 9, 1, 1, p.toolGlow],
+      [7, 8, 2, 2, highlight],
+      [3, 9, 2, 1, highlight],
+      [2, 10, 1, 1, p.toolMetalDark],
+      [6, 8, 1, 1, highlight],
+      [10, 9, 1, 1, highlight],
       [4, 12, 1, 1, p.water],
-      [7, 13, 1, 1, "#7fd8ff"],
+      [7, 13, 1, 1, highlight],
       [5, 15, 1, 1, p.water],
-      [9, 16, 1, 1, "#7fd8ff"],
+      [9, 16, 1, 1, highlight],
     ];
   }
   return [

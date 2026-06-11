@@ -5,6 +5,7 @@ import PlayerAvatarPreview from "./PlayerAvatarPreview";
 import GameMenuDialog, { type GameMenuTab } from "./GameMenuDialog";
 import TitleUnlockDialog from "./TitleUnlockDialog";
 import QuickMatchButton from "./QuickMatchButton";
+import ShoeTrailOverlay, { shoeTrailFootPoint, type ShoeTrailPoint } from "./ShoeTrailOverlay";
 import { fetchScoreboard, type ScoreboardEntry } from "@/lib/match-client";
 import {
   HoeIcon,
@@ -79,27 +80,6 @@ function hasManualMovement(keys: Set<string>): boolean {
   return ["keyw", "keya", "keys", "keyd", "arrowup", "arrowdown", "arrowleft", "arrowright"].some(
     (k) => keys.has(k),
   );
-}
-
-function smoothTrailPath(points: { x: number; y: number }[]): string {
-  if (points.length < 2) return "";
-  let d = `M ${points[0].x} ${points[0].y}`;
-  for (let i = 1; i < points.length; i++) {
-    const prev = points[i - 1];
-    const current = points[i];
-    const midX = (prev.x + current.x) / 2;
-    const midY = (prev.y + current.y) / 2;
-    d += ` Q ${prev.x} ${prev.y} ${midX} ${midY}`;
-  }
-  const last = points[points.length - 1];
-  d += ` T ${last.x} ${last.y}`;
-  return d;
-}
-
-function trailSegmentPath(a: { x: number; y: number }, b: { x: number; y: number }): string {
-  const mx = (a.x + b.x) / 2;
-  const my = (a.y + b.y) / 2;
-  return `M ${a.x} ${a.y} Q ${a.x} ${a.y} ${mx} ${my} T ${b.x} ${b.y}`;
 }
 
 const TILE = 56;
@@ -208,7 +188,7 @@ export default function FarmGame() {
   >([]);
   const [shoeTrailPath, setShoeTrailPath] = useState<{
     kind: "fire" | "lightning";
-    points: { x: number; y: number; t: number; foot: 0 | 1 }[];
+    points: ShoeTrailPoint[];
   } | null>(null);
   const [screenShake, setScreenShake] = useState(0);
   const [hudPulse, setHudPulse] = useState(false);
@@ -339,9 +319,10 @@ export default function FarmGame() {
   const addShoeTrailPoint = useCallback((x: number, y: number, dir: Direction, now: number) => {
     const trail = cosmeticsRef.current.shoeTrail;
     if (trail === "none") return;
-    const footX = dir === "right" ? 17 : dir === "left" ? -17 : 0;
-    const footY = dir === "down" ? 24 : dir === "up" ? 4 : 22;
-    const trailPoint = { x: x * TILE + TILE / 2 + footX, y: y * TILE + footY, t: now };
+    const foot = shoeTrailFoot.current;
+    shoeTrailFoot.current = foot === 0 ? 1 : 0;
+    const point = shoeTrailFootPoint(x, y, dir, foot, TILE);
+    const trailPoint = { ...point, t: now, foot };
     setShoeTrailPath((current) => {
       const recent =
         current?.kind === trail ? current.points.filter((point) => now - point.t < 1350) : [];
@@ -426,9 +407,12 @@ export default function FarmGame() {
       if (!color) return;
       const id = ++popupId.current;
       setTileEffects((current) => [...current, { id, x, y, color, cropGlow, kind }]);
-      setTimeout(() => {
-        setTileEffects((current) => current.filter((effect) => effect.id !== id));
-      }, 1100);
+      setTimeout(
+        () => {
+          setTileEffects((current) => current.filter((effect) => effect.id !== id));
+        },
+        kind === "water" && cropGlow ? 1700 : 1100,
+      );
     },
     [],
   );
@@ -1595,32 +1579,13 @@ export default function FarmGame() {
           );
         })}
 
-        {shoeTrailPath && shoeTrailPath.points.length >= 2 && (
-          <svg className="shoe-trail-svg" width={COLS * TILE} height={ROWS * TILE} aria-hidden>
-            <defs>
-              <linearGradient id="shoe-trail-fade" x1="0%" y1="0%" x2="100%" y2="0%">
-                <stop offset="0%" stopColor="currentColor" stopOpacity="0" />
-                <stop offset="55%" stopColor="currentColor" stopOpacity="0.55" />
-                <stop offset="100%" stopColor="currentColor" stopOpacity="1" />
-              </linearGradient>
-            </defs>
-            {shoeTrailPath.points.slice(1).map((point, index) => {
-              const previous = shoeTrailPath.points[index];
-              const alpha = (index + 1) / (shoeTrailPath.points.length - 1);
-              return (
-                <path
-                  key={`${point.t}:${index}`}
-                  className={`shoe-trail-line shoe-trail-line-${shoeTrailPath.kind}`}
-                  d={trailSegmentPath(previous, point)}
-                  style={{ opacity: Math.max(0.08, alpha) }}
-                />
-              );
-            })}
-            <path
-              className={`shoe-trail-head shoe-trail-head-${shoeTrailPath.kind}`}
-              d={smoothTrailPath(shoeTrailPath.points.slice(-3))}
-            />
-          </svg>
+        {shoeTrailPath && (
+          <ShoeTrailOverlay
+            width={COLS * TILE}
+            height={ROWS * TILE}
+            kind={shoeTrailPath.kind}
+            points={shoeTrailPath.points}
+          />
         )}
 
         {/* dust puffs */}

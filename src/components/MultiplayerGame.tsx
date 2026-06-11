@@ -634,6 +634,14 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
     [isSpectator, send],
   );
 
+  const setLocalTool = useCallback((tool: Tool, seedChoice?: CropId) => {
+    const current = localPlayerRef.current ?? selfRef.current;
+    if (!current) return;
+    const next = { ...current, tool, seedChoice: seedChoice ?? current.seedChoice };
+    localPlayerRef.current = next;
+    setLocalPlayer(next);
+  }, []);
+
   const sendAction = useCallback(() => {
     if (isSpectator) return;
     if (statusRef.current !== "playing") return;
@@ -689,6 +697,14 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
               (tile.type === "tilled" || (tile.crop && tile.type !== "watered"))
             ) {
               SFX.water();
+              setEvents((prev) => {
+                const id = ++evIdRef.current;
+                setTimeout(() => setEvents((p) => p.filter((q) => q.id !== id)), 1800);
+                return [
+                  ...prev,
+                  { id, ev: { kind: "water", playerId: local.id, x: target.x, y: target.y } },
+                ];
+              });
             } else if (
               local.tool === "seed" &&
               (tile.type === "tilled" || tile.type === "watered") &&
@@ -745,10 +761,12 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       if (selfPlayer && selfPlayer.role !== "seller") {
         if (k === "keye") {
           SFX.click();
+          setLocalTool("hoe");
           send({ t: "tool", tool: "hoe" });
         }
         if (k === "keyq") {
           SFX.click();
+          setLocalTool("watering_can");
           send({ t: "tool", tool: "watering_can" });
         }
         const cropShortcut = { digit1: 0, digit2: 1, digit3: 2, digit4: 3 }[k];
@@ -782,7 +800,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
       window.removeEventListener("blur", stopAll);
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
-  }, [isSpectator, send, sendAction, setMovement]);
+  }, [isSpectator, send, sendAction, setLocalTool, setMovement]);
 
   useEffect(() => {
     if (state?.status === "playing") return;
@@ -1159,6 +1177,7 @@ export default function MultiplayerGame({ code, role = "player", desiredMode }: 
             SFX.click();
             setBugHuntOpen(true);
           }}
+          onSetLocalTool={setLocalTool}
         />
       )}
       {cropIndexOpen && (
@@ -4031,6 +4050,7 @@ function Toolbar({
   bugHuntReady,
   marketOrder,
   onBugHunt,
+  onSetLocalTool,
 }: {
   self: PublicPlayer;
   send: (msg: Parameters<ReturnType<typeof useMatch>["send"]>[0]) => void;
@@ -4039,6 +4059,7 @@ function Toolbar({
   bugHuntReady?: boolean;
   marketOrder?: MarketOrder;
   onBugHunt?: () => void;
+  onSetLocalTool?: (tool: Tool, seedChoice?: CropId) => void;
 }) {
   const cropPool = selectedCropPool(self.selectedCrops);
   if (self.role === "seller") {
@@ -4188,6 +4209,7 @@ function Toolbar({
               key={t.id}
               onClick={() => {
                 SFX.click();
+                onSetLocalTool?.(t.id);
                 send({ t: "tool", tool: t.id });
               }}
               className="farm-tool-btn pixel-btn"
@@ -4217,6 +4239,7 @@ function Toolbar({
                   key={c.id}
                   onClick={() => {
                     SFX.click();
+                    onSetLocalTool?.("seed", c.id);
                     send({ t: "seed", id: c.id });
                   }}
                   className="farm-crop-card pixel-btn"

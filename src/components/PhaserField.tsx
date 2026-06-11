@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type Phaser from "phaser";
 import {
   COLS,
@@ -26,8 +26,9 @@ import {
   verticalToolOverlay,
   type Rect,
 } from "@/lib/pixel-art";
+import ShoeTrailOverlay, { shoeTrailFootPoint, type ShoeTrailPoint } from "./ShoeTrailOverlay";
 import { sampleToolPose, toolDurationMs } from "@/lib/tool-animation";
-import type { ToolSkinId } from "@/lib/player-cosmetics";
+import type { ShoeTrailId, ToolSkinId } from "@/lib/player-cosmetics";
 
 const TILE = 56;
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -268,6 +269,11 @@ export default function PhaserField({
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<FieldScene | null>(null);
   const seenEvents = useRef<Set<number>>(new Set());
+  const shoeTrailFoot = useRef<0 | 1>(0);
+  const [shoeTrailPath, setShoeTrailPath] = useState<{
+    kind: Exclude<ShoeTrailId, "none">;
+    points: ShoeTrailPoint[];
+  } | null>(null);
 
   // Latest props for the scene to read once it boots.
   const playerRef = useRef(player);
@@ -286,6 +292,38 @@ export default function PhaserField({
   showMarketRef.current = showMarket;
   teammatesRef.current = teammates ?? [];
   stageRef.current = stage;
+
+  const addShoeTrailPoint = useCallback(
+    (kind: ShoeTrailId, x: number, y: number, dir: Direction, now: number) => {
+      if (kind === "none") return;
+      const foot = shoeTrailFoot.current;
+      shoeTrailFoot.current = foot === 0 ? 1 : 0;
+      const point = shoeTrailFootPoint(x, y, dir, foot, TILE);
+      const trailPoint = { ...point, t: now, foot };
+      setShoeTrailPath((current) => {
+        const recent =
+          current?.kind === kind ? current.points.filter((item) => now - item.t < 1350) : [];
+        const lastPoint = recent[recent.length - 1];
+        if (lastPoint && Math.hypot(lastPoint.x - trailPoint.x, lastPoint.y - trailPoint.y) < 8) {
+          return current;
+        }
+        return { kind, points: [...recent, trailPoint].slice(-34) };
+      });
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const now = performance.now();
+      setShoeTrailPath((current) => {
+        if (!current) return null;
+        const points = current.points.filter((point) => now - point.t < 1350);
+        return points.length >= 2 ? { ...current, points } : null;
+      });
+    }, 120);
+    return () => window.clearInterval(id);
+  }, []);
 
   useEffect(() => {
     let game: Phaser.Game | null = null;
@@ -511,67 +549,20 @@ export default function PhaserField({
           });
         }
 
-        fadeTrailShape(shape: Phaser.GameObjects.Shape) {
-          this.tweens.add({
-            targets: shape,
-            alpha: 0,
-            duration: 2000,
-            ease: "Quad.Out",
-            onComplete: () => shape.destroy(),
-          });
-        }
-
-        spawnShoeTrail(kind: "fire" | "lightning" | "none", x: number, y: number, dir: Direction) {
-          if (kind === "none") return;
-          const backX = dir === "right" ? -1 : dir === "left" ? 1 : 0;
-          const backY = dir === "down" ? -1 : dir === "up" ? 1 : 0;
-          const cx = x * TILE + TILE / 2 + backX * 7;
-          const cy = y * TILE + TILE - 8 + backY * 7;
-          const colors =
-            kind === "fire" ? [0xf47820, 0xffd24a, 0xd94e6a] : [0xffd24a, 0x7fd8ff, 0xf4e4c1];
-          const vertical = dir === "up" || dir === "down";
-          const marks = kind === "fire" ? 6 : 5;
-          for (let i = 0; i < marks; i++) {
-            const jitter = (Math.random() - 0.5) * 9;
-            const spread = (Math.random() - 0.5) * 7;
-            const mark = this.add.rectangle(
-              cx + (vertical ? spread : -backX * (i * 9 + jitter)),
-              cy + (vertical ? -backY * (i * 9 + jitter) : spread),
-              kind === "fire" ? 16 + Math.random() * 12 : 18 + Math.random() * 14,
-              3 + Math.random() * 3,
-              colors[i % colors.length],
-              0.82 + Math.random() * 0.16,
-            );
-            mark.setDepth(8);
-            mark.setAngle((vertical ? 90 : 0) + (Math.random() - 0.5) * 28);
-            this.tweens.add({
-              targets: mark,
-              alpha: { from: 1, to: 0 },
-              scaleX: { from: 1.2, to: 0.25 },
-              scaleY: { from: 1, to: 1.6 },
-              angle: mark.angle + (Math.random() - 0.5) * 18,
-              duration: kind === "fire" ? 720 + Math.random() * 240 : 420 + Math.random() * 180,
-              yoyo: kind === "lightning" && i % 2 === 0,
-              ease: "Stepped",
-              onComplete: () => mark.destroy(),
-            });
-          }
-        }
-
         maybeSpawnSelfTrail(time: number) {
           const trail = playerRef.current.cosmetics.shoeTrail;
-          if (trail === "none" || time - this.lastTrailAt < 90) return;
+          if (trail === "none" || time - this.lastTrailAt < 60) return;
           this.lastTrailAt = time;
-          this.spawnShoeTrail(trail, this.disp.x, this.disp.y, playerRef.current.dir);
+          addShoeTrailPoint(trail, this.disp.x, this.disp.y, playerRef.current.dir, time);
         }
 
         maybeSpawnTeammateTrail(mate: PublicPlayer, time: number, disp: { x: number; y: number }) {
           const trail = mate.cosmetics.shoeTrail;
           if (trail === "none") return;
           const last = this.teammateTrailAt.get(mate.id) ?? 0;
-          if (time - last < 100) return;
+          if (time - last < 70) return;
           this.teammateTrailAt.set(mate.id, time);
-          this.spawnShoeTrail(trail, disp.x, disp.y, mate.dir);
+          addShoeTrailPoint(trail, disp.x, disp.y, mate.dir, time);
         }
 
         /** Cheap rolling hash of the tile/crop layout to detect changes. */
@@ -772,7 +763,7 @@ export default function PhaserField({
           }
           if (isActing) {
             const isVertical = p.dir === "up" || p.dir === "down";
-            const palette = paletteFor(p.cosmetics ?? {});
+            const palette = paletteFor(p.cosmetics, p.tool);
             const toolRects = isVertical
               ? verticalToolOverlay(p.tool, palette, p.dir)
               : sideToolOverlay(p.tool, palette);
@@ -803,7 +794,8 @@ export default function PhaserField({
               p.tool === "watering_can" ? p.cosmetics.wateringCanSkin : p.cosmetics.hoeSkin;
             const glowColor = toolSkinGlowColor(activeToolSkin);
             if (glowColor !== null) {
-              drawGlowRects(this.toolG, relativeRects, 0, 0, glowColor);
+              const glowRects = relativeRects.filter(([, , , , color]) => color !== "transparent");
+              drawGlowRects(this.toolG, glowRects, 0, 0, glowColor);
             }
             drawRects(this.toolG, relativeRects, 0, 0);
 
@@ -950,16 +942,16 @@ export default function PhaserField({
             );
             this.tweens.add({
               targets: cropFx,
-              alpha: 0.45,
-              duration: 120,
+              alpha: 0.7,
+              duration: 180,
               yoyo: true,
-              repeat: 2,
+              repeat: 3,
               ease: "Sine.InOut",
               onComplete: () => {
                 this.tweens.add({
                   targets: cropFx,
                   alpha: 0,
-                  duration: 520,
+                  duration: 780,
                   ease: "Sine.Out",
                   onComplete: () => cropFx.destroy(),
                 });
@@ -1223,6 +1215,7 @@ export default function PhaserField({
               }
             }
 
+            this.maybeSpawnSelfTrail(time);
             this.drawMarker();
             this.drawFarmer();
           } else {
@@ -1257,7 +1250,7 @@ export default function PhaserField({
       sceneRef.current = null;
       game?.destroy(true);
     };
-  }, []);
+  }, [addShoeTrailPoint]);
 
   // Push snapshot updates into the scene.
   useEffect(() => {
@@ -1306,6 +1299,14 @@ export default function PhaserField({
       style={{ width: COLS * TILE, height: ROWS * TILE }}
     >
       <div ref={hostRef} className="absolute inset-0" />
+      {shoeTrailPath && (
+        <ShoeTrailOverlay
+          width={COLS * TILE}
+          height={ROWS * TILE}
+          kind={shoeTrailPath.kind}
+          points={shoeTrailPath.points}
+        />
+      )}
     </div>
   );
 }

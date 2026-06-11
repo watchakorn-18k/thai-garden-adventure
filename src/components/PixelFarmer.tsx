@@ -139,6 +139,7 @@ export default function PixelFarmer({
   const toolRects = (
     isVertical ? verticalToolOverlay(tool, palette, direction) : sideToolOverlay(tool, palette)
   ).map((rect) => (flip ? mirrorRect(rect) : rect));
+  const glowRects = toolRects.filter(([, , , , color]) => color !== "transparent");
 
   const toolRef = useRef<SVGGElement>(null);
   useEffect(() => {
@@ -171,7 +172,7 @@ export default function PixelFarmer({
     >
       {glowClass && (
         <g className={glowClass}>
-          <Rects rects={toolRects} />
+          <Rects rects={glowRects} />
         </g>
       )}
       <Rects rects={toolRects} />
