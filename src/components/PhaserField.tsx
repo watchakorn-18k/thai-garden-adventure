@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type Phaser from "phaser";
 import {
   COLS,
@@ -26,9 +26,16 @@ import {
   verticalToolOverlay,
   type Rect,
 } from "@/lib/pixel-art";
-import ShoeTrailOverlay, { shoeTrailFootPoint, type ShoeTrailPoint } from "./ShoeTrailOverlay";
+import ShoeTrailOverlay from "./ShoeTrailOverlay";
 import { sampleToolPose, toolDurationMs } from "@/lib/tool-animation";
-import type { ShoeTrailId, ToolSkinId } from "@/lib/player-cosmetics";
+import type { ToolSkinId } from "@/lib/player-cosmetics";
+import { useShoeTrail } from "@/lib/use-shoe-trail";
+import {
+  hexNum,
+  TOOL_SKIN_PHASER_COLORS,
+  BASIC_WATER_PHASER_COLORS,
+  toolSkinGlowColorNum,
+} from "@/lib/tool-effects";
 
 const TILE = 56;
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -36,13 +43,6 @@ const MOVE_SPEED_TILES_PER_SECOND = 5.8;
 // closer to the server position, higher = smoother but more trailing.
 const MOVE_TAU = 45;
 const PIXEL_FONT = '"Press Start 2P", "VT323", "Mali", monospace';
-const TOOL_SKIN_COLORS: Record<ToolSkinId, number[]> = {
-  basic: [0x6b3a1c, 0x8b5a2b, 0x3d2412],
-  golden: [0xffd24a, 0xfff5b8, 0xe8a23a],
-  aqua: [0x7fd8ff, 0x4cc2ee, 0x2a8ec0],
-  starlight: [0xc08bd9, 0xd9a6f0, 0x4a2f5c],
-};
-
 const TYPE_CODE: Record<"grass" | "tilled" | "watered", number> = {
   grass: 0,
   tilled: 1,
@@ -137,10 +137,6 @@ interface Props {
   stage?: RoomStage;
 }
 
-function hexNum(hex: string): number {
-  return Number.parseInt(hex.slice(1), 16);
-}
-
 function drawRects(g: Phaser.GameObjects.Graphics, rects: Rect[], ox: number, oy: number) {
   const s = TILE / ART_GRID;
   for (const [x, y, w, h, color] of rects) {
@@ -161,13 +157,6 @@ function drawGlowRects(
     g.fillStyle(glowColor, 0.34);
     g.fillRect(ox + (x - 0.55) * s, oy + (y - 0.55) * s, (w + 1.1) * s, (h + 1.1) * s);
   }
-}
-
-function toolSkinGlowColor(skin: ToolSkinId): number | null {
-  if (skin === "golden") return 0xffd24a;
-  if (skin === "aqua") return 0x7fd8ff;
-  if (skin === "starlight") return 0xc08bd9;
-  return null;
 }
 
 /** Per-crop bar color as a Phaser number, derived from the shared CROP_COLOR map. */
@@ -269,11 +258,7 @@ export default function PhaserField({
   const hostRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<FieldScene | null>(null);
   const seenEvents = useRef<Set<number>>(new Set());
-  const shoeTrailFoot = useRef<0 | 1>(0);
-  const [shoeTrailPath, setShoeTrailPath] = useState<{
-    kind: Exclude<ShoeTrailId, "none">;
-    points: ShoeTrailPoint[];
-  } | null>(null);
+  const { shoeTrailPath, addShoeTrailPoint } = useShoeTrail(TILE);
 
   // Latest props for the scene to read once it boots.
   const playerRef = useRef(player);
@@ -292,38 +277,6 @@ export default function PhaserField({
   showMarketRef.current = showMarket;
   teammatesRef.current = teammates ?? [];
   stageRef.current = stage;
-
-  const addShoeTrailPoint = useCallback(
-    (kind: ShoeTrailId, x: number, y: number, dir: Direction, now: number) => {
-      if (kind === "none") return;
-      const foot = shoeTrailFoot.current;
-      shoeTrailFoot.current = foot === 0 ? 1 : 0;
-      const point = shoeTrailFootPoint(x, y, dir, foot, TILE);
-      const trailPoint = { ...point, t: now, foot };
-      setShoeTrailPath((current) => {
-        const recent =
-          current?.kind === kind ? current.points.filter((item) => now - item.t < 1350) : [];
-        const lastPoint = recent[recent.length - 1];
-        if (lastPoint && Math.hypot(lastPoint.x - trailPoint.x, lastPoint.y - trailPoint.y) < 8) {
-          return current;
-        }
-        return { kind, points: [...recent, trailPoint].slice(-34) };
-      });
-    },
-    [],
-  );
-
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const now = performance.now();
-      setShoeTrailPath((current) => {
-        if (!current) return null;
-        const points = current.points.filter((point) => now - point.t < 1350);
-        return points.length >= 2 ? { ...current, points } : null;
-      });
-    }, 120);
-    return () => window.clearInterval(id);
-  }, []);
 
   useEffect(() => {
     let game: Phaser.Game | null = null;
@@ -702,7 +655,7 @@ export default function PhaserField({
             p.tool === "watering_can" ? p.cosmetics.wateringCanSkin : p.cosmetics.hoeSkin;
           const markerColor =
             this.acting || actingRef.current
-              ? (toolSkinGlowColor(activeToolSkin) ?? 0xffd24a)
+              ? (toolSkinGlowColorNum(activeToolSkin) ?? 0xffd24a)
               : 0xffd24a;
           this.markerG.fillStyle(markerColor, 0.12);
           this.markerG.fillRect(x * TILE + 3, y * TILE + 3, TILE - 6, TILE - 6);
@@ -792,7 +745,7 @@ export default function PhaserField({
 
             const activeToolSkin =
               p.tool === "watering_can" ? p.cosmetics.wateringCanSkin : p.cosmetics.hoeSkin;
-            const glowColor = toolSkinGlowColor(activeToolSkin);
+            const glowColor = toolSkinGlowColorNum(activeToolSkin);
             if (glowColor !== null) {
               const glowRects = relativeRects.filter(([, , , , color]) => color !== "transparent");
               drawGlowRects(this.toolG, glowRects, 0, 0, glowColor);
@@ -859,13 +812,47 @@ export default function PhaserField({
               : teammatesRef.current.find((mate) => mate.id === ev.playerId);
           const skin =
             ev.kind === "water" ? actor?.cosmetics?.wateringCanSkin : actor?.cosmetics?.hoeSkin;
-          if (!skin || skin === "basic") return;
-          if (ev.kind === "till") this.cameras.main.shake(45, 0.00045);
-          if (ev.kind === "water") this.cameras.main.shake(35, 0.00025);
-          const colors = TOOL_SKIN_COLORS[skin];
-          const effectColor = toolSkinGlowColor(skin) ?? colors[0];
+          if (!skin) return;
+
           const cx = ev.x * TILE + TILE / 2;
           const cy = ev.y * TILE + TILE / 2;
+
+          // Basic skin: plain dirt/water arc burst (matches SP burstParticles)
+          if (skin === "basic") {
+            const basicColors =
+              ev.kind === "water" ? BASIC_WATER_PHASER_COLORS : TOOL_SKIN_PHASER_COLORS.basic;
+            const count = 8;
+            for (let i = 0; i < count; i++) {
+              const angle = (Math.PI * (i + 1)) / (count + 1) + Math.PI;
+              const dist = 14 + Math.random() * 12;
+              const chip = this.add.rectangle(
+                cx,
+                cy,
+                ev.kind === "water" ? 4 : 5,
+                ev.kind === "water" ? 4 : 5,
+                basicColors[i % basicColors.length],
+                0.85,
+              );
+              chip.setDepth(8);
+              this.tweens.add({
+                targets: chip,
+                x: cx + Math.cos(angle) * dist,
+                y: cy + Math.sin(angle) * dist - 6,
+                alpha: 0,
+                scale: 0.4,
+                duration: 520,
+                ease: "Quad.Out",
+                onComplete: () => chip.destroy(),
+              });
+            }
+            return;
+          }
+
+          // Non-basic: camera shake + skin-colored effects
+          if (ev.kind === "till") this.cameras.main.shake(45, 0.00045);
+          if (ev.kind === "water") this.cameras.main.shake(35, 0.00025);
+          const colors = TOOL_SKIN_PHASER_COLORS[skin];
+          const effectColor = toolSkinGlowColorNum(skin) ?? colors[0];
 
           if (ev.kind === "till") {
             const furrow = this.add.graphics();
@@ -901,7 +888,7 @@ export default function PhaserField({
               onComplete: () => furrow.destroy(),
             });
 
-            const dustCount = skin === "starlight" ? 18 : 14;
+            const dustCount = skin === "starlight" ? 24 : 18;
             for (let i = 0; i < dustCount; i++) {
               const angle = (Math.PI * 2 * i) / dustCount;
               const dist = 8 + (i % 4) * 5;
@@ -959,7 +946,7 @@ export default function PhaserField({
             });
           }
 
-          const count = skin === "starlight" ? 34 : 28;
+          const count = skin === "starlight" ? 24 : 18;
           for (let i = 0; i < count; i++) {
             const angle = -Math.PI / 2 + ((i % 9) - 4) * 0.22;
             const dist = 16 + (i % 5) * 7;

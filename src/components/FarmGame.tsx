@@ -5,7 +5,8 @@ import PlayerAvatarPreview from "./PlayerAvatarPreview";
 import GameMenuDialog, { type GameMenuTab } from "./GameMenuDialog";
 import TitleUnlockDialog from "./TitleUnlockDialog";
 import QuickMatchButton from "./QuickMatchButton";
-import ShoeTrailOverlay, { shoeTrailFootPoint, type ShoeTrailPoint } from "./ShoeTrailOverlay";
+import ShoeTrailOverlay from "./ShoeTrailOverlay";
+import { useShoeTrail } from "@/lib/use-shoe-trail";
 import { fetchScoreboard, type ScoreboardEntry } from "@/lib/match-client";
 import {
   HoeIcon,
@@ -36,6 +37,13 @@ import {
 } from "@/lib/game-types";
 import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from "@/lib/game-logic";
 import { toolDurationMs } from "@/lib/tool-animation";
+import {
+  TOOL_SKIN_PARTICLE_COLORS,
+  TOOL_SKIN_EFFECT_COLOR,
+  TOOL_SKIN_PARTICLE_COUNT,
+  CROP_GLOW_DURATION_MS,
+  TILE_EFFECT_DURATION_MS,
+} from "@/lib/tool-effects";
 import { chooseFarmBotPlan, isFarmBotPlanValid, type FarmBotPlan } from "@/lib/farm-bot";
 import { SFX, setMuted, isMuted, startBgm, stopBgm } from "@/lib/sfx";
 import {
@@ -87,20 +95,6 @@ const COMBO_WINDOW = 2200; // ms to keep combo alive
 const AUTO_RESUME_MS = 60_000;
 const AUTO_BOT_TICK_MS = 180;
 const AUTO_BOT_ACTION_MS = 450;
-
-const TOOL_SKIN_PARTICLE_COLORS: Record<ToolSkinId, string[]> = {
-  basic: ["#6b3a1c", "#8b5a2b", "#3d2412"],
-  golden: ["#ffd24a", "#fff5b8", "#e8a23a"],
-  aqua: ["#7fd8ff", "#4cc2ee", "#2a8ec0"],
-  starlight: ["#c08bd9", "#ffd24a", "#f4e4c1"],
-};
-
-const TOOL_SKIN_EFFECT_COLOR: Record<ToolSkinId, string | null> = {
-  basic: null,
-  golden: "#ffd24a",
-  aqua: "#7fd8ff",
-  starlight: "#c08bd9",
-};
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
@@ -186,17 +180,13 @@ export default function FarmGame() {
       dy: number;
     }[]
   >([]);
-  const [shoeTrailPath, setShoeTrailPath] = useState<{
-    kind: "fire" | "lightning";
-    points: ShoeTrailPoint[];
-  } | null>(null);
   const [screenShake, setScreenShake] = useState(0);
   const [hudPulse, setHudPulse] = useState(false);
   const [muted, setMutedState] = useState(false);
+  const { shoeTrailPath, addShoeTrailPoint, trimTrailOnStop } = useShoeTrail(TILE);
   const comboTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDustAt = useRef(0);
   const lastShoeTrailAt = useRef(0);
-  const shoeTrailFoot = useRef<0 | 1>(0);
   const keys = useRef<Set<string>>(new Set());
   const popupId = useRef(0);
   const fieldRef = useRef<HTMLDivElement>(null);
@@ -266,17 +256,6 @@ export default function FarmGame() {
   useEffect(() => {
     gameMenuOpenRef.current = gameMenuOpen;
   }, [gameMenuOpen]);
-  useEffect(() => {
-    const id = window.setInterval(() => {
-      const now = performance.now();
-      setShoeTrailPath((current) => {
-        if (!current) return null;
-        const points = current.points.filter((point) => now - point.t < 1350);
-        return points.length >= 2 ? { ...current, points } : null;
-      });
-    }, 120);
-    return () => window.clearInterval(id);
-  }, []);
   // Load browser-only profile data after hydration to avoid SSR mismatch.
   useEffect(() => {
     const syncCosmetics = () => setCosmetics(readCosmetics());
@@ -315,24 +294,6 @@ export default function FarmGame() {
     },
     [],
   );
-
-  const addShoeTrailPoint = useCallback((x: number, y: number, dir: Direction, now: number) => {
-    const trail = cosmeticsRef.current.shoeTrail;
-    if (trail === "none") return;
-    const foot = shoeTrailFoot.current;
-    shoeTrailFoot.current = foot === 0 ? 1 : 0;
-    const point = shoeTrailFootPoint(x, y, dir, foot, TILE);
-    const trailPoint = { ...point, t: now, foot };
-    setShoeTrailPath((current) => {
-      const recent =
-        current?.kind === trail ? current.points.filter((point) => now - point.t < 1350) : [];
-      const lastPoint = recent[recent.length - 1];
-      if (lastPoint && Math.hypot(lastPoint.x - trailPoint.x, lastPoint.y - trailPoint.y) < 8) {
-        return current;
-      }
-      return { kind: trail, points: [...recent, trailPoint].slice(-34) };
-    });
-  }, []);
 
   const burstParticles = useCallback(
     (x: number, y: number, kind: "dirt" | "water" | "sparkle" | "tool" | "shoe") => {
@@ -378,7 +339,7 @@ export default function FarmGame() {
   const burstToolSkinEffect = useCallback((x: number, y: number, skin: ToolSkinId) => {
     if (skin === "basic") return;
     const colors = TOOL_SKIN_PARTICLE_COLORS[skin];
-    const count = skin === "starlight" ? 24 : 18;
+    const count = TOOL_SKIN_PARTICLE_COUNT[skin];
     const fresh = Array.from({ length: count }).map((_, i) => {
       const angle = (Math.PI * 2 * i) / count;
       const speed = 18 + Math.random() * 26;
@@ -408,10 +369,8 @@ export default function FarmGame() {
       const id = ++popupId.current;
       setTileEffects((current) => [...current, { id, x, y, color, cropGlow, kind }]);
       setTimeout(
-        () => {
-          setTileEffects((current) => current.filter((effect) => effect.id !== id));
-        },
-        kind === "water" && cropGlow ? 1700 : 1100,
+        () => setTileEffects((current) => current.filter((effect) => effect.id !== id)),
+        kind === "water" && cropGlow ? CROP_GLOW_DURATION_MS : TILE_EFFECT_DURATION_MS,
       );
     },
     [],
@@ -859,7 +818,13 @@ export default function FarmGame() {
         }
         if (now - lastDustAt.current > 90) {
           lastDustAt.current = now;
-          addShoeTrailPoint(posRef.current.x, posRef.current.y, nd, now);
+          addShoeTrailPoint(
+            cosmeticsRef.current.shoeTrail,
+            posRef.current.x,
+            posRef.current.y,
+            nd,
+            now,
+          );
         }
         if (!walkingRef.current) {
           walkingRef.current = true;
@@ -967,7 +932,13 @@ export default function FarmGame() {
 
         if (cosmeticsRef.current.shoeTrail !== "none" && now - lastShoeTrailAt.current > 45) {
           lastShoeTrailAt.current = now;
-          addShoeTrailPoint(posRef.current.x, posRef.current.y, nd, now);
+          addShoeTrailPoint(
+            cosmeticsRef.current.shoeTrail,
+            posRef.current.x,
+            posRef.current.y,
+            nd,
+            now,
+          );
         }
 
         frameAccum += dt;
@@ -992,7 +963,7 @@ export default function FarmGame() {
             setDust((d) => [...d, puff]);
             setTimeout(() => setDust((d) => d.filter((q) => q.id !== id)), 500);
           } else {
-            addShoeTrailPoint(px, py, nd, now);
+            addShoeTrailPoint(cosmeticsRef.current.shoeTrail, px, py, nd, now);
           }
         }
         if (!walkingRef.current) {
@@ -1001,9 +972,7 @@ export default function FarmGame() {
         }
       } else {
         if (walkingRef.current) {
-          setShoeTrailPath((current) =>
-            current ? { ...current, points: current.points.slice(-10) } : null,
-          );
+          trimTrailOnStop();
           walkingRef.current = false;
           setWalking(false);
         }
@@ -1013,7 +982,7 @@ export default function FarmGame() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [addShoeTrailPoint, burstParticles]);
+  }, [addShoeTrailPoint, trimTrailOnStop, burstParticles]);
 
   const facing = facingTile();
 
