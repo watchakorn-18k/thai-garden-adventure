@@ -1285,7 +1285,6 @@ export default function PhaserField({
       className="relative field-frame scanlines"
       style={{ width: COLS * TILE, height: ROWS * TILE }}
     >
-      <div ref={hostRef} className="absolute inset-0" />
       {shoeTrailPath && (
         <ShoeTrailOverlay
           width={COLS * TILE}
@@ -1294,6 +1293,7 @@ export default function PhaserField({
           points={shoeTrailPath.points}
         />
       )}
+      <div ref={hostRef} className="absolute inset-0 z-10" />
     </div>
   );
 }
