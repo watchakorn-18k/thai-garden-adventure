@@ -231,7 +231,8 @@ function sameCosmetics(a: PlayerCosmetics, b: PlayerCosmetics): boolean {
     a.aura === b.aura &&
     a.shoeTrail === b.shoeTrail &&
     a.hoeSkin === b.hoeSkin &&
-    a.wateringCanSkin === b.wateringCanSkin
+    a.wateringCanSkin === b.wateringCanSkin &&
+    a.basketSkin === b.basketSkin
   );
 }
 
@@ -254,6 +255,9 @@ const PRESET_CATEGORIES: Record<string, ShopCategoryId[]> = {
   golden_watering_can: ["skill"],
   aqua_watering_can: ["skill"],
   starlight_watering_can: ["skill"],
+  golden_basket: ["skill"],
+  aqua_basket: ["skill"],
+  starlight_basket: ["skill"],
   fire_shoes: ["shoes"],
   lightning_shoes: ["shoes"],
   classic_farmer: ["hat", "shirt", "pants"],
@@ -306,16 +310,19 @@ function ShopContent({
         {presets.map((preset) => {
           const unlocked = preset.price === 0 || unlockedPresetIds.includes(preset.id);
           const categories = PRESET_CATEGORIES[preset.id] ?? [];
-          const isToolPreset = categories.includes("skill");
+          const isBasketPreset = preset.id.includes("_basket");
+          const isToolPreset = categories.includes("skill") && !isBasketPreset;
           const isShoePreset = categories.includes("shoes");
-          const equipped = isToolPreset
-            ? preset.id.includes("watering_can")
-              ? cosmetics.wateringCanSkin === preset.cosmetics.wateringCanSkin
-              : cosmetics.hoeSkin === preset.cosmetics.hoeSkin
-            : isShoePreset
-              ? cosmetics.shoe.toLowerCase() === preset.cosmetics.shoe.toLowerCase() &&
-                cosmetics.shoeTrail === preset.cosmetics.shoeTrail
-              : sameCosmetics(cosmetics, preset.cosmetics);
+          const equipped = isBasketPreset
+            ? cosmetics.basketSkin === preset.cosmetics.basketSkin
+            : isToolPreset
+              ? preset.id.includes("watering_can")
+                ? cosmetics.wateringCanSkin === preset.cosmetics.wateringCanSkin
+                : cosmetics.hoeSkin === preset.cosmetics.hoeSkin
+              : isShoePreset
+                ? cosmetics.shoe.toLowerCase() === preset.cosmetics.shoe.toLowerCase() &&
+                  cosmetics.shoeTrail === preset.cosmetics.shoeTrail
+                : sameCosmetics(cosmetics, preset.cosmetics);
           const affordable = gardenTokens >= preset.price;
           return (
             <article
@@ -325,9 +332,17 @@ function ShopContent({
             >
               <div className="shop-preset-preview-wrap" data-aura={preset.cosmetics.aura}>
                 <span className="shop-preview-label">
-                  {isToolPreset ? "อุปกรณ์" : isShoePreset ? "รอยเท้า" : "ลองใส่แล้ว"}
+                  {isBasketPreset
+                    ? "ตะกร้าคนขาย"
+                    : isToolPreset
+                      ? "อุปกรณ์"
+                      : isShoePreset
+                        ? "รอยเท้า"
+                        : "ลองใส่แล้ว"}
                 </span>
-                {isToolPreset ? (
+                {isBasketPreset ? (
+                  <BasketSkinPreview cosmetics={preset.cosmetics} />
+                ) : isToolPreset ? (
                   <ToolSkinPreview presetId={preset.id} cosmetics={preset.cosmetics} />
                 ) : isShoePreset ? (
                   <ShoeTrailPreview cosmetics={preset.cosmetics} />
@@ -337,7 +352,10 @@ function ShopContent({
                     cosmetics={preset.cosmetics}
                   />
                 )}
-                {(preset.cosmetics.aura !== "none" || isToolPreset || isShoePreset) && (
+                {(preset.cosmetics.aura !== "none" ||
+                  isToolPreset ||
+                  isShoePreset ||
+                  isBasketPreset) && (
                   <>
                     <span className="shop-effect-ring" aria-hidden />
                     <span className="shop-effect-badge">EFFECT</span>
@@ -387,6 +405,48 @@ function ShoeTrailPreview({ cosmetics }: { cosmetics: PlayerCosmetics }) {
       {trail !== "none" && (
         <span className={`shop-shoe-trail-demo shop-shoe-trail-demo-${trail}`} />
       )}
+    </div>
+  );
+}
+
+const BASKET_TRIM: Record<
+  PlayerCosmetics["basketSkin"],
+  { rim: string; band: string; glow: string }
+> = {
+  basic: { rim: "#a06a3a", band: "#6b3a1b", glow: "transparent" },
+  golden: { rim: "#ffd24a", band: "#d99b1f", glow: "#fff5b8" },
+  aqua: { rim: "#7fd8ff", band: "#2a6e9e", glow: "#7fd8ff" },
+  starlight: { rim: "#c08bd9", band: "#4a2f5c", glow: "#c08bd9" },
+};
+
+function BasketSkinPreview({ cosmetics }: { cosmetics: PlayerCosmetics }) {
+  const trim = BASKET_TRIM[cosmetics.basketSkin];
+  return (
+    <div className="shop-tool-preview" data-skin={cosmetics.basketSkin} aria-hidden>
+      <span className="shop-tool-sprite">
+        <svg viewBox="0 0 16 16" width="100%" height="100%" shapeRendering="crispEdges">
+          {trim.glow !== "transparent" && (
+            <rect x={2} y={4} width={12} height={9} fill={trim.glow} opacity={0.3} />
+          )}
+          <rect x={5} y={2} width={6} height={1} fill={trim.band} />
+          <rect x={4} y={4} width={8} height={1} fill={trim.rim} />
+          <rect x={3} y={5} width={10} height={7} fill="#8b5a2b" />
+          <rect x={4} y={6} width={8} height={5} fill="#5a2f17" />
+          <rect x={3} y={9} width={10} height={1} fill={trim.band} />
+          <rect x={5} y={6} width={2} height={2} fill="#6ab04c" />
+          <rect x={8} y={6} width={2} height={2} fill="#e84444" />
+          <rect
+            x={11}
+            y={4}
+            width={1}
+            height={1}
+            fill={trim.glow === "transparent" ? trim.rim : trim.glow}
+          />
+        </svg>
+      </span>
+      <span className="shop-tool-hit-effect" />
+      <span className="shop-tool-particle shop-tool-particle-a" />
+      <span className="shop-tool-particle shop-tool-particle-b" />
     </div>
   );
 }

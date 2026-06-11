@@ -102,6 +102,7 @@ export const cosmeticsSchema = z.object({
   shoeTrail: shoeTrailSchema.default(DEFAULT_COSMETICS.shoeTrail),
   hoeSkin: toolSkinSchema.default(DEFAULT_COSMETICS.hoeSkin),
   wateringCanSkin: toolSkinSchema.default(DEFAULT_COSMETICS.wateringCanSkin),
+  basketSkin: toolSkinSchema.default(DEFAULT_COSMETICS.basketSkin),
 });
 
 export type MatchRole = z.infer<typeof matchRoleSchema>;

@@ -1075,9 +1075,11 @@ export default function FarmGame() {
         ? { ...current, hoeSkin: preset.cosmetics.hoeSkin }
         : id.includes("_watering_can")
           ? { ...current, wateringCanSkin: preset.cosmetics.wateringCanSkin }
-          : id.includes("_shoes")
-            ? { ...current, shoe: preset.cosmetics.shoe, shoeTrail: preset.cosmetics.shoeTrail }
-            : preset.cosmetics;
+          : id.includes("_basket")
+            ? { ...current, basketSkin: preset.cosmetics.basketSkin }
+            : id.includes("_shoes")
+              ? { ...current, shoe: preset.cosmetics.shoe, shoeTrail: preset.cosmetics.shoeTrail }
+              : preset.cosmetics;
       writeCosmetics(next);
       return next;
     });

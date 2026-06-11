@@ -15,6 +15,8 @@ export interface PlayerCosmetics {
   shoeTrail: ShoeTrailId;
   hoeSkin: ToolSkinId;
   wateringCanSkin: ToolSkinId;
+  /** Seller backpack basket (2v2) — same skin family as tools. */
+  basketSkin: ToolSkinId;
 }
 
 export const DEFAULT_COSMETICS: PlayerCosmetics = {
@@ -28,6 +30,7 @@ export const DEFAULT_COSMETICS: PlayerCosmetics = {
   shoeTrail: "none",
   hoeSkin: "basic",
   wateringCanSkin: "basic",
+  basketSkin: "basic",
 };
 
 export const COSMETIC_PALETTES = {
@@ -104,6 +107,36 @@ export const COSMETIC_PRESETS: CosmeticPreset[] = [
     cosmetics: {
       ...DEFAULT_COSMETICS,
       wateringCanSkin: "starlight",
+    },
+  },
+  {
+    id: "golden_basket",
+    name: "ตะกร้าทองมั่งมี",
+    description: "ตะกร้าคนขายขอบทองเรืองแสง (2v2)",
+    price: 350,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      basketSkin: "golden",
+    },
+  },
+  {
+    id: "aqua_basket",
+    name: "ตะกร้าคลื่นน้ำ",
+    description: "ตะกร้าคนขายฟ้าใส หยิบของเย็นฉ่ำ (2v2)",
+    price: 540,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      basketSkin: "aqua",
+    },
+  },
+  {
+    id: "starlight_basket",
+    name: "ตะกร้าละอองดาว",
+    description: "ตะกร้าคนขายม่วงดาวล้อมตอนหยิบ (2v2)",
+    price: 820,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      basketSkin: "starlight",
     },
   },
   {
@@ -256,6 +289,7 @@ export function normalizeCosmetics(input: unknown): PlayerCosmetics {
     wateringCanSkin: isToolSkin(c.wateringCanSkin)
       ? c.wateringCanSkin
       : DEFAULT_COSMETICS.wateringCanSkin,
+    basketSkin: isToolSkin(c.basketSkin) ? c.basketSkin : DEFAULT_COSMETICS.basketSkin,
   };
 }
 
