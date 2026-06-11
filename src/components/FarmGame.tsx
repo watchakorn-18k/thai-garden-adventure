@@ -37,7 +37,12 @@ import { applyAction, tickGrowth, updateComboAndGetBonus, type ComboState } from
 import { toolDurationMs } from "@/lib/tool-animation";
 import { chooseFarmBotPlan, isFarmBotPlanValid, type FarmBotPlan } from "@/lib/farm-bot";
 import { SFX, setMuted, isMuted, startBgm, stopBgm } from "@/lib/sfx";
-import { COSMETIC_PRESETS, readCosmetics, writeCosmetics } from "@/lib/player-cosmetics";
+import {
+  COSMETIC_PRESETS,
+  readCosmetics,
+  writeCosmetics,
+  type ToolSkinId,
+} from "@/lib/player-cosmetics";
 import {
   awardGardenTokens,
   buyCosmeticPreset,
@@ -76,11 +81,46 @@ function hasManualMovement(keys: Set<string>): boolean {
   );
 }
 
+function smoothTrailPath(points: { x: number; y: number }[]): string {
+  if (points.length < 2) return "";
+  let d = `M ${points[0].x} ${points[0].y}`;
+  for (let i = 1; i < points.length; i++) {
+    const prev = points[i - 1];
+    const current = points[i];
+    const midX = (prev.x + current.x) / 2;
+    const midY = (prev.y + current.y) / 2;
+    d += ` Q ${prev.x} ${prev.y} ${midX} ${midY}`;
+  }
+  const last = points[points.length - 1];
+  d += ` T ${last.x} ${last.y}`;
+  return d;
+}
+
+function trailSegmentPath(a: { x: number; y: number }, b: { x: number; y: number }): string {
+  const mx = (a.x + b.x) / 2;
+  const my = (a.y + b.y) / 2;
+  return `M ${a.x} ${a.y} Q ${a.x} ${a.y} ${mx} ${my} T ${b.x} ${b.y}`;
+}
+
 const TILE = 56;
 const COMBO_WINDOW = 2200; // ms to keep combo alive
 const AUTO_RESUME_MS = 60_000;
 const AUTO_BOT_TICK_MS = 180;
 const AUTO_BOT_ACTION_MS = 450;
+
+const TOOL_SKIN_PARTICLE_COLORS: Record<ToolSkinId, string[]> = {
+  basic: ["#6b3a1c", "#8b5a2b", "#3d2412"],
+  golden: ["#ffd24a", "#fff5b8", "#e8a23a"],
+  aqua: ["#7fd8ff", "#4cc2ee", "#2a8ec0"],
+  starlight: ["#c08bd9", "#ffd24a", "#f4e4c1"],
+};
+
+const TOOL_SKIN_EFFECT_COLOR: Record<ToolSkinId, string | null> = {
+  basic: null,
+  golden: "#ffd24a",
+  aqua: "#7fd8ff",
+  starlight: "#c08bd9",
+};
 
 const CROP_ICONS: Record<CropId, React.ComponentType<{ size?: number }>> = {
   chili: ChiliIcon,
@@ -136,13 +176,16 @@ export default function FarmGame() {
       id: number;
       x: number;
       y: number;
-      kind: "dirt" | "water" | "sparkle";
+      kind: "dirt" | "water" | "sparkle" | "tool" | "shoe";
       dx: number;
       dy: number;
       color: string;
     }[]
   >([]);
   const [shakeTile, setShakeTile] = useState<{ x: number; y: number; id: number } | null>(null);
+  const [tileEffects, setTileEffects] = useState<
+    { id: number; x: number; y: number; color: string; cropGlow: boolean; kind: "hoe" | "water" }[]
+  >([]);
   const [combo, setCombo] = useState(0);
   const [comboShown, setComboShown] = useState<{
     id: number;
@@ -154,20 +197,33 @@ export default function FarmGame() {
     { id: number; sx: number; sy: number; cx: number; cy: number }[]
   >([]);
   const [crits, setCrits] = useState<{ id: number; x: number; y: number }[]>([]);
-  const [dust, setDust] = useState<{ id: number; x: number; y: number; dx: number; dy: number }[]>(
-    [],
-  );
+  const [dust, setDust] = useState<
+    {
+      id: number;
+      x: number;
+      y: number;
+      dx: number;
+      dy: number;
+    }[]
+  >([]);
+  const [shoeTrailPath, setShoeTrailPath] = useState<{
+    kind: "fire" | "lightning";
+    points: { x: number; y: number; t: number; foot: 0 | 1 }[];
+  } | null>(null);
   const [screenShake, setScreenShake] = useState(0);
   const [hudPulse, setHudPulse] = useState(false);
   const [muted, setMutedState] = useState(false);
   const comboTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const lastDustAt = useRef(0);
+  const lastShoeTrailAt = useRef(0);
+  const shoeTrailFoot = useRef<0 | 1>(0);
   const keys = useRef<Set<string>>(new Set());
   const popupId = useRef(0);
   const fieldRef = useRef<HTMLDivElement>(null);
   const tilesRef = useRef<Tile[][]>(tiles);
   const coinsRef = useRef(coins);
   const toolRef = useRef<Tool>(tool);
+  const cosmeticsRef = useRef(cosmetics);
   const seedChoiceRef = useRef<CropId>(seedChoice);
   const marketPricesRef = useRef(marketPrices);
   const comboStateRef = useRef(comboState);
@@ -216,6 +272,9 @@ export default function FarmGame() {
     toolRef.current = tool;
   }, [tool]);
   useEffect(() => {
+    cosmeticsRef.current = cosmetics;
+  }, [cosmetics]);
+  useEffect(() => {
     seedChoiceRef.current = seedChoice;
   }, [seedChoice]);
   useEffect(() => {
@@ -227,6 +286,17 @@ export default function FarmGame() {
   useEffect(() => {
     gameMenuOpenRef.current = gameMenuOpen;
   }, [gameMenuOpen]);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const now = performance.now();
+      setShoeTrailPath((current) => {
+        if (!current) return null;
+        const points = current.points.filter((point) => now - point.t < 1350);
+        return points.length >= 2 ? { ...current, points } : null;
+      });
+    }, 120);
+    return () => window.clearInterval(id);
+  }, []);
   // Load browser-only profile data after hydration to avoid SSR mismatch.
   useEffect(() => {
     const syncCosmetics = () => setCosmetics(readCosmetics());
@@ -266,31 +336,102 @@ export default function FarmGame() {
     [],
   );
 
-  const burstParticles = useCallback((x: number, y: number, kind: "dirt" | "water" | "sparkle") => {
-    const palette =
-      kind === "dirt"
-        ? ["#6b3a1c", "#8b5a2b", "#3d2412"]
-        : kind === "water"
-          ? ["#4cc2ee", "#7fd8ff", "#2a8ec0"]
-          : ["#ffe07a", "#fff5b8", "#e8a23a"];
-    const count = kind === "sparkle" ? 10 : 8;
+  const addShoeTrailPoint = useCallback((x: number, y: number, dir: Direction, now: number) => {
+    const trail = cosmeticsRef.current.shoeTrail;
+    if (trail === "none") return;
+    const footX = dir === "right" ? 17 : dir === "left" ? -17 : 0;
+    const footY = dir === "down" ? 24 : dir === "up" ? 4 : 22;
+    const trailPoint = { x: x * TILE + TILE / 2 + footX, y: y * TILE + footY, t: now };
+    setShoeTrailPath((current) => {
+      const recent =
+        current?.kind === trail ? current.points.filter((point) => now - point.t < 1350) : [];
+      const lastPoint = recent[recent.length - 1];
+      if (lastPoint && Math.hypot(lastPoint.x - trailPoint.x, lastPoint.y - trailPoint.y) < 8) {
+        return current;
+      }
+      return { kind: trail, points: [...recent, trailPoint].slice(-34) };
+    });
+  }, []);
+
+  const burstParticles = useCallback(
+    (x: number, y: number, kind: "dirt" | "water" | "sparkle" | "tool" | "shoe") => {
+      const palette =
+        kind === "dirt"
+          ? ["#6b3a1c", "#8b5a2b", "#3d2412"]
+          : kind === "water"
+            ? ["#4cc2ee", "#7fd8ff", "#2a8ec0"]
+            : kind === "tool"
+              ? ["#ffd24a", "#7fd8ff", "#c08bd9"]
+              : kind === "shoe"
+                ? cosmeticsRef.current.shoeTrail === "fire"
+                  ? ["#f47820", "#ffd24a", "#d94e6a", "#ff8f3a"]
+                  : ["#ffd24a", "#7fd8ff", "#f4e4c1", "#4cc2ee"]
+                : ["#ffe07a", "#fff5b8", "#e8a23a"];
+      const count = kind === "shoe" ? 22 : kind === "sparkle" || kind === "tool" ? 10 : 8;
+      const fresh = Array.from({ length: count }).map((_, i) => {
+        const angle =
+          kind === "shoe"
+            ? Math.PI * 2 * Math.random()
+            : (Math.PI * (i + 1)) / (count + 1) + Math.PI;
+        const speed = kind === "shoe" ? 22 + Math.random() * 54 : 22 + Math.random() * 20;
+        return {
+          id: popupId.current + i + 1,
+          x,
+          y,
+          kind,
+          dx: Math.cos(angle) * speed,
+          dy: Math.sin(angle) * speed - 8,
+          color: palette[i % palette.length],
+        };
+      });
+      popupId.current += count;
+      setParticles((p) => [...p, ...fresh]);
+      setTimeout(
+        () => setParticles((p) => p.filter((q) => !fresh.find((f) => f.id === q.id))),
+        650,
+      );
+    },
+    [],
+  );
+
+  const burstToolSkinEffect = useCallback((x: number, y: number, skin: ToolSkinId) => {
+    if (skin === "basic") return;
+    const colors = TOOL_SKIN_PARTICLE_COLORS[skin];
+    const count = skin === "starlight" ? 24 : 18;
     const fresh = Array.from({ length: count }).map((_, i) => {
-      const angle = (Math.PI * (i + 1)) / (count + 1) + Math.PI;
-      const speed = 22 + Math.random() * 20;
+      const angle = (Math.PI * 2 * i) / count;
+      const speed = 18 + Math.random() * 26;
       return {
         id: popupId.current + i + 1,
         x,
         y,
-        kind,
+        kind: "tool" as const,
         dx: Math.cos(angle) * speed,
-        dy: Math.sin(angle) * speed - 8,
-        color: palette[i % palette.length],
+        dy: Math.sin(angle) * speed - 6,
+        color: colors[i % colors.length],
       };
     });
     popupId.current += count;
-    setParticles((p) => [...p, ...fresh]);
-    setTimeout(() => setParticles((p) => p.filter((q) => !fresh.find((f) => f.id === q.id))), 650);
+    setParticles((current) => [...current, ...fresh]);
+    setTimeout(() => {
+      setParticles((current) =>
+        current.filter((particle) => !fresh.some((item) => item.id === particle.id)),
+      );
+    }, 650);
   }, []);
+
+  const addTileEffect = useCallback(
+    (x: number, y: number, skin: ToolSkinId, cropGlow: boolean, kind: "hoe" | "water") => {
+      const color = TOOL_SKIN_EFFECT_COLOR[skin];
+      if (!color) return;
+      const id = ++popupId.current;
+      setTileEffects((current) => [...current, { id, x, y, color, cropGlow, kind }]);
+      setTimeout(() => {
+        setTileEffects((current) => current.filter((effect) => effect.id !== id));
+      }, 1100);
+    },
+    [],
+  );
 
   const shake = useCallback((x: number, y: number) => {
     const id = ++popupId.current;
@@ -358,6 +499,19 @@ export default function FarmGame() {
         Math.round(actionPos.x) + (actionDir === "right" ? 1 : actionDir === "left" ? -1 : 0);
       const ty = Math.round(actionPos.y) + (actionDir === "down" ? 1 : actionDir === "up" ? -1 : 0);
       if (tx < 0 || ty < 0 || tx >= COLS || ty >= ROWS) return;
+      const actionSkin =
+        actionTool === "hoe"
+          ? cosmeticsRef.current.hoeSkin
+          : actionTool === "watering_can"
+            ? cosmeticsRef.current.wateringCanSkin
+            : "basic";
+      addTileEffect(
+        tx,
+        ty,
+        actionSkin,
+        Boolean(tilesRef.current[ty]?.[tx]?.crop),
+        actionTool === "watering_can" ? "water" : "hoe",
+      );
 
       setActing(true);
       actingRef.current = true;
@@ -482,11 +636,22 @@ export default function FarmGame() {
           } else if (ev.kind === "till") {
             addPopup(ev.x, ev.y, "ขุด", "info");
             burstParticles(ev.x, ev.y, "dirt");
+            burstToolSkinEffect(ev.x, ev.y, cosmeticsRef.current.hoeSkin);
+            addTileEffect(
+              ev.x,
+              ev.y,
+              cosmeticsRef.current.hoeSkin,
+              Boolean(grid[ev.y]?.[ev.x]?.crop),
+              "hoe",
+            );
+            if (cosmeticsRef.current.hoeSkin !== "basic") triggerScreenShake(0.08);
             shake(ev.x, ev.y);
             SFX.hoe();
           } else if (ev.kind === "water") {
             addPopup(ev.x, ev.y, "รดน้ำ", "info");
             burstParticles(ev.x, ev.y, "water");
+            burstToolSkinEffect(ev.x, ev.y, cosmeticsRef.current.wateringCanSkin);
+            if (cosmeticsRef.current.wateringCanSkin !== "basic") triggerScreenShake(0.05);
             SFX.water();
           } else if (ev.kind === "plant") {
             addPopup(ev.x, ev.y, CROPS[ev.cropId].name, "info");
@@ -505,7 +670,17 @@ export default function FarmGame() {
         return result.tiles;
       });
     },
-    [addPopup, autoBotActive, burstParticles, shake, spawnFlyCoins, spawnCrit, triggerScreenShake],
+    [
+      addPopup,
+      addTileEffect,
+      autoBotActive,
+      burstParticles,
+      burstToolSkinEffect,
+      shake,
+      spawnFlyCoins,
+      spawnCrit,
+      triggerScreenShake,
+    ],
   );
 
   const doActionRef = useRef(doAction);
@@ -698,6 +873,10 @@ export default function FarmGame() {
           dirRef.current = nd;
           setDir(nd);
         }
+        if (now - lastDustAt.current > 90) {
+          lastDustAt.current = now;
+          addShoeTrailPoint(posRef.current.x, posRef.current.y, nd, now);
+        }
         if (!walkingRef.current) {
           walkingRef.current = true;
           setWalking(true);
@@ -736,7 +915,7 @@ export default function FarmGame() {
       });
     }, AUTO_BOT_TICK_MS);
     return () => clearInterval(i);
-  }, []);
+  }, [addShoeTrailPoint]);
 
   // Browsers block autoplay until the first user gesture — start BGM then.
   useEffect(() => {
@@ -802,6 +981,11 @@ export default function FarmGame() {
         posRef.current = { x: nx, y: ny };
         setPos(posRef.current);
 
+        if (cosmeticsRef.current.shoeTrail !== "none" && now - lastShoeTrailAt.current > 45) {
+          lastShoeTrailAt.current = now;
+          addShoeTrailPoint(posRef.current.x, posRef.current.y, nd, now);
+        }
+
         frameAccum += dt;
         if (frameAccum > 0.14) {
           frameAccum = 0;
@@ -810,18 +994,22 @@ export default function FarmGame() {
           // dust puff under feet
           const px = posRef.current.x;
           const py = posRef.current.y;
-          const id = ++popupId.current;
           const back = nd === "right" ? -1 : nd === "left" ? 1 : 0;
           const backY = nd === "down" ? -1 : nd === "up" ? 1 : 0;
-          const puff = {
-            id,
-            x: px * TILE + TILE / 2 + back * 6,
-            y: py * TILE + TILE - 8 + backY * 6,
-            dx: back * 18 + (Math.random() - 0.5) * 10,
-            dy: -8 - Math.random() * 6,
-          };
-          setDust((d) => [...d, puff]);
-          setTimeout(() => setDust((d) => d.filter((q) => q.id !== id)), 500);
+          if (cosmeticsRef.current.shoeTrail === "none") {
+            const id = ++popupId.current;
+            const puff = {
+              id,
+              x: px * TILE + TILE / 2 + back * 10,
+              y: py * TILE + TILE - 8 + backY * 10,
+              dx: back * 18 + (Math.random() - 0.5) * 10,
+              dy: -8 - Math.random() * 6,
+            };
+            setDust((d) => [...d, puff]);
+            setTimeout(() => setDust((d) => d.filter((q) => q.id !== id)), 500);
+          } else {
+            addShoeTrailPoint(px, py, nd, now);
+          }
         }
         if (!walkingRef.current) {
           walkingRef.current = true;
@@ -829,6 +1017,9 @@ export default function FarmGame() {
         }
       } else {
         if (walkingRef.current) {
+          setShoeTrailPath((current) =>
+            current ? { ...current, points: current.points.slice(-10) } : null,
+          );
           walkingRef.current = false;
           setWalking(false);
         }
@@ -838,7 +1029,7 @@ export default function FarmGame() {
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, []);
+  }, [addShoeTrailPoint, burstParticles]);
 
   const facing = facingTile();
 
@@ -903,6 +1094,12 @@ export default function FarmGame() {
     [],
   );
   const progressNext = progress ? calculateLevel(progress.totalExp).next : 0;
+  const facingMarkerColor =
+    acting && tool === "hoe"
+      ? (TOOL_SKIN_EFFECT_COLOR[cosmetics.hoeSkin] ?? "var(--gold)")
+      : acting && tool === "watering_can"
+        ? (TOOL_SKIN_EFFECT_COLOR[cosmetics.wateringCanSkin] ?? "var(--gold)")
+        : "var(--gold)";
 
   const openScoreboard = useCallback(() => {
     setHomeScoreboardOpen(true);
@@ -920,8 +1117,17 @@ export default function FarmGame() {
   const equipPreset = useCallback((id: string) => {
     const preset = COSMETIC_PRESETS.find((item) => item.id === id);
     if (!preset) return false;
-    setCosmetics(preset.cosmetics);
-    writeCosmetics(preset.cosmetics);
+    setCosmetics((current) => {
+      const next = id.includes("_hoe")
+        ? { ...current, hoeSkin: preset.cosmetics.hoeSkin }
+        : id.includes("_watering_can")
+          ? { ...current, wateringCanSkin: preset.cosmetics.wateringCanSkin }
+          : id.includes("_shoes")
+            ? { ...current, shoe: preset.cosmetics.shoe, shoeTrail: preset.cosmetics.shoeTrail }
+            : preset.cosmetics;
+      writeCosmetics(next);
+      return next;
+    });
     return true;
   }, []);
 
@@ -1209,7 +1415,9 @@ export default function FarmGame() {
       {/* Field */}
       <div
         ref={fieldRef}
-        className={`relative isolate mt-3 field-frame scanlines ${screenShake ? "screen-shake" : ""}`}
+        className={`relative isolate mt-3 field-frame scanlines ${
+          screenShake ? (screenShake < 1 ? "screen-shake-soft" : "screen-shake") : ""
+        }`}
         style={{ width: COLS * TILE, height: ROWS * TILE }}
       >
         {tiles.map((row, y) =>
@@ -1223,6 +1431,7 @@ export default function FarmGame() {
                   ? "tile-watered"
                   : "tile-tilled";
             const decor = c.type === "grass" && !c.crop ? decorMap[`${x}-${y}`] : null;
+            const tileEffect = tileEffects.find((effect) => effect.x === x && effect.y === y);
             return (
               <div
                 key={`${x}-${y}`}
@@ -1230,7 +1439,26 @@ export default function FarmGame() {
                 style={{ left: x * TILE, top: y * TILE, width: TILE, height: TILE }}
               >
                 {decor && <TileDecor kind={decor} />}
-                {isFacing && <div className="absolute inset-0 facing-marker pointer-events-none" />}
+                {tileEffect && tileEffect.kind === "hoe" && (
+                  <div
+                    className="absolute inset-[3px] z-30 pointer-events-none tool-furrow-fx"
+                    style={{ ["--tool-effect-color" as string]: tileEffect.color }}
+                  >
+                    <span />
+                    <span />
+                    <span />
+                    <span />
+                    <i />
+                    <i />
+                    <i />
+                  </div>
+                )}
+                {isFacing && (
+                  <div
+                    className="absolute inset-0 facing-marker pointer-events-none"
+                    style={{ ["--facing-color" as string]: facingMarkerColor }}
+                  />
+                )}
                 {c.type === "watered" && (
                   <div
                     className="absolute pointer-events-none ripple"
@@ -1246,16 +1474,26 @@ export default function FarmGame() {
                 {c.crop && (
                   <div
                     className={`absolute inset-1 ${
-                      c.crop.stage === 2 ? "ripe-glow" : c.crop.stage === 3 ? "" : "crop-sway"
+                      tileEffect?.cropGlow
+                        ? "tool-crop-glow"
+                        : c.crop.stage === 2
+                          ? "ripe-glow"
+                          : c.crop.stage === 3
+                            ? ""
+                            : "crop-sway"
                     }`}
                     style={
-                      c.crop.stage === 2
-                        ? undefined
-                        : c.crop.stage === 3
-                          ? { animation: "none" }
-                          : {
-                              animation: `grow 0.4s ease-out, crop-sway 2.4s ease-in-out 0.4s infinite`,
-                            }
+                      tileEffect?.cropGlow
+                        ? ({
+                            ["--tool-effect-color" as string]: tileEffect.color,
+                          } as React.CSSProperties)
+                        : c.crop.stage === 2
+                          ? undefined
+                          : c.crop.stage === 3
+                            ? { animation: "none" }
+                            : {
+                                animation: `grow 0.4s ease-out, crop-sway 2.4s ease-in-out 0.4s infinite`,
+                              }
                     }
                   >
                     <PixelCrop id={c.crop.id} stage={c.crop.stage} />
@@ -1357,11 +1595,39 @@ export default function FarmGame() {
           );
         })}
 
+        {shoeTrailPath && shoeTrailPath.points.length >= 2 && (
+          <svg className="shoe-trail-svg" width={COLS * TILE} height={ROWS * TILE} aria-hidden>
+            <defs>
+              <linearGradient id="shoe-trail-fade" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="currentColor" stopOpacity="0" />
+                <stop offset="55%" stopColor="currentColor" stopOpacity="0.55" />
+                <stop offset="100%" stopColor="currentColor" stopOpacity="1" />
+              </linearGradient>
+            </defs>
+            {shoeTrailPath.points.slice(1).map((point, index) => {
+              const previous = shoeTrailPath.points[index];
+              const alpha = (index + 1) / (shoeTrailPath.points.length - 1);
+              return (
+                <path
+                  key={`${point.t}:${index}`}
+                  className={`shoe-trail-line shoe-trail-line-${shoeTrailPath.kind}`}
+                  d={trailSegmentPath(previous, point)}
+                  style={{ opacity: Math.max(0.08, alpha) }}
+                />
+              );
+            })}
+            <path
+              className={`shoe-trail-head shoe-trail-head-${shoeTrailPath.kind}`}
+              d={smoothTrailPath(shoeTrailPath.points.slice(-3))}
+            />
+          </svg>
+        )}
+
         {/* dust puffs */}
         {dust.map((d) => (
           <div
             key={`du-${d.id}`}
-            className="absolute pointer-events-none dust-puff z-10"
+            className="absolute pointer-events-none z-10 dust-puff"
             style={{
               left: d.x,
               top: d.y,
@@ -1436,11 +1702,16 @@ export default function FarmGame() {
             style={{
               left: p.x * TILE + TILE / 2 - 3,
               top: p.y * TILE + TILE / 2 - 3,
-              width: p.kind === "sparkle" ? 5 : 6,
-              height: p.kind === "sparkle" ? 5 : 6,
+              width: p.kind === "shoe" ? 1 : p.kind === "sparkle" ? 5 : p.kind === "tool" ? 7 : 6,
+              height: p.kind === "shoe" ? 1 : p.kind === "sparkle" ? 5 : p.kind === "tool" ? 7 : 6,
               background: p.color,
               borderRadius: p.kind === "water" ? "50%" : 0,
-              boxShadow: p.kind === "sparkle" ? `0 0 8px ${p.color}` : "0 1px 0 rgba(0,0,0,0.4)",
+              boxShadow:
+                p.kind === "shoe"
+                  ? `0 0 6px 2px ${p.color}, 0 0 10px ${p.color}`
+                  : p.kind === "sparkle" || p.kind === "tool"
+                    ? `0 0 10px ${p.color}, 0 0 0 1px #1a0f1f`
+                    : "0 1px 0 rgba(0,0,0,0.4)",
               ["--dx" as string]: `${p.dx}px`,
               ["--dy" as string]: `${p.dy}px`,
             }}
@@ -1565,7 +1836,6 @@ export default function FarmGame() {
         open={gameMenuOpen}
         initialTab={gameMenuInitialTab}
         playerName={playerName}
-        coins={coins}
         gardenTokens={gardenTokenState.balance}
         unlockedPresetIds={gardenTokenState.unlockedPresetIds}
         levelLabel={progress ? `LV ${progress.level} · ${levelTitle(progress.level)}` : "เมนู"}

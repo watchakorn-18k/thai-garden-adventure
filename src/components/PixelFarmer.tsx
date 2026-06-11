@@ -41,6 +41,13 @@ function Rects({ rects }: { rects: Rect[] }) {
   );
 }
 
+function toolGlowClass(skin: PlayerCosmetics["hoeSkin"]): string | undefined {
+  if (skin === "golden") return "tool-glow tool-glow-golden";
+  if (skin === "aqua") return "tool-glow tool-glow-aqua";
+  if (skin === "starlight") return "tool-glow tool-glow-starlight";
+  return undefined;
+}
+
 const AURA_PARTICLES = [
   { x: 8, y: 8, path: "0 0; -2 -3; -7 -5; -11 -3", dur: 1.35, delay: 0 },
   { x: 8, y: 8, path: "0 0; 3 -2; 8 -8; 12 -6", dur: 1.55, delay: 0.16 },
@@ -97,6 +104,17 @@ function AuraEffect({ aura }: { aura: PlayerCosmetics["aura"] }) {
   );
 }
 
+function ShoeGlow({ trail }: { trail: PlayerCosmetics["shoeTrail"] }) {
+  if (trail === "none") return null;
+  const glowClass = trail === "fire" ? "shoe-glow-fire" : "shoe-glow-lightning";
+  return (
+    <g className={`shoe-glow ${glowClass}`}>
+      <rect x="4" y="13" width="8" height="3" />
+      <rect x="5" y="14" width="6" height="2" />
+    </g>
+  );
+}
+
 export default function PixelFarmer({
   direction,
   walking,
@@ -108,7 +126,9 @@ export default function PixelFarmer({
   const swing = walking ? walkFrame % 2 : 0;
   const flip = direction === "left";
   const isVertical = direction === "up" || direction === "down";
-  const palette = paletteFor(cosmetics);
+  const palette = paletteFor(cosmetics, tool);
+  const activeToolSkin = tool === "watering_can" ? cosmetics.wateringCanSkin : cosmetics.hoeSkin;
+  const glowClass = toolGlowClass(activeToolSkin);
   const bodyRects = farmerRects({
     direction,
     swing,
@@ -149,6 +169,11 @@ export default function PixelFarmer({
       }
       style={{ transformOrigin: isVertical ? "8px 11px" : flip ? "6px 11px" : "10px 11px" }}
     >
+      {glowClass && (
+        <g className={glowClass}>
+          <Rects rects={toolRects} />
+        </g>
+      )}
       <Rects rects={toolRects} />
     </g>
   ) : null;
@@ -168,6 +193,7 @@ export default function PixelFarmer({
       }}
     >
       <AuraEffect aura={cosmetics.aura} />
+      <ShoeGlow trail={cosmetics.shoeTrail} />
       {toolBehindBody && toolNode}
       <Rects rects={bodyRects} />
       {!toolBehindBody && toolNode}

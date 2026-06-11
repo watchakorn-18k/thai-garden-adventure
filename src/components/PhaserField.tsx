@@ -27,6 +27,7 @@ import {
   type Rect,
 } from "@/lib/pixel-art";
 import { sampleToolPose, toolDurationMs } from "@/lib/tool-animation";
+import type { ToolSkinId } from "@/lib/player-cosmetics";
 
 const TILE = 56;
 const MOVE_SPEED_TILES_PER_SECOND = 5.8;
@@ -34,6 +35,12 @@ const MOVE_SPEED_TILES_PER_SECOND = 5.8;
 // closer to the server position, higher = smoother but more trailing.
 const MOVE_TAU = 45;
 const PIXEL_FONT = '"Press Start 2P", "VT323", "Mali", monospace';
+const TOOL_SKIN_COLORS: Record<ToolSkinId, number[]> = {
+  basic: [0x6b3a1c, 0x8b5a2b, 0x3d2412],
+  golden: [0xffd24a, 0xfff5b8, 0xe8a23a],
+  aqua: [0x7fd8ff, 0x4cc2ee, 0x2a8ec0],
+  starlight: [0xc08bd9, 0xd9a6f0, 0x4a2f5c],
+};
 
 const TYPE_CODE: Record<"grass" | "tilled" | "watered", number> = {
   grass: 0,
@@ -139,6 +146,27 @@ function drawRects(g: Phaser.GameObjects.Graphics, rects: Rect[], ox: number, oy
     g.fillStyle(hexNum(color), 1);
     g.fillRect(ox + x * s, oy + y * s, w * s, h * s);
   }
+}
+
+function drawGlowRects(
+  g: Phaser.GameObjects.Graphics,
+  rects: Rect[],
+  ox: number,
+  oy: number,
+  glowColor: number,
+) {
+  const s = TILE / ART_GRID;
+  for (const [x, y, w, h] of rects) {
+    g.fillStyle(glowColor, 0.34);
+    g.fillRect(ox + (x - 0.55) * s, oy + (y - 0.55) * s, (w + 1.1) * s, (h + 1.1) * s);
+  }
+}
+
+function toolSkinGlowColor(skin: ToolSkinId): number | null {
+  if (skin === "golden") return 0xffd24a;
+  if (skin === "aqua") return 0x7fd8ff;
+  if (skin === "starlight") return 0xc08bd9;
+  return null;
 }
 
 /** Per-crop bar color as a Phaser number, derived from the shared CROP_COLOR map. */
@@ -290,6 +318,8 @@ export default function PhaserField({
         private walkFrame = 0;
         private acting = false;
         private actingTimer?: Phaser.Time.TimerEvent;
+        private lastTrailAt = 0;
+        private teammateTrailAt = new Map<string, number>();
         // signature of the last drawn tile/crop layout; skip redraw when unchanged
         private lastSig = -1;
 
@@ -303,8 +333,10 @@ export default function PhaserField({
           const dur = toolDurationMs(playerRef.current.tool);
           this.actingTimer = this.time.delayedCall(dur, () => {
             this.acting = false;
+            this.drawMarker();
             this.drawFarmer();
           });
+          this.drawMarker();
           this.drawFarmer();
         }
 
@@ -479,6 +511,69 @@ export default function PhaserField({
           });
         }
 
+        fadeTrailShape(shape: Phaser.GameObjects.Shape) {
+          this.tweens.add({
+            targets: shape,
+            alpha: 0,
+            duration: 2000,
+            ease: "Quad.Out",
+            onComplete: () => shape.destroy(),
+          });
+        }
+
+        spawnShoeTrail(kind: "fire" | "lightning" | "none", x: number, y: number, dir: Direction) {
+          if (kind === "none") return;
+          const backX = dir === "right" ? -1 : dir === "left" ? 1 : 0;
+          const backY = dir === "down" ? -1 : dir === "up" ? 1 : 0;
+          const cx = x * TILE + TILE / 2 + backX * 7;
+          const cy = y * TILE + TILE - 8 + backY * 7;
+          const colors =
+            kind === "fire" ? [0xf47820, 0xffd24a, 0xd94e6a] : [0xffd24a, 0x7fd8ff, 0xf4e4c1];
+          const vertical = dir === "up" || dir === "down";
+          const marks = kind === "fire" ? 6 : 5;
+          for (let i = 0; i < marks; i++) {
+            const jitter = (Math.random() - 0.5) * 9;
+            const spread = (Math.random() - 0.5) * 7;
+            const mark = this.add.rectangle(
+              cx + (vertical ? spread : -backX * (i * 9 + jitter)),
+              cy + (vertical ? -backY * (i * 9 + jitter) : spread),
+              kind === "fire" ? 16 + Math.random() * 12 : 18 + Math.random() * 14,
+              3 + Math.random() * 3,
+              colors[i % colors.length],
+              0.82 + Math.random() * 0.16,
+            );
+            mark.setDepth(8);
+            mark.setAngle((vertical ? 90 : 0) + (Math.random() - 0.5) * 28);
+            this.tweens.add({
+              targets: mark,
+              alpha: { from: 1, to: 0 },
+              scaleX: { from: 1.2, to: 0.25 },
+              scaleY: { from: 1, to: 1.6 },
+              angle: mark.angle + (Math.random() - 0.5) * 18,
+              duration: kind === "fire" ? 720 + Math.random() * 240 : 420 + Math.random() * 180,
+              yoyo: kind === "lightning" && i % 2 === 0,
+              ease: "Stepped",
+              onComplete: () => mark.destroy(),
+            });
+          }
+        }
+
+        maybeSpawnSelfTrail(time: number) {
+          const trail = playerRef.current.cosmetics.shoeTrail;
+          if (trail === "none" || time - this.lastTrailAt < 90) return;
+          this.lastTrailAt = time;
+          this.spawnShoeTrail(trail, this.disp.x, this.disp.y, playerRef.current.dir);
+        }
+
+        maybeSpawnTeammateTrail(mate: PublicPlayer, time: number, disp: { x: number; y: number }) {
+          const trail = mate.cosmetics.shoeTrail;
+          if (trail === "none") return;
+          const last = this.teammateTrailAt.get(mate.id) ?? 0;
+          if (time - last < 100) return;
+          this.teammateTrailAt.set(mate.id, time);
+          this.spawnShoeTrail(trail, disp.x, disp.y, mate.dir);
+        }
+
         /** Cheap rolling hash of the tile/crop layout to detect changes. */
         tileSignature(): number {
           const p = playerRef.current;
@@ -612,9 +707,15 @@ export default function PhaserField({
           else if (p.dir === "left") x -= 1;
           else if (p.dir === "right") x += 1;
           if (x < 0 || y < 0 || x >= COLS || y >= ROWS) return;
-          this.markerG.fillStyle(0xffd24a, 0.12);
+          const activeToolSkin =
+            p.tool === "watering_can" ? p.cosmetics.wateringCanSkin : p.cosmetics.hoeSkin;
+          const markerColor =
+            this.acting || actingRef.current
+              ? (toolSkinGlowColor(activeToolSkin) ?? 0xffd24a)
+              : 0xffd24a;
+          this.markerG.fillStyle(markerColor, 0.12);
           this.markerG.fillRect(x * TILE + 3, y * TILE + 3, TILE - 6, TILE - 6);
-          this.markerG.lineStyle(2, 0xffd24a, 0.7);
+          this.markerG.lineStyle(2, markerColor, 0.7);
           this.markerG.strokeRect(x * TILE + 3, y * TILE + 3, TILE - 6, TILE - 6);
         }
 
@@ -698,6 +799,12 @@ export default function PhaserField({
               return [rx_rel, ry_rel, rw, rh, color];
             });
 
+            const activeToolSkin =
+              p.tool === "watering_can" ? p.cosmetics.wateringCanSkin : p.cosmetics.hoeSkin;
+            const glowColor = toolSkinGlowColor(activeToolSkin);
+            if (glowColor !== null) {
+              drawGlowRects(this.toolG, relativeRects, 0, 0, glowColor);
+            }
             drawRects(this.toolG, relativeRects, 0, 0);
 
             let finalPivotX = baseX + pivotX * s;
@@ -750,6 +857,141 @@ export default function PhaserField({
           if (dir) p.dir = dir;
           this.drawMarker();
           this.drawFarmer();
+        }
+
+        spawnToolSkinEffect(ev: Extract<ServerEvent, { kind: "till" | "water" }>) {
+          const self = playerRef.current;
+          const actor =
+            ev.playerId === self.id
+              ? self
+              : teammatesRef.current.find((mate) => mate.id === ev.playerId);
+          const skin =
+            ev.kind === "water" ? actor?.cosmetics?.wateringCanSkin : actor?.cosmetics?.hoeSkin;
+          if (!skin || skin === "basic") return;
+          if (ev.kind === "till") this.cameras.main.shake(45, 0.00045);
+          if (ev.kind === "water") this.cameras.main.shake(35, 0.00025);
+          const colors = TOOL_SKIN_COLORS[skin];
+          const effectColor = toolSkinGlowColor(skin) ?? colors[0];
+          const cx = ev.x * TILE + TILE / 2;
+          const cy = ev.y * TILE + TILE / 2;
+
+          if (ev.kind === "till") {
+            const furrow = this.add.graphics();
+            furrow.setDepth(7);
+            const px = ev.x * TILE;
+            const py = ev.y * TILE;
+            for (let i = 0; i < 4; i++) {
+              const y = py + 11 + i * 9;
+              furrow.fillStyle(effectColor, 0.28);
+              furrow.fillRect(px + 7 + (i % 2) * 2, y, TILE - 14, 3);
+              furrow.fillStyle(colors[1], 0.62);
+              furrow.fillRect(px + 10 + ((i + 1) % 2) * 2, y + 3, TILE - 20, 2);
+              furrow.fillStyle(colors[2], 0.38);
+              furrow.fillRect(px + 15 + (i % 3) * 4, y + 6, TILE - 30, 2);
+            }
+            furrow.lineStyle(2, effectColor, 0.85);
+            furrow.beginPath();
+            furrow.moveTo(px + 10, py + 13);
+            furrow.lineTo(px + 22, py + 17);
+            furrow.lineTo(px + 14, py + 23);
+            furrow.moveTo(px + 30, py + 24);
+            furrow.lineTo(px + 42, py + 30);
+            furrow.lineTo(px + 34, py + 37);
+            furrow.moveTo(px + 16, py + 42);
+            furrow.lineTo(px + 28, py + 46);
+            furrow.strokePath();
+            this.tweens.add({
+              targets: furrow,
+              alpha: 0,
+              delay: 320,
+              duration: 820,
+              ease: "Quad.Out",
+              onComplete: () => furrow.destroy(),
+            });
+
+            const dustCount = skin === "starlight" ? 18 : 14;
+            for (let i = 0; i < dustCount; i++) {
+              const angle = (Math.PI * 2 * i) / dustCount;
+              const dist = 8 + (i % 4) * 5;
+              const chip = this.add.rectangle(
+                cx + ((i % 3) - 1) * 3,
+                cy + ((i % 4) - 1.5) * 3,
+                i % 2 ? 3 : 4,
+                i % 2 ? 3 : 4,
+                colors[i % colors.length],
+                0.88,
+              );
+              chip.setDepth(8);
+              chip.setStrokeStyle(1, 0x1a0f1f, 0.8);
+              this.tweens.add({
+                targets: chip,
+                x: cx + Math.cos(angle) * dist,
+                y: cy + Math.sin(angle) * dist - 4,
+                alpha: 0,
+                scale: 0.4,
+                duration: 560,
+                ease: "Quad.Out",
+                onComplete: () => chip.destroy(),
+              });
+            }
+            return;
+          }
+
+          const crop = actor?.tiles[ev.y]?.[ev.x]?.crop;
+          if (crop) {
+            const cropFx = this.add.graphics();
+            cropFx.setDepth(7);
+            drawGlowRects(
+              cropFx,
+              cropRects(crop.id, crop.stage),
+              ev.x * TILE,
+              ev.y * TILE,
+              effectColor,
+            );
+            this.tweens.add({
+              targets: cropFx,
+              alpha: 0.45,
+              duration: 120,
+              yoyo: true,
+              repeat: 2,
+              ease: "Sine.InOut",
+              onComplete: () => {
+                this.tweens.add({
+                  targets: cropFx,
+                  alpha: 0,
+                  duration: 520,
+                  ease: "Sine.Out",
+                  onComplete: () => cropFx.destroy(),
+                });
+              },
+            });
+          }
+
+          const count = skin === "starlight" ? 34 : 28;
+          for (let i = 0; i < count; i++) {
+            const angle = -Math.PI / 2 + ((i % 9) - 4) * 0.22;
+            const dist = 16 + (i % 5) * 7;
+            const waterMix = i % 3 === 0 ? 0x7fd8ff : colors[i % colors.length];
+            const drop = this.add.rectangle(
+              cx + ((i % 5) - 2) * 2,
+              cy - 2 + ((i % 4) - 1.5) * 2,
+              i % 2 ? 3 : 4,
+              i % 2 ? 3 : 4,
+              waterMix,
+              0.78,
+            );
+            drop.setDepth(8);
+            this.tweens.add({
+              targets: drop,
+              x: cx + Math.cos(angle) * dist + ((i % 3) - 1) * 10,
+              y: cy + Math.sin(angle) * (dist * 0.55) + 18 + (i % 4) * 4,
+              alpha: 0,
+              scale: i % 2 ? 1.35 : 1.8,
+              duration: 760 + (i % 4) * 80,
+              ease: "Sine.Out",
+              onComplete: () => drop.destroy(),
+            });
+          }
         }
 
         spawnEvent(ev: ServerEvent) {
@@ -858,6 +1100,9 @@ export default function PhaserField({
           if (ev.kind !== "insufficient_funds" && !isSelfRef.current) {
             this.triggerAction();
           }
+          if (ev.kind === "till" || ev.kind === "water") {
+            this.spawnToolSkinEffect(ev);
+          }
           const isWithered = ev.kind === "harvest" && ev.reward === 0;
           const isInsufficient = ev.kind === "insufficient_funds";
           const text =
@@ -902,7 +1147,7 @@ export default function PhaserField({
         }
 
         /** Glide each teammate sprite toward its latest server position. */
-        updateTeammates(delta: number) {
+        updateTeammates(time: number, delta: number) {
           const mates = teammatesRef.current;
           if (!mates.length && !this.teammateDisp.size) return;
           const k = 1 - Math.exp(-delta / MOVE_TAU);
@@ -922,6 +1167,7 @@ export default function PhaserField({
             } else if (Math.abs(dx) > 0.002 || Math.abs(dy) > 0.002) {
               disp.x += dx * k;
               disp.y += dy * k;
+              this.maybeSpawnTeammateTrail(mate, time, disp);
               moved = true;
             }
           }
@@ -929,7 +1175,7 @@ export default function PhaserField({
         }
 
         override update(time: number, delta: number) {
-          this.updateTeammates(delta);
+          this.updateTeammates(time, delta);
           const predictedDir = predictedDirRef.current;
           const p = playerRef.current;
           if (predictedDir) p.dir = predictedDir;
@@ -951,6 +1197,7 @@ export default function PhaserField({
 
             this.moving = true;
             this.walkFrame = Math.floor(time / 110) % 2;
+            this.maybeSpawnSelfTrail(time);
             this.drawMarker();
             this.drawFarmer();
             return;

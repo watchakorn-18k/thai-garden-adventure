@@ -1,29 +1,40 @@
 export type HatShapeId = "straw" | "wide" | "crown" | "leaf" | "halo";
 export type ShirtStyleId = "plain" | "overalls" | "sash" | "jacket" | "champion";
 export type AuraEffectId = "none" | "gold" | "spark" | "rainbow";
+export type ToolSkinId = "basic" | "golden" | "aqua" | "starlight";
+export type ShoeTrailId = "none" | "fire" | "lightning";
 
 export interface PlayerCosmetics {
   hat: string;
   shirt: string;
   pants: string;
+  shoe: string;
   hatShape: HatShapeId;
   shirtStyle: ShirtStyleId;
   aura: AuraEffectId;
+  shoeTrail: ShoeTrailId;
+  hoeSkin: ToolSkinId;
+  wateringCanSkin: ToolSkinId;
 }
 
 export const DEFAULT_COSMETICS: PlayerCosmetics = {
   hat: "#d9a441",
   shirt: "#c8412e",
   pants: "#3a5a8a",
+  shoe: "#2a1810",
   hatShape: "straw",
   shirtStyle: "plain",
   aura: "none",
+  shoeTrail: "none",
+  hoeSkin: "basic",
+  wateringCanSkin: "basic",
 };
 
 export const COSMETIC_PALETTES = {
   hat: ["#d9a441", "#ffd24a", "#f0a05b", "#8bc967", "#7fd8ff", "#c08bd9"],
   shirt: ["#c8412e", "#d94e6a", "#4cc2ee", "#6ab04c", "#9b59d4", "#f0a05b"],
   pants: ["#3a5a8a", "#355070", "#5a3f12", "#4a2f5c", "#2a6e9e", "#5a2f17"],
+  shoe: ["#2a1810", "#d94e6a", "#f47820", "#ffd24a", "#7fd8ff", "#1a0f1f"],
 } as const;
 
 export interface CosmeticPreset {
@@ -35,6 +46,88 @@ export interface CosmeticPreset {
 }
 
 export const COSMETIC_PRESETS: CosmeticPreset[] = [
+  {
+    id: "golden_hoe",
+    name: "จอบทองประกาย",
+    description: "จอบทองเรืองแสง ระดับเริ่มต้น",
+    price: 260,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hoeSkin: "golden",
+    },
+  },
+  {
+    id: "aqua_hoe",
+    name: "จอบคริสตัลฟ้า",
+    description: "จอบฟ้า particle น้ำค้าง",
+    price: 420,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hoeSkin: "aqua",
+    },
+  },
+  {
+    id: "starlight_hoe",
+    name: "จอบดาวตก",
+    description: "จอบม่วงละอองดาวขั้นสูง",
+    price: 680,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      hoeSkin: "starlight",
+    },
+  },
+  {
+    id: "golden_watering_can",
+    name: "บัวทองประกาย",
+    description: "บัวรดน้ำทองเรืองแสง",
+    price: 300,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      wateringCanSkin: "golden",
+    },
+  },
+  {
+    id: "aqua_watering_can",
+    name: "บัวคริสตัลฟ้า",
+    description: "บัวฟ้า particle น้ำแรง",
+    price: 480,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      wateringCanSkin: "aqua",
+    },
+  },
+  {
+    id: "starlight_watering_can",
+    name: "บัวดาวตก",
+    description: "บัวม่วงละอองดาวขั้นสูง",
+    price: 760,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      wateringCanSkin: "starlight",
+    },
+  },
+  {
+    id: "fire_shoes",
+    name: "รองเท้าติดไฟ",
+    description: "รอยเท้าไฟลุกแรงทุกก้าว",
+    price: 520,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      shoe: "#d94e6a",
+      shoeTrail: "fire",
+    },
+  },
+  {
+    id: "lightning_shoes",
+    name: "รองเท้าสายฟ้า",
+    description: "รอยเท้าสายฟ้าฟาดติดพื้น",
+    price: 620,
+    cosmetics: {
+      ...DEFAULT_COSMETICS,
+      shoe: "#7fd8ff",
+      shoeTrail: "lightning",
+    },
+  },
   {
     id: "classic_farmer",
     name: "ชาวสวนดั้งเดิม",
@@ -124,6 +217,8 @@ function isHexColor(v: unknown): v is string {
 const HAT_SHAPES = new Set<HatShapeId>(["straw", "wide", "crown", "leaf", "halo"]);
 const SHIRT_STYLES = new Set<ShirtStyleId>(["plain", "overalls", "sash", "jacket", "champion"]);
 const AURA_EFFECTS = new Set<AuraEffectId>(["none", "gold", "spark", "rainbow"]);
+const TOOL_SKINS = new Set<ToolSkinId>(["basic", "golden", "aqua", "starlight"]);
+const SHOE_TRAILS = new Set<ShoeTrailId>(["none", "fire", "lightning"]);
 
 function isHatShape(v: unknown): v is HatShapeId {
   return typeof v === "string" && HAT_SHAPES.has(v as HatShapeId);
@@ -137,6 +232,14 @@ function isAuraEffect(v: unknown): v is AuraEffectId {
   return typeof v === "string" && AURA_EFFECTS.has(v as AuraEffectId);
 }
 
+function isToolSkin(v: unknown): v is ToolSkinId {
+  return typeof v === "string" && TOOL_SKINS.has(v as ToolSkinId);
+}
+
+function isShoeTrail(v: unknown): v is ShoeTrailId {
+  return typeof v === "string" && SHOE_TRAILS.has(v as ShoeTrailId);
+}
+
 export function normalizeCosmetics(input: unknown): PlayerCosmetics {
   if (!input || typeof input !== "object") return DEFAULT_COSMETICS;
   const c = input as Partial<PlayerCosmetics>;
@@ -144,9 +247,15 @@ export function normalizeCosmetics(input: unknown): PlayerCosmetics {
     hat: isHexColor(c.hat) ? c.hat : DEFAULT_COSMETICS.hat,
     shirt: isHexColor(c.shirt) ? c.shirt : DEFAULT_COSMETICS.shirt,
     pants: isHexColor(c.pants) ? c.pants : DEFAULT_COSMETICS.pants,
+    shoe: isHexColor(c.shoe) ? c.shoe : DEFAULT_COSMETICS.shoe,
     hatShape: isHatShape(c.hatShape) ? c.hatShape : DEFAULT_COSMETICS.hatShape,
     shirtStyle: isShirtStyle(c.shirtStyle) ? c.shirtStyle : DEFAULT_COSMETICS.shirtStyle,
     aura: isAuraEffect(c.aura) ? c.aura : DEFAULT_COSMETICS.aura,
+    shoeTrail: isShoeTrail(c.shoeTrail) ? c.shoeTrail : DEFAULT_COSMETICS.shoeTrail,
+    hoeSkin: isToolSkin(c.hoeSkin) ? c.hoeSkin : DEFAULT_COSMETICS.hoeSkin,
+    wateringCanSkin: isToolSkin(c.wateringCanSkin)
+      ? c.wateringCanSkin
+      : DEFAULT_COSMETICS.wateringCanSkin,
   };
 }
 

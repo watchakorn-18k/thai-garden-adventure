@@ -89,13 +89,19 @@ const hexColorSchema = z.string().regex(/^#[0-9a-fA-F]{6}$/);
 const hatShapeSchema = z.enum(["straw", "wide", "crown", "leaf", "halo"]);
 const shirtStyleSchema = z.enum(["plain", "overalls", "sash", "jacket", "champion"]);
 const auraEffectSchema = z.enum(["none", "gold", "spark", "rainbow"]);
+const toolSkinSchema = z.enum(["basic", "golden", "aqua", "starlight"]);
+const shoeTrailSchema = z.enum(["none", "fire", "lightning"]);
 export const cosmeticsSchema = z.object({
   hat: hexColorSchema.default(DEFAULT_COSMETICS.hat),
   shirt: hexColorSchema.default(DEFAULT_COSMETICS.shirt),
   pants: hexColorSchema.default(DEFAULT_COSMETICS.pants),
+  shoe: hexColorSchema.default(DEFAULT_COSMETICS.shoe),
   hatShape: hatShapeSchema.default(DEFAULT_COSMETICS.hatShape),
   shirtStyle: shirtStyleSchema.default(DEFAULT_COSMETICS.shirtStyle),
   aura: auraEffectSchema.default(DEFAULT_COSMETICS.aura),
+  shoeTrail: shoeTrailSchema.default(DEFAULT_COSMETICS.shoeTrail),
+  hoeSkin: toolSkinSchema.default(DEFAULT_COSMETICS.hoeSkin),
+  wateringCanSkin: toolSkinSchema.default(DEFAULT_COSMETICS.wateringCanSkin),
 });
 
 export type MatchRole = z.infer<typeof matchRoleSchema>;

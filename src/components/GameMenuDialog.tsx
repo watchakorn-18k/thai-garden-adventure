@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import CosmeticPicker from "./CosmeticPicker";
+import PixelFarmer from "./PixelFarmer";
 import PlayerAvatarPreview from "./PlayerAvatarPreview";
 import { CropIndexBookContent } from "./CropIndexBook";
 import {
@@ -21,7 +22,6 @@ interface GameMenuDialogProps {
   open: boolean;
   initialTab?: GameMenuTab;
   playerName: string;
-  coins: number;
   gardenTokens: number;
   unlockedPresetIds: string[];
   levelLabel: string;
@@ -54,7 +54,6 @@ export default function GameMenuDialog({
   open,
   initialTab = "outfit",
   playerName,
-  coins,
   gardenTokens,
   unlockedPresetIds,
   levelLabel,
@@ -111,10 +110,6 @@ export default function GameMenuDialog({
             </div>
           </div>
           <div className="game-menu-head-actions">
-            <span className="pixel-chip flex items-center gap-2" data-gold="true">
-              <CoinIcon size={16} />
-              {coins}
-            </span>
             <span className="pixel-chip flex items-center gap-2 shop-price-chip">
               GT {gardenTokens}
             </span>
@@ -230,9 +225,13 @@ function sameCosmetics(a: PlayerCosmetics, b: PlayerCosmetics): boolean {
     a.hat.toLowerCase() === b.hat.toLowerCase() &&
     a.shirt.toLowerCase() === b.shirt.toLowerCase() &&
     a.pants.toLowerCase() === b.pants.toLowerCase() &&
+    a.shoe.toLowerCase() === b.shoe.toLowerCase() &&
     a.hatShape === b.hatShape &&
     a.shirtStyle === b.shirtStyle &&
-    a.aura === b.aura
+    a.aura === b.aura &&
+    a.shoeTrail === b.shoeTrail &&
+    a.hoeSkin === b.hoeSkin &&
+    a.wateringCanSkin === b.wateringCanSkin
   );
 }
 
@@ -249,12 +248,20 @@ const SHOP_CATEGORIES: { id: ShopCategoryId; label: string }[] = [
 ];
 
 const PRESET_CATEGORIES: Record<string, ShopCategoryId[]> = {
+  golden_hoe: ["skill"],
+  aqua_hoe: ["skill"],
+  starlight_hoe: ["skill"],
+  golden_watering_can: ["skill"],
+  aqua_watering_can: ["skill"],
+  starlight_watering_can: ["skill"],
+  fire_shoes: ["shoes"],
+  lightning_shoes: ["shoes"],
   classic_farmer: ["hat", "shirt", "pants"],
   rice_farmer: ["hat", "shirt", "pants"],
   chili_red: ["shirt", "pants"],
   river_blue: ["hat", "shirt", "pants"],
-  mango_gold: ["hat", "skill"],
-  night_violet: ["hat", "skill"],
+  mango_gold: ["hat", "shirt", "pants"],
+  night_violet: ["hat", "shirt", "pants"],
 };
 
 function ShopContent({
@@ -298,7 +305,17 @@ function ShopContent({
       <div className="shop-preset-grid">
         {presets.map((preset) => {
           const unlocked = preset.price === 0 || unlockedPresetIds.includes(preset.id);
-          const equipped = sameCosmetics(cosmetics, preset.cosmetics);
+          const categories = PRESET_CATEGORIES[preset.id] ?? [];
+          const isToolPreset = categories.includes("skill");
+          const isShoePreset = categories.includes("shoes");
+          const equipped = isToolPreset
+            ? preset.id.includes("watering_can")
+              ? cosmetics.wateringCanSkin === preset.cosmetics.wateringCanSkin
+              : cosmetics.hoeSkin === preset.cosmetics.hoeSkin
+            : isShoePreset
+              ? cosmetics.shoe.toLowerCase() === preset.cosmetics.shoe.toLowerCase() &&
+                cosmetics.shoeTrail === preset.cosmetics.shoeTrail
+              : sameCosmetics(cosmetics, preset.cosmetics);
           const affordable = gardenTokens >= preset.price;
           return (
             <article
@@ -307,9 +324,20 @@ function ShopContent({
               data-equipped={equipped ? "true" : undefined}
             >
               <div className="shop-preset-preview-wrap" data-aura={preset.cosmetics.aura}>
-                <span className="shop-preview-label">ลองใส่แล้ว</span>
-                <PlayerAvatarPreview className="shop-preset-preview" cosmetics={preset.cosmetics} />
-                {preset.cosmetics.aura !== "none" && (
+                <span className="shop-preview-label">
+                  {isToolPreset ? "อุปกรณ์" : isShoePreset ? "รอยเท้า" : "ลองใส่แล้ว"}
+                </span>
+                {isToolPreset ? (
+                  <ToolSkinPreview presetId={preset.id} cosmetics={preset.cosmetics} />
+                ) : isShoePreset ? (
+                  <ShoeTrailPreview cosmetics={preset.cosmetics} />
+                ) : (
+                  <PlayerAvatarPreview
+                    className="shop-preset-preview"
+                    cosmetics={preset.cosmetics}
+                  />
+                )}
+                {(preset.cosmetics.aura !== "none" || isToolPreset || isShoePreset) && (
                   <>
                     <span className="shop-effect-ring" aria-hidden />
                     <span className="shop-effect-badge">EFFECT</span>
@@ -347,6 +375,55 @@ function ShopContent({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+function ShoeTrailPreview({ cosmetics }: { cosmetics: PlayerCosmetics }) {
+  const trail = cosmetics.shoeTrail;
+  return (
+    <div className="shop-shoe-preview" aria-hidden>
+      <PlayerAvatarPreview className="shop-preset-preview" cosmetics={cosmetics} />
+      {trail !== "none" && (
+        <span className={`shop-shoe-trail-demo shop-shoe-trail-demo-${trail}`} />
+      )}
+    </div>
+  );
+}
+
+function ToolSkinPreview({
+  presetId,
+  cosmetics,
+}: {
+  presetId: string;
+  cosmetics: PlayerCosmetics;
+}) {
+  const tool = presetId.includes("watering_can") ? "watering_can" : "hoe";
+  const skin = tool === "watering_can" ? cosmetics.wateringCanSkin : cosmetics.hoeSkin;
+  const [loop, setLoop] = useState(0);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setLoop((current) => current + 1), 720);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return (
+    <div className="shop-tool-preview" data-tool={tool} data-skin={skin} aria-hidden>
+      <span className="shop-tool-sprite">
+        <PixelFarmer
+          key={`${tool}:${skin}:${loop}`}
+          direction="right"
+          walking={false}
+          walkFrame={0}
+          acting={true}
+          tool={tool}
+          cosmetics={cosmetics}
+        />
+      </span>
+      <span className="shop-tool-hit-effect" />
+      <span className="shop-tool-particle shop-tool-particle-a" />
+      <span className="shop-tool-particle shop-tool-particle-b" />
+      <span className="shop-tool-particle shop-tool-particle-c" />
     </div>
   );
 }

@@ -46,19 +46,60 @@ export interface Palette {
   tool: string;
   toolMetal: string;
   toolMetalDark: string;
+  toolGlow: string;
   water: string;
   seed: string;
 }
 
-export function paletteFor(cosmetics: PlayerCosmetics): Palette {
+function toolSkinPalette(
+  skin: PlayerCosmetics["hoeSkin"],
+): Pick<Palette, "toolMetal" | "toolMetalDark" | "toolGlow" | "water"> {
+  if (skin === "golden") {
+    return {
+      toolMetal: "#ffd24a",
+      toolMetalDark: "#8b6420",
+      toolGlow: "#fff5b8",
+      water: BASE.water,
+    };
+  }
+  if (skin === "aqua") {
+    return {
+      toolMetal: "#7fd8ff",
+      toolMetalDark: "#2a6e9e",
+      toolGlow: "#4cc2ee",
+      water: "#7fd8ff",
+    };
+  }
+  if (skin === "starlight") {
+    return {
+      toolMetal: "#c08bd9",
+      toolMetalDark: "#4a2f5c",
+      toolGlow: "#c08bd9",
+      water: "#c08bd9",
+    };
+  }
+  return {
+    toolMetal: BASE.toolMetal,
+    toolMetalDark: BASE.toolMetalDark,
+    toolGlow: "transparent",
+    water: BASE.water,
+  };
+}
+
+export function paletteFor(cosmetics: PlayerCosmetics, tool?: Tool): Palette {
+  const toolSkin = tool === "watering_can" ? cosmetics.wateringCanSkin : cosmetics.hoeSkin;
+  const toolPalette = toolSkinPalette(toolSkin);
+
   return {
     ...BASE,
+    ...toolPalette,
     hat: cosmetics.hat,
     hatDark: shade(cosmetics.hat, -70),
     shirt: cosmetics.shirt,
     shirtDark: shade(cosmetics.shirt, -70),
     pants: cosmetics.pants,
     pantsDark: shade(cosmetics.pants, -70),
+    shoe: cosmetics.shoe,
   };
 }
 
@@ -234,6 +275,8 @@ export function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
       [12, 7, 1, 7, p.tool],
       [12, 3, 4, 2, p.toolMetal],
       [12, 5, 4, 1, p.toolMetalDark],
+      [13, 2, 1, 1, p.toolGlow],
+      [15, 3, 1, 1, p.toolGlow],
     ];
   }
   if (tool === "watering_can") {
@@ -247,6 +290,8 @@ export function sideToolOverlay(tool: Tool, p: Palette): Rect[] {
       [13, 6, 1, 2, p.toolMetal],
       [14, 7, 2, 1, "#d8d3d0"],
       [15, 6, 1, 1, "#b8b2b0"],
+      [10, 8, 1, 1, p.toolGlow],
+      [13, 9, 1, 1, p.toolGlow],
       // water stream in front of spout.
       [15, 8, 1, 1, p.water],
       [17, 9, 1, 1, p.water],
@@ -282,6 +327,8 @@ export function verticalToolOverlay(tool: Tool, p: Palette, direction: Direction
         [7, 7, 2, 2, p.toolMetalDark],
         [12, 7, 2, 1, "#d8d3d0"],
         [13, 6, 1, 1, "#b8b2b0"],
+        [5, 7, 1, 1, p.toolGlow],
+        [10, 8, 1, 1, p.toolGlow],
         [12, 5, 1, 1, p.water],
         [10, 3, 1, 1, "#7fd8ff"],
         [13, 2, 1, 1, p.water],
@@ -299,6 +346,8 @@ export function verticalToolOverlay(tool: Tool, p: Palette, direction: Direction
       [7, 8, 2, 2, "#d8d3d0"],
       [3, 9, 2, 1, "#d8d3d0"],
       [2, 10, 1, 1, "#b8b2b0"],
+      [6, 8, 1, 1, p.toolGlow],
+      [10, 9, 1, 1, p.toolGlow],
       [4, 12, 1, 1, p.water],
       [7, 13, 1, 1, "#7fd8ff"],
       [5, 15, 1, 1, p.water],
@@ -321,7 +370,7 @@ export function farmerRects(opts: {
   cosmetics?: PlayerCosmetics;
 }): Rect[] {
   const { direction, swing, acting, tool, cosmetics = DEFAULT_COSMETICS } = opts;
-  const p = paletteFor(cosmetics);
+  const p = paletteFor(cosmetics, tool);
   const isVertical = direction === "up" || direction === "down";
 
   let body: Rect[];
